@@ -1,0 +1,53 @@
+# ============================================================================
+# Docker Compose — Quran LMS Dev + Production Reference
+# ============================================================================
+# For Dockploy: Use this as the compose file in your project settings.
+# For local dev: `docker compose up` to start the app + services.
+# ============================================================================
+
+version: "3.8"
+
+services:
+  # ── Main Application (Next.js) ───────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - DIRECT_DATABASE_URL=${DIRECT_DATABASE_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - CALCOM_WEBHOOK_SECRET=${CALCOM_WEBHOOK_SECRET}
+      - JITSI_DOMAIN=${JITSI_DOMAIN}
+      - JITSI_APP_ID=${JITSI_APP_ID}
+      - JITSI_JWT_SECRET=${JITSI_JWT_SECRET}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - EMAIL_FROM=${EMAIL_FROM}
+      - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
+      - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
+      - VAPID_SUBJECT=${VAPID_SUBJECT}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ── Cal.com (Self-Hosted Scheduling) ─────────────────────────────────────
+  # Uncomment to self-host Cal.com alongside the app.
+  # Refer to: https://cal.com/docs/self-hosting/docker
+  # calcom:
+  #   image: calcom/cal.com:latest
+  #   ports:
+  #     - "3001:3000"
+  #   environment:
+  #     - DATABASE_URL=${CALCOM_DATABASE_URL}
+  #     - NEXTAUTH_SECRET=${CALCOM_NEXTAUTH_SECRET}
+  #     - NEXT_PUBLIC_WEBAPP_URL=https://cal.yourschool.com
+  #   restart: unless-stopped
