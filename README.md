@@ -82,7 +82,7 @@ quran-lms/
 │   │   ├── api/
 │   │   │   ├── auth/[...all]/     # Better Auth catch-all
 │   │   │   ├── students/
-│   │   │   │   ├── profiles/      # GET/POST student profiles
+│   │   │   │   ├── profiles/      # GET/POST student profile s
 │   │   │   │   ├── bookings/      # GET/POST bookings (quota)
 │   │   │   │   └── progress/      # GET progress records
 │   │   │   ├── teachers/
@@ -91,7 +91,7 @@ quran-lms/
 │   │   │   │   └── call-now/      # POST push notification
 │   │   │   ├── sessions/[id]/
 │   │   │   │   ├── join/          # GET Jitsi JWT
-│   │   │   │   ├── extend/        # POST extend session
+│   │   │   │   ├── extend/         # POST extend session
 │   │   │   │   └── recording/     # POST toggle recording
 │   │   │   ├── chat/
 │   │   │   │   ├── messages/      # GET/POST chat
