@@ -16,31 +16,40 @@
   --font-geist-sans: "Geist", system-ui, -apple-system, sans-serif;
   --font-geist-mono: "Geist Mono", monospace;
 
-  /* Surface colors — warm, not clinical */
-  --bg-primary: #ffffff;
-  --bg-secondary: #f5f5f7;
-  --bg-tertiary: #fafafa;
+  /* Surface colors — warm cream, not clinical white */
+  --bg-primary: #faf9f4;
+  --bg-secondary: #f0ede6;
+  --bg-tertiary: #fafaf8;
   --bg-elevated: #ffffff;
+  --bg-hero: linear-gradient(160deg, #faf9f4 0%, #f0ede6 40%, #eaf5f0 100%);
 
   /* Text — high contrast but not harsh */
-  --text-primary: #1d1d1f;
-  --text-secondary: #6e6e73;
-  --text-tertiary: #aeaeb2;
+  --text-primary: #1a1a1a;
+  --text-secondary: #4b5563;
+  --text-tertiary: #9ca3af;
 
-  /* Accent — a warm teal, not neon */
-  --accent: #0a8967;
-  --accent-light: #e8f5ef;
-  --accent-hover: #087a5c;
+  /* Accent — deep emerald green, Islamic & calm */
+  --accent: #0b6e4f;
+  --accent-light: #d8f0e8;
+  --accent-hover: #085c3f;
+  --accent-subtle: #e8f5ef;
+
+  /* Gold — warmth and trust */
+  --gold: #c8841a;
+  --gold-light: #fef3c7;
+  --gold-hover: #a96e15;
 
   /* Borders — barely there */
-  --border: rgba(0, 0, 0, 0.06);
-  --border-hover: rgba(0, 0, 0, 0.12);
+  --border: rgba(0, 0, 0, 0.07);
+  --border-hover: rgba(0, 0, 0, 0.14);
+  --border-accent: rgba(11, 110, 79, 0.2);
 
-  /* Shadows — Apple-style layered depth */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04);
-  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.04);
-  --shadow-xl: 0 24px 80px rgba(0, 0, 0, 0.10), 0 8px 24px rgba(0, 0, 0, 0.06);
+  /* Shadows — layered depth */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.09), 0 4px 12px rgba(0, 0, 0, 0.05);
+  --shadow-xl: 0 32px 80px rgba(0, 0, 0, 0.12), 0 8px 24px rgba(0, 0, 0, 0.07);
+  --shadow-accent: 0 4px 20px rgba(11, 110, 79, 0.25);
 }
 
 * {
@@ -77,13 +86,27 @@ body {
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 20px;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.25s ease;
 }
 .card:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--border-hover);
+  transform: translateY(-2px);
+}
+
+/* ── Utility: Accent card ────────────────────────────────────────────── */
+.card-accent {
+  background: var(--bg-elevated);
+  border: 2px solid var(--accent);
+  border-radius: 20px;
+  box-shadow: var(--shadow-md), 0 0 0 1px var(--accent-subtle);
+  transition: box-shadow 0.25s ease, transform 0.25s ease;
+}
+.card-accent:hover {
+  box-shadow: var(--shadow-lg), var(--shadow-accent);
+  transform: translateY(-2px);
 }
 
 /* ── Utility: Soft button ────────────────────────────────────────────── */
@@ -92,22 +115,24 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px 24px;
+  padding: 13px 26px;
   background: var(--accent);
   color: #ffffff;
   font-weight: 600;
-  font-size: 0.875rem;
-  border-radius: 12px;
+  font-size: 0.9375rem;
+  border-radius: 14px;
   border: none;
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
-  box-shadow: 0 1px 3px rgba(10, 137, 103, 0.2);
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 8px rgba(11, 110, 79, 0.25), 0 1px 3px rgba(11, 110, 79, 0.2);
+  text-decoration: none;
 }
 .btn-primary:hover {
   background: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(10, 137, 103, 0.25);
+  box-shadow: 0 6px 20px rgba(11, 110, 79, 0.35), 0 2px 8px rgba(11, 110, 79, 0.2);
+  transform: translateY(-1px);
 }
-.btn-primary:active { transform: scale(0.98); }
+.btn-primary:active { transform: scale(0.98) translateY(0); }
 .btn-primary:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -119,39 +144,65 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  padding: 12px 24px;
-  background: var(--bg-secondary);
+  padding: 13px 26px;
+  background: var(--bg-elevated);
   color: var(--text-primary);
   font-weight: 500;
-  font-size: 0.875rem;
-  border-radius: 12px;
-  border: 1px solid var(--border);
+  font-size: 0.9375rem;
+  border-radius: 14px;
+  border: 1px solid var(--border-hover);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+  text-decoration: none;
 }
 .btn-secondary:hover {
-  background: #ececee;
-  border-color: var(--border-hover);
+  background: var(--bg-secondary);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
+}
+
+/* ── Utility: Gold button ────────────────────────────────────────────── */
+.btn-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 13px 26px;
+  background: var(--gold);
+  color: #ffffff;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  border-radius: 14px;
+  border: none;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
+  box-shadow: 0 2px 8px rgba(200, 132, 26, 0.3);
+  text-decoration: none;
+}
+.btn-gold:hover {
+  background: var(--gold-hover);
+  box-shadow: 0 6px 20px rgba(200, 132, 26, 0.4);
+  transform: translateY(-1px);
 }
 
 /* ── Utility: Input ──────────────────────────────────────────────────── */
 .input {
   width: 100%;
   padding: 12px 16px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border: 1.5px solid var(--border-hover);
   border-radius: 12px;
   color: var(--text-primary);
   font-size: 0.9375rem;
   font-family: var(--font-geist-sans);
   outline: none;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 .input::placeholder { color: var(--text-tertiary); }
 .input:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(10, 137, 103, 0.1);
-  background: var(--bg-primary);
+  box-shadow: 0 0 0 3px rgba(11, 110, 79, 0.1);
 }
 
 /* ── Utility: Badge ──────────────────────────────────────────────────── */
@@ -159,29 +210,71 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 0.75rem;
   font-weight: 600;
   border-radius: 100px;
   letter-spacing: 0.02em;
 }
 .badge-accent {
-  background: var(--accent-light);
+  background: var(--accent-subtle);
   color: var(--accent);
+  border: 1px solid var(--border-accent);
+}
+.badge-gold {
+  background: var(--gold-light);
+  color: var(--gold);
+  border: 1px solid rgba(200, 132, 26, 0.2);
+}
+
+/* ── Section label ────────────────────────────────────────────────────── */
+.section-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin-bottom: 12px;
+}
+
+/* ── Check icon wrapper ──────────────────────────────────────────────── */
+.check-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--accent-light);
+  flex-shrink: 0;
 }
 
 /* ── Animation: Smooth fade-in ───────────────────────────────────────── */
 @keyframes fade-in {
-  from { opacity: 0; transform: translateY(8px); }
+  from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
 .animate-in {
-  animation: fade-in 0.4s ease forwards;
+  animation: fade-in 0.5s ease forwards;
 }
+.animate-in-delay-1 { animation: fade-in 0.5s ease 0.1s both; }
+.animate-in-delay-2 { animation: fade-in 0.5s ease 0.2s both; }
+.animate-in-delay-3 { animation: fade-in 0.5s ease 0.3s both; }
 
 /* ── Animation: Subtle pulse (live indicator) ────────────────────────── */
 @keyframes soft-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.9); }
 }
 .pulse { animation: soft-pulse 2s ease-in-out infinite; }
+
+/* ── Gradient text ───────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, var(--accent) 0%, #0ea47a 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}

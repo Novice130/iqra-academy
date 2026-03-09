@@ -4,7 +4,7 @@
  * FAQ Accordion — Landing Page
  *
  * Client component because it needs useState for open/close toggle.
- * 10 parent-focused FAQs with smooth height transitions.
+ * 12 parent-focused FAQs with smooth height transitions.
  */
 
 import { useState } from "react";
@@ -68,16 +68,32 @@ export default function FAQ() {
   };
 
   return (
-    <section id="faq" className="py-20 lg:py-24">
+    <section id="faq" className="py-20 lg:py-28" style={{ background: "var(--bg-secondary)" }}>
       <div className="max-w-3xl mx-auto px-6">
-        <div className="text-center mb-14">
+        <div className="text-center mb-16">
+          <div className="section-label justify-center">
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8.228 9c.549-1.165 2.03-2 3.772-2 2.21 0 4 1.343 4 3 0 1.4-1.278 2.575-3.006 2.907-.542.104-.994.54-.994 1.093m0 3h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            Common Questions
+          </div>
           <h2
             className="text-3xl sm:text-4xl font-bold tracking-tight mb-4"
             style={{ color: "var(--text-primary)" }}
           >
-            Frequently Asked Questions
+            Frequently asked questions
           </h2>
-          <p className="text-base" style={{ color: "var(--text-secondary)" }}>
+          <p className="text-lg" style={{ color: "var(--text-secondary)" }}>
             Everything parents ask before enrolling
           </p>
         </div>
@@ -88,8 +104,9 @@ export default function FAQ() {
               key={i}
               className="rounded-2xl overflow-hidden transition-all"
               style={{
-                background: openIndex === i ? "var(--bg-elevated)" : "transparent",
+                background: openIndex === i ? "#ffffff" : "transparent",
                 border: `1px solid ${openIndex === i ? "var(--border-hover)" : "var(--border)"}`,
+                boxShadow: openIndex === i ? "var(--shadow-sm)" : "none",
               }}
             >
               <button
@@ -98,22 +115,36 @@ export default function FAQ() {
               >
                 <span
                   className="text-[15px] font-medium pr-4"
-                  style={{ color: "var(--text-primary)" }}
+                  style={{
+                    color: openIndex === i ? "var(--text-primary)" : "var(--text-secondary)",
+                  }}
                 >
                   {faq.q}
                 </span>
-                <svg
-                  className="w-5 h-5 shrink-0 transition-transform"
+                <div
+                  className="w-7 h-7 rounded-full flex items-center justify-center shrink-0 transition-all"
                   style={{
-                    color: "var(--text-tertiary)",
-                    transform: openIndex === i ? "rotate(45deg)" : "rotate(0deg)",
+                    background: openIndex === i ? "var(--accent)" : "var(--bg-secondary)",
+                    color: openIndex === i ? "white" : "var(--text-tertiary)",
                   }}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
                 >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                </svg>
+                  <svg
+                    className="w-4 h-4 transition-transform"
+                    style={{
+                      transform: openIndex === i ? "rotate(45deg)" : "rotate(0deg)",
+                    }}
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M12 4v16m8-8H4"
+                    />
+                  </svg>
+                </div>
               </button>
               {openIndex === i && (
                 <div className="px-5 pb-5 animate-in">
