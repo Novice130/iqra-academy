@@ -16,7 +16,7 @@ import { logAudit, getClientIp } from "@/lib/audit";
 
 const feedbackSchema = z.object({
   sessionId: z.string().min(1),
-  studentId: z.string().min(1),
+  studentProfileId: z.string().min(1),
   audioUrl: z.string().url("Audio URL must be a valid URL"),
   duration: z.number().int().positive().optional(),
   notes: z.string().max(1000).optional(),
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
     const [feedback] = await db.insert(teacherFeedback).values({
       sessionId: data.sessionId,
       teacherId: ctx.userId,
-      studentId: data.studentId,
+      studentProfileId: data.studentProfileId,
       audioUrl: data.audioUrl,
       duration: data.duration,
       notes: data.notes,
@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
       actorId: ctx.userId,
       action: "SESSION_COMPLETED",
       target: `feedback:${feedback.id}`,
-      metadata: { sessionId: data.sessionId, studentId: data.studentId },
+      metadata: { sessionId: data.sessionId, studentProfileId: data.studentProfileId },
       ipAddress: getClientIp(request.headers),
     });
 

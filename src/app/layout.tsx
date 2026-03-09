@@ -13,9 +13,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quran LMS — Learning Management System",
+  title: "Iqra Academy — Learn Quran Online",
   description:
-    "Modern Quran learning platform with live sessions, progress tracking, and subscription management.",
+    "Live 1:1 and group Quran lessons with certified teachers. Qaidah, Quran reading, and Hifz — from anywhere.",
 };
 
 export default function RootLayout({
@@ -24,9 +24,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0a0a0f] text-white`}
+        className={`${geistSans.variable} ${geistMono.variable}`}
+        style={{ fontFamily: "var(--font-geist-sans)" }}
       >
         {children}
       </body>

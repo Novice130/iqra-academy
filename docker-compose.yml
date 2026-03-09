@@ -1,53 +1,324 @@
 # ============================================================================
-# Docker Compose — Quran LMS Dev + Production Reference
+# Docker Compose — Iqra Academy Full Stack
 # ============================================================================
-# For Dockploy: Use this as the compose file in your project settings.
-# For local dev: `docker compose up` to start the app + services.
+#
+# 📚 EDUCATIONAL NOTE FOR JUNIOR DEVS:
+# This file defines ALL the services that make up the Iqra Academy platform.
+# Docker Compose takes this file and spins up each service as a container.
+#
+# SERVICES:
+# 1. app          — Next.js web app + API (quran.learnnovice.com)
+# 2. jitsi-web    — Jitsi Meet web interface (meet.learnnovice.com)
+# 3. jitsi-prosody — Jitsi XMPP server (chat signaling)
+# 4. jitsi-jicofo  — Jitsi focus component (manages conferences)
+# 5. jitsi-jvb     — Jitsi video bridge (handles video streams)
+# 6. calcom       — Cal.com scheduling (cal.learnnovice.com)
+# 7. twenty-server — Twenty CRM backend (crm.learnnovice.com)
+# 8. twenty-worker — Twenty CRM background jobs
+# 9. twenty-db     — Postgres for Twenty CRM (separate from Neon)
+#
+# HOW TO USE:
+# Option A — Full stack locally:    docker compose up -d
+# Option B — Just the main app:    docker compose up -d app
+# Option C — Dockploy:             Import this file as a Compose project
+#
 # ============================================================================
 
-version: "3.8"
+# ============================================================================
+# 1. MAIN APPLICATION (Next.js)
+# ============================================================================
+# Domain: quran.learnnovice.com
+# This is YOUR app — the one you wrote in TypeScript.
+# ============================================================================
 
 services:
-  # ── Main Application (Next.js) ───────────────────────────────────────────
   app:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+        - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
     ports:
       - "3000:3000"
     environment:
+      # ── Core ──
       - NODE_ENV=production
+      - NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+
+      # ── Database (Neon — managed externally) ──
       - DATABASE_URL=${DATABASE_URL}
       - DIRECT_DATABASE_URL=${DIRECT_DATABASE_URL}
+
+      # ── Auth ──
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
-      - NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+
+      # ── Stripe ──
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+
+      # ── Cal.com ──
+      - CALCOM_API_URL=https://cal.learnnovice.com
       - CALCOM_WEBHOOK_SECRET=${CALCOM_WEBHOOK_SECRET}
-      - JITSI_DOMAIN=${JITSI_DOMAIN}
+
+      # ── Jitsi ──
+      - JITSI_DOMAIN=meet.learnnovice.com
       - JITSI_APP_ID=${JITSI_APP_ID}
       - JITSI_JWT_SECRET=${JITSI_JWT_SECRET}
+
+      # ── Email (Resend) ──
       - RESEND_API_KEY=${RESEND_API_KEY}
       - EMAIL_FROM=${EMAIL_FROM}
+
+      # ── Web Push ──
       - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
       - VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}
       - VAPID_SUBJECT=${VAPID_SUBJECT}
+
+      # ── CRM (Twenty) ──
+      - TWENTY_API_URL=http://twenty-server:3000/api
+      - TWENTY_API_KEY=${TWENTY_API_KEY}
+      - CRM_SYNC_ENABLED=${CRM_SYNC_ENABLED:-false}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
       interval: 30s
       timeout: 10s
+      start_period: 30s
       retries: 3
+    depends_on:
+      twenty-server:
+        condition: service_started
+    networks:
+      - iqra-network
 
-  # ── Cal.com (Self-Hosted Scheduling) ─────────────────────────────────────
-  # Uncomment to self-host Cal.com alongside the app.
-  # Refer to: https://cal.com/docs/self-hosting/docker
-  # calcom:
-  #   image: calcom/cal.com:latest
-  #   ports:
-  #     - "3001:3000"
-  #   environment:
-  #     - DATABASE_URL=${CALCOM_DATABASE_URL}
-  #     - NEXTAUTH_SECRET=${CALCOM_NEXTAUTH_SECRET}
-  #     - NEXT_PUBLIC_WEBAPP_URL=https://cal.yourschool.com
-  #   restart: unless-stopped
+# ============================================================================
+# 2. JITSI MEET (Video Conferencing)
+# ============================================================================
+# Domain: meet.learnnovice.com
+#
+# 📚 Jitsi requires 4 containers:
+# - web:     Serves the meeting UI
+# - prosody: XMPP server for signaling (how browsers find each other)
+# - jicofo:  Focus component (manages who is in which room)
+# - jvb:     Video Bridge (routes the actual video/audio streams)
+#
+# WHY 4 CONTAINERS?
+# Each handles a different protocol. Splitting them means you can
+# scale the video bridge (jvb) independently when you have many calls.
+# ============================================================================
+
+  jitsi-web:
+    image: jitsi/web:stable-9823
+    ports:
+      - "8443:443"
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JITSI_APP_ID}
+      - JWT_APP_SECRET=${JITSI_JWT_SECRET}
+      - JWT_ACCEPTED_ISSUERS=iqra-academy
+      - JWT_ACCEPTED_AUDIENCES=jitsi
+      - ENABLE_RECORDING=0
+      - ENABLE_LIVESTREAMING=0
+      - ENABLE_TRANSCRIPTIONS=0
+      - PUBLIC_URL=https://meet.learnnovice.com
+      - TZ=UTC
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_BOSH_URL_BASE=http://jitsi-prosody:5280
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+    volumes:
+      - jitsi-web-config:/config
+    restart: unless-stopped
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - iqra-network
+
+  jitsi-prosody:
+    image: jitsi/prosody:stable-9823
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - JWT_APP_ID=${JITSI_APP_ID}
+      - JWT_APP_SECRET=${JITSI_JWT_SECRET}
+      - JWT_ACCEPTED_ISSUERS=iqra-academy
+      - JWT_ACCEPTED_AUDIENCES=jitsi
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - TZ=UTC
+    volumes:
+      - jitsi-prosody-config:/config
+      - jitsi-prosody-plugins:/prosody-plugins-custom
+    restart: unless-stopped
+    networks:
+      - iqra-network
+
+  jitsi-jicofo:
+    image: jitsi/jicofo:stable-9823
+    environment:
+      - ENABLE_AUTH=1
+      - AUTH_TYPE=jwt
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - XMPP_SERVER=jitsi-prosody
+      - JICOFO_AUTH_USER=focus
+      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
+      - TZ=UTC
+    restart: unless-stopped
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - iqra-network
+
+  jitsi-jvb:
+    image: jitsi/jvb:stable-9823
+    ports:
+      - "10000:10000/udp"   # Video stream port (UDP for low latency)
+      - "8080:8080"          # Health/stats API
+    environment:
+      - XMPP_DOMAIN=meet.jitsi
+      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
+      - XMPP_SERVER=jitsi-prosody
+      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
+      - JVB_AUTH_USER=jvb
+      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
+      - JVB_PORT=10000
+      - JVB_STUN_SERVERS=meet-jit-si-turnrelay.jitsi.net:443
+      - PUBLIC_URL=https://meet.learnnovice.com
+      - TZ=UTC
+    restart: unless-stopped
+    depends_on:
+      - jitsi-prosody
+    networks:
+      - iqra-network
+
+# ============================================================================
+# 3. CAL.COM (Scheduling)
+# ============================================================================
+# Domain: cal.learnnovice.com
+#
+# 📚 Cal.com is the open-source alternative to Calendly.
+# Teachers set their availability here, and students book sessions.
+# Cal.com sends webhooks to our app when bookings are created/cancelled.
+# ============================================================================
+
+  calcom:
+    image: calcom/cal.com:latest
+    ports:
+      - "3001:3000"
+    environment:
+      # Cal.com needs its own Postgres database
+      - DATABASE_URL=${CALCOM_DATABASE_URL}
+      - DATABASE_DIRECT_URL=${CALCOM_DATABASE_URL}
+      - NEXTAUTH_SECRET=${CALCOM_NEXTAUTH_SECRET}
+      - CALENDSO_ENCRYPTION_KEY=${CALCOM_ENCRYPTION_KEY}
+      - NEXT_PUBLIC_WEBAPP_URL=https://cal.learnnovice.com
+      - NEXT_PUBLIC_API_V2_URL=https://cal.learnnovice.com/api/v2
+      # Disable telemetry
+      - CALCOM_TELEMETRY_DISABLED=1
+      - NEXT_PUBLIC_IS_E2E=0
+    restart: unless-stopped
+    networks:
+      - iqra-network
+
+# ============================================================================
+# 4. TWENTY CRM
+# ============================================================================
+# Domain: crm.learnnovice.com
+#
+# 📚 Twenty is an open-source CRM (like HubSpot but free).
+# It has its own Postgres database (separate from Neon).
+# The server handles the API, the worker processes background jobs.
+# ============================================================================
+
+  twenty-server:
+    image: twentycrm/twenty:latest
+    ports:
+      - "3002:3000"
+    environment:
+      - IS_SIGN_UP_DISABLED=false
+      - PG_DATABASE_URL=postgres://twenty:${TWENTY_DB_PASSWORD}@twenty-db:5432/twenty
+      - FRONT_BASE_URL=https://crm.learnnovice.com
+      - SERVER_URL=https://crm.learnnovice.com
+      - PORT=3000
+      - ACCESS_TOKEN_SECRET=${TWENTY_ACCESS_TOKEN_SECRET}
+      - LOGIN_TOKEN_SECRET=${TWENTY_LOGIN_TOKEN_SECRET}
+      - REFRESH_TOKEN_SECRET=${TWENTY_REFRESH_TOKEN_SECRET}
+      - FILE_TOKEN_SECRET=${TWENTY_FILE_TOKEN_SECRET}
+    restart: unless-stopped
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+    networks:
+      - iqra-network
+
+  twenty-worker:
+    image: twentycrm/twenty:latest
+    command: ["node", "dist/src/queue-worker/queue-worker.module.js"]
+    environment:
+      - PG_DATABASE_URL=postgres://twenty:${TWENTY_DB_PASSWORD}@twenty-db:5432/twenty
+      - SERVER_URL=https://crm.learnnovice.com
+      - ACCESS_TOKEN_SECRET=${TWENTY_ACCESS_TOKEN_SECRET}
+      - LOGIN_TOKEN_SECRET=${TWENTY_LOGIN_TOKEN_SECRET}
+      - REFRESH_TOKEN_SECRET=${TWENTY_REFRESH_TOKEN_SECRET}
+      - FILE_TOKEN_SECRET=${TWENTY_FILE_TOKEN_SECRET}
+    restart: unless-stopped
+    depends_on:
+      twenty-db:
+        condition: service_healthy
+    networks:
+      - iqra-network
+
+  twenty-db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=twenty
+      - POSTGRES_PASSWORD=${TWENTY_DB_PASSWORD}
+      - POSTGRES_DB=twenty
+    volumes:
+      - twenty-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U twenty -d twenty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - iqra-network
+
+# ============================================================================
+# VOLUMES (persistent data)
+# ============================================================================
+# 📚 Volumes survive container restarts. Without them, data is lost
+# when you run `docker compose down`.
+# ============================================================================
+
+volumes:
+  jitsi-web-config:
+    name: iqra-jitsi-web-config
+  jitsi-prosody-config:
+    name: iqra-jitsi-prosody-config
+  jitsi-prosody-plugins:
+    name: iqra-jitsi-prosody-plugins
+  twenty-db-data:
+    name: iqra-twenty-db-data
+
+# ============================================================================
+# NETWORK
+# ============================================================================
+# All services share one Docker network so they can talk to each other
+# by container name (e.g., the app calls twenty-server:3000 directly).
+# ============================================================================
+
+networks:
+  iqra-network:
+    name: iqra-network
+    driver: bridge

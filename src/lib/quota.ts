@@ -17,6 +17,12 @@
  * - Each booking is a withdrawal
  * - Remaining = 4 - COUNT(bookings this week)
  *
+ * SIBLINGS PLAN HANDLING:
+ * The Siblings plan gives 4 classes/week PER CHILD, not per account.
+ * So a family with 3 kids gets 12 total classes/week (4 × 3).
+ * We track entitlements per-child by using `studentProfileId` on the
+ * entitlements table.
+ *
  * RACE CONDITIONS:
  * What if two browser tabs try to book at the same time?
  * We use a database transaction with query isolation.
@@ -26,8 +32,15 @@
  */
 
 import { db } from "./db";
-import { eq, and, gte, lte, inArray, sql } from "drizzle-orm";
-import { bookings, subscriptions, plans, sessions, entitlements } from "@/db/schema";
+import { eq, and, gte, lte, inArray, sql, isNull } from "drizzle-orm";
+import {
+  bookings,
+  subscriptions,
+  plans,
+  sessions,
+  entitlements,
+  studentProfiles,
+} from "@/db/schema";
 import { startOfWeek, endOfWeek } from "date-fns";
 
 /**
@@ -47,6 +60,8 @@ export interface QuotaStatus {
   weekStart: Date;
   /** End of the current quota week (Sunday 23:59 UTC) */
   weekEnd: Date;
+  /** Student profile ID (for Siblings plan per-child tracking) */
+  studentProfileId?: string;
 }
 
 /**
@@ -58,15 +73,22 @@ export interface QuotaStatus {
  * 3. Count CONFIRMED bookings for this user in this week
  * 4. Remaining = classesPerWeek - bookingsThisWeek
  *
+ * FOR SIBLINGS PLAN:
+ * - If `studentProfileId` is provided, we check quota per-child.
+ * - Each child gets `classesPerWeek` independently.
+ * - Without a profileId, returns the aggregate for ALL children.
+ *
  * @param subscriptionId - The subscription to check
  * @param userId - The user who owns the subscription
  * @param orgId - The organization (for multi-tenant scoping)
+ * @param studentProfileId - Optional: check quota for a specific child (Siblings plan)
  * @returns QuotaStatus with remaining classes
  */
 export async function getQuotaStatus(
   subscriptionId: string,
   userId: string,
-  orgId: string
+  orgId: string,
+  studentProfileId?: string
 ): Promise<QuotaStatus> {
   // Step 1: Get the subscription with its plan
   const subscription = await db.query.subscriptions.findFirst({
@@ -86,28 +108,40 @@ export async function getQuotaStatus(
       canBook: false,
       weekStart,
       weekEnd,
+      studentProfileId,
     };
   }
 
-  // Step 2: Count bookings this week for this user
-  // We join bookings→sessions to filter by scheduled date
+  const isSiblingsPlan = subscription.plan.tier === "SIBLINGS";
+
+  // Step 2: Count bookings this week
+  // For Siblings plan with profileId: count only that child's bookings
+  // For other plans: count all bookings for this user
+  const bookingConditions = [
+    eq(bookings.userId, userId),
+    eq(bookings.orgId, orgId),
+    inArray(bookings.status, ["CONFIRMED", "COMPLETED"]),
+    gte(sessions.scheduledStart, weekStart),
+    lte(sessions.scheduledEnd, weekEnd),
+  ];
+
+  // For Siblings plan, filter by specific child profile
+  if (isSiblingsPlan && studentProfileId) {
+    bookingConditions.push(
+      eq(bookings.studentProfileId, studentProfileId)
+    );
+  }
+
   const [result] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(bookings)
     .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-    .where(
-      and(
-        eq(bookings.userId, userId),
-        eq(bookings.orgId, orgId),
-        inArray(bookings.status, ["CONFIRMED", "COMPLETED"]),
-        gte(sessions.scheduledStart, weekStart),
-        lte(sessions.scheduledEnd, weekEnd)
-      )
-    );
+    .where(and(...bookingConditions));
 
   const usedThisWeek = result?.count ?? 0;
 
   // Step 3: Calculate remaining
+  // For Siblings plan: each child gets `classesPerWeek` independently
   const totalAllowed = subscription.plan.classesPerWeek;
   const remaining = Math.max(0, totalAllowed - usedThisWeek);
 
@@ -116,12 +150,17 @@ export async function getQuotaStatus(
     .insert(entitlements)
     .values({
       subscriptionId,
+      studentProfileId: isSiblingsPlan ? studentProfileId : null,
       weekStartDate: weekStart,
       totalClasses: totalAllowed,
       usedClasses: usedThisWeek,
     })
     .onConflictDoUpdate({
-      target: [entitlements.subscriptionId, entitlements.weekStartDate],
+      target: [
+        entitlements.subscriptionId,
+        entitlements.weekStartDate,
+        entitlements.studentProfileId,
+      ],
       set: { usedClasses: usedThisWeek },
     });
 
@@ -132,7 +171,42 @@ export async function getQuotaStatus(
     canBook: remaining > 0,
     weekStart,
     weekEnd,
+    studentProfileId,
   };
+}
+
+/**
+ * Gets quota status for ALL children under a Siblings subscription.
+ *
+ * 📚 USE CASE: On the parent's dashboard, show each child's remaining
+ * classes side by side: "Aisha: 3 left | Yusuf: 2 left | Zahra: 4 left"
+ *
+ * @param subscriptionId - The Siblings subscription
+ * @param userId - The parent user
+ * @param orgId - The organization
+ * @returns Array of QuotaStatus, one per child profile
+ */
+export async function getSiblingsQuotaStatus(
+  subscriptionId: string,
+  userId: string,
+  orgId: string
+): Promise<QuotaStatus[]> {
+  // Get all child profiles for this user
+  const profiles = await db.query.studentProfiles.findMany({
+    where: and(
+      eq(studentProfiles.userId, userId),
+      eq(studentProfiles.orgId, orgId)
+    ),
+  });
+
+  // Get quota for each child independently
+  const quotas = await Promise.all(
+    profiles.map((profile) =>
+      getQuotaStatus(subscriptionId, userId, orgId, profile.id)
+    )
+  );
+
+  return quotas;
 }
 
 /**
@@ -145,17 +219,27 @@ export async function getQuotaStatus(
  * 3. If yes → create the booking in a transaction (atomic)
  * 4. If no → return false (frontend shows "No classes remaining")
  *
+ * FOR SIBLINGS PLAN:
+ * The `studentProfileId` is REQUIRED. Each child's quota is checked
+ * independently. Booking 1 class for Aisha doesn't affect Yusuf's quota.
+ *
+ * WEBINAR EXEMPTION:
+ * Free-tier webinars don't consume quota (they're unlimited).
+ * Check `session.consumesQuota` before calling this function.
+ *
  * @param subscriptionId - The subscription paying for this class
  * @param userId - The student booking the class
  * @param orgId - The organization
  * @param sessionId - The session they want to book
+ * @param studentProfileId - Which child profile is attending (required for Siblings)
  * @returns true if booking was created, false if quota exhausted
  */
 export async function consumeQuota(
   subscriptionId: string,
   userId: string,
   orgId: string,
-  sessionId: string
+  sessionId: string,
+  studentProfileId?: string
 ): Promise<boolean> {
   // Use a transaction to prevent race conditions
   return db.transaction(async (tx) => {
@@ -169,23 +253,52 @@ export async function consumeQuota(
       return false;
     }
 
+    // Check if the session actually consumes quota
+    const session = await tx.query.sessions.findFirst({
+      where: eq(sessions.id, sessionId),
+    });
+
+    if (!session) {
+      return false;
+    }
+
+    // Webinars and ad-hoc sessions may not consume quota
+    if (!session.consumesQuota) {
+      // Create the booking without checking quota
+      await tx.insert(bookings).values({
+        orgId,
+        userId,
+        studentProfileId,
+        sessionId,
+        status: "CONFIRMED",
+      });
+      return true;
+    }
+
+    const isSiblingsPlan = subscription.plan.tier === "SIBLINGS";
+
     const now = new Date();
     const weekStart = startOfWeek(now, { weekStartsOn: 1 });
     const weekEnd = endOfWeek(now, { weekStartsOn: 1 });
+
+    // Build booking count conditions
+    const bookingConditions = [
+      eq(bookings.userId, userId),
+      eq(bookings.orgId, orgId),
+      inArray(bookings.status, ["CONFIRMED", "COMPLETED"]),
+      gte(sessions.scheduledStart, weekStart),
+      lte(sessions.scheduledEnd, weekEnd),
+    ];
+
+    if (isSiblingsPlan && studentProfileId) {
+      bookingConditions.push(eq(bookings.studentProfileId, studentProfileId));
+    }
 
     const [result] = await tx
       .select({ count: sql<number>`count(*)::int` })
       .from(bookings)
       .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-      .where(
-        and(
-          eq(bookings.userId, userId),
-          eq(bookings.orgId, orgId),
-          inArray(bookings.status, ["CONFIRMED", "COMPLETED"]),
-          gte(sessions.scheduledStart, weekStart),
-          lte(sessions.scheduledEnd, weekEnd)
-        )
-      );
+      .where(and(...bookingConditions));
 
     const usedThisWeek = result?.count ?? 0;
 
@@ -197,6 +310,7 @@ export async function consumeQuota(
     await tx.insert(bookings).values({
       orgId,
       userId,
+      studentProfileId,
       sessionId,
       status: "CONFIRMED",
     });
@@ -206,12 +320,17 @@ export async function consumeQuota(
       .insert(entitlements)
       .values({
         subscriptionId,
+        studentProfileId: isSiblingsPlan ? studentProfileId : null,
         weekStartDate: weekStart,
         totalClasses: subscription.plan.classesPerWeek,
         usedClasses: usedThisWeek + 1,
       })
       .onConflictDoUpdate({
-        target: [entitlements.subscriptionId, entitlements.weekStartDate],
+        target: [
+          entitlements.subscriptionId,
+          entitlements.weekStartDate,
+          entitlements.studentProfileId,
+        ],
         set: { usedClasses: usedThisWeek + 1 },
       });
 

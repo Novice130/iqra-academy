@@ -1,0 +1,50 @@
+# ============================================================================
+# .dockerignore — Exclude from Docker build context
+# ============================================================================
+# This dramatically speeds up `docker build` because Docker doesn't copy
+# these files into the build context. The build context is the snapshot of
+# your project that Docker uses — smaller = faster.
+
+# Dependencies (reinstalled in Docker)
+node_modules
+.pnpm-store
+
+# Flutter mobile app (Dart, not needed for Next.js container)
+apps/mobile
+
+# Build outputs
+.next
+out
+dist
+
+# Version control
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Environment (secrets should be injected via Dockploy, not baked in)
+.env
+.env.local
+.env.production
+.env.development
+
+# Documentation (not needed at runtime)
+docs
+*.md
+!README.md
+
+# Docker files (prevent recursive context)
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Misc
+.DS_Store
+Thumbs.db
+coverage
+.turbo

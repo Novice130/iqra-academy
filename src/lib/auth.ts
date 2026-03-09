@@ -78,6 +78,28 @@ export const auth = betterAuth({
   },
 
   /**
+   * Social/OAuth providers.
+   *
+   * 📚 GOOGLE SIGN-IN SETUP:
+   * 1. Go to https://console.cloud.google.com/apis/credentials
+   * 2. Create OAuth 2.0 Client ID (Web application)
+   * 3. Add authorized redirect URI:
+   *    - Dev:  http://localhost:3000/api/auth/callback/google
+   *    - Prod: https://yourdomain.com/api/auth/callback/google
+   * 4. Copy Client ID + Client Secret to .env
+   *
+   * WHY GOOGLE?
+   * Many Quran school parents use Gmail. Google Sign-In skips the
+   * "create password → verify email" friction, boosting signup conversion.
+   */
+  socialProviders: {
+    google: {
+      clientId: process.env.GOOGLE_CLIENT_ID!,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
+    },
+  },
+
+  /**
    * Session configuration.
    * `expiresIn` — session lasts 7 days (parents don't want to log in daily)
    * `updateAge` — refresh the session expiry if they visit within 1 day

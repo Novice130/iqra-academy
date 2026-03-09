@@ -44,9 +44,11 @@ export type AuditAction =
   | "BOOKING_CREATED"
   | "BOOKING_CANCELLED"
   | "CHAT_MESSAGE_HIDDEN"
+  | "CHAT_MESSAGE_DELETED"
   | "COUPON_CREATED"
   | "EXPORT_GENERATED"
-  | "SETTINGS_CHANGED";
+  | "SETTINGS_CHANGED"
+  | "RECORDING_ACCESS_CHANGED";
 
 /**
  * Parameters for creating an audit log entry.

@@ -21,6 +21,8 @@ import { logAudit, getClientIp } from "@/lib/audit";
 const createProfileSchema = z.object({
   name: z.string().min(1, "Name is required").max(100),
   dateOfBirth: z.string().datetime().optional(),
+  /** Learning track: QAIDAH, QURAN_READING, or HIFZ */
+  track: z.enum(["QAIDAH", "QURAN_READING", "HIFZ"]).default("QAIDAH"),
   currentLevel: z.string().default("qaida-basics"),
   notes: z.string().max(500).optional(),
 });
@@ -33,7 +35,10 @@ export async function GET(request: NextRequest) {
     const ctx = authResult;
 
     const profiles = await db.query.studentProfiles.findMany({
-      where: eq(studentProfiles.userId, ctx.userId),
+      where: and(
+        eq(studentProfiles.userId, ctx.userId),
+        eq(studentProfiles.orgId, ctx.orgId)
+      ),
       with: {
         progressRecords: {
           orderBy: (pr, { desc }) => [desc(pr.createdAt)],
@@ -81,9 +86,11 @@ export async function POST(request: NextRequest) {
     }
 
     const [profile] = await db.insert(studentProfiles).values({
+      orgId: ctx.orgId,
       userId: ctx.userId,
       name: data.name,
       dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
+      track: data.track,
       currentLevel: data.currentLevel,
       notes: data.notes,
     }).returning();

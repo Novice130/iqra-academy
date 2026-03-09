@@ -9,14 +9,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
-import { chatMessages } from "@/db/schema";
+import { chatMessages, chatModerationActions } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError, NotFoundError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 
 const moderateSchema = z.object({
   messageId: z.string().min(1),
-  action: z.enum(["hide", "unhide"]),
+  action: z.enum(["hide", "unhide", "delete"]),
+  reason: z.string().max(500).optional(),
 });
 
 /** POST /api/chat/moderate — hide or unhide a message */
@@ -27,7 +28,7 @@ export async function POST(request: NextRequest) {
     const ctx = authResult;
 
     const body = await request.json();
-    const { messageId, action } = moderateSchema.parse(body);
+    const { messageId, action, reason } = moderateSchema.parse(body);
 
     const message = await db.query.chatMessages.findFirst({
       where: and(eq(chatMessages.id, messageId), eq(chatMessages.orgId, ctx.orgId)),
@@ -38,17 +39,25 @@ export async function POST(request: NextRequest) {
       .update(chatMessages)
       .set({
         isHidden: action === "hide",
-        hiddenBy: action === "hide" ? ctx.userId : null,
-        hiddenAt: action === "hide" ? new Date() : null,
+        isDeleted: action === "delete",
       })
       .where(eq(chatMessages.id, messageId));
+
+    // Log the moderation action in a separate audit table
+    await db.insert(chatModerationActions).values({
+      orgId: ctx.orgId,
+      messageId,
+      moderatorId: ctx.userId,
+      action: action.toUpperCase(),
+      reason: reason || null,
+    });
 
     await logAudit({
       orgId: ctx.orgId,
       actorId: ctx.userId,
-      action: "CHAT_MESSAGE_HIDDEN",
+      action: action === "delete" ? "CHAT_MESSAGE_DELETED" : "CHAT_MESSAGE_HIDDEN",
       target: `message:${messageId}`,
-      metadata: { action, senderId: message.senderId },
+      metadata: { action, senderId: message.senderId, reason },
       ipAddress: getClientIp(request.headers),
     });
 

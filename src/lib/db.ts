@@ -13,6 +13,7 @@
  */
 
 import { drizzle } from "drizzle-orm/postgres-js";
+import { sql } from "drizzle-orm";
 import postgres from "postgres";
 import * as schema from "@/db/schema";
 
@@ -31,7 +32,10 @@ const globalForDrizzle = globalThis as unknown as {
 };
 
 function createDrizzleClient() {
-  const client = globalForDrizzle.pgClient ?? postgres(connectionString);
+  const client = globalForDrizzle.pgClient ?? postgres(connectionString, {
+    ssl: "require",  // Required for Neon — connections fail without this
+    max: 10,         // Connection pool size
+  });
   if (process.env.NODE_ENV !== "production") {
     globalForDrizzle.pgClient = client;
   }
@@ -62,4 +66,57 @@ export const db = globalForDrizzle.db ?? createDrizzleClient();
 
 if (process.env.NODE_ENV !== "production") {
   globalForDrizzle.db = db;
+}
+
+/**
+ * RLS context — sets Postgres session variables for Row-Level Security.
+ *
+ * 📚 HOW RLS WORKS WITH THIS:
+ * 1. Your API route calls `withRLS(ctx, async (tx) => { ... })`
+ * 2. This function does `SET LOCAL app.current_org_id = 'xxx'` inside a transaction
+ * 3. All queries inside the callback automatically get filtered by RLS policies
+ * 4. When the transaction ends, the session variables are cleared (SET LOCAL is tx-scoped)
+ *
+ * USAGE:
+ * ```ts
+ * import { withRLS } from "@/lib/db";
+ *
+ * export async function GET(request: NextRequest) {
+ *   const ctx = await requireAuth(request);
+ *   return withRLS(ctx, async (tx) => {
+ *     // This query is automatically filtered by RLS policies!
+ *     const myBookings = await tx.select().from(bookings);
+ *     return NextResponse.json({ bookings: myBookings });
+ *   });
+ * }
+ * ```
+ *
+ * WHY `SET LOCAL`?
+ * `SET LOCAL` only lasts for the current transaction. If we used `SET`
+ * (without LOCAL), the session variables would persist across queries
+ * from different users sharing the same connection — a security hole!
+ *
+ * @param ctx - Auth context with userId, orgId, role
+ * @param fn - Callback that receives a transaction-scoped DB client
+ * @returns The result of the callback
+ */
+export async function withRLS<T>(
+  ctx: { userId: string; orgId: string; role: string },
+  fn: (tx: typeof db) => Promise<T>
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    // Set session variables for RLS policies
+    await tx.execute(
+      sql`SELECT set_config('app.current_org_id', ${ctx.orgId}, true)`
+    );
+    await tx.execute(
+      sql`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`
+    );
+    await tx.execute(
+      sql`SELECT set_config('app.current_role', ${ctx.role}, true)`
+    );
+
+    // Run the user's query function within the RLS context
+    return fn(tx as unknown as typeof db);
+  });
 }

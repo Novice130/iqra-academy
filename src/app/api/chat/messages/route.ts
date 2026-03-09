@@ -10,9 +10,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db } from "@/lib/db";
 import { eq, and, asc } from "drizzle-orm";
-import { chatMessages, subscriptions } from "@/db/schema";
+import { chatMessages, chatRooms, subscriptions } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
-import { handleApiError, ForbiddenError } from "@/lib/errors";
+import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 
 const sendMessageSchema = z.object({
   sessionId: z.string().min(1),
@@ -31,15 +31,22 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
     }
 
+    // Look up the chat room for this session
+    const room = await db.query.chatRooms.findFirst({
+      where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+    });
+    if (!room) throw new NotFoundError("Chat room for this session");
+
     const isTeacherOrAdmin = ctx.role === "TEACHER" || ctx.role === "ORG_ADMIN" || ctx.role === "SUPER_ADMIN";
 
     const conditions = [
-      eq(chatMessages.sessionId, sessionId),
+      eq(chatMessages.roomId, room.id),
       eq(chatMessages.orgId, ctx.orgId),
     ];
-    // Students don't see hidden messages
+    // Students don't see hidden or deleted messages
     if (!isTeacherOrAdmin) {
       conditions.push(eq(chatMessages.isHidden, false));
+      conditions.push(eq(chatMessages.isDeleted, false));
     }
 
     const messages = await db.query.chatMessages.findMany({
@@ -75,9 +82,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Find or create chat room for this session
+    let room = await db.query.chatRooms.findFirst({
+      where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+    });
+    if (!room) {
+      // Auto-create a chat room for the session
+      const [newRoom] = await db.insert(chatRooms).values({
+        orgId: ctx.orgId,
+        name: `Session ${sessionId}`,
+        sessionId,
+      }).returning();
+      room = newRoom;
+    }
+
     const [message] = await db.insert(chatMessages).values({
       orgId: ctx.orgId,
-      sessionId,
+      roomId: room.id,
       senderId: ctx.userId,
       content,
     }).returning();

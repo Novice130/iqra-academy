@@ -15,7 +15,8 @@ import { handleApiError, NotFoundError } from "@/lib/errors";
 
 const recordingSchema = z.object({
   recordingUrl: z.string().url().optional(),
-  accessible: z.boolean(),
+  /** Who can access the recording: NONE, STUDENT_ONLY, STUDENT_AND_OBSERVERS, ALL */
+  access: z.enum(["NONE", "STUDENT_ONLY", "STUDENT_AND_OBSERVERS", "ALL"]),
 });
 
 export async function POST(
@@ -40,7 +41,7 @@ export async function POST(
       .update(sessions)
       .set({
         ...(data.recordingUrl && { recordingUrl: data.recordingUrl }),
-        recordingAccessible: data.accessible,
+        recordingAccess: data.access,
       })
       .where(eq(sessions.id, sessionId))
       .returning();
