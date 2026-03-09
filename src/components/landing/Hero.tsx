@@ -39,7 +39,7 @@ export default function Hero() {
             <div className="flex flex-col sm:flex-row items-center justify-center lg:justify-start gap-3">
               <a
                 id="book"
-                href="https://cal.com"
+                href="#book"
                 className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-emerald-700 text-white font-bold text-base hover:bg-emerald-800 transition-colors shadow-md shadow-emerald-900/15"
               >
                 Book a Free Assessment
