@@ -13,9 +13,32 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Quran LMS — Learning Management System",
+  title: "Online Quran Classes for Kids | Iqra Academy – 4 Live Sessions a Week",
   description:
-    "Modern Quran learning platform with live sessions, progress tracking, and subscription management.",
+    "Online Quran classes for kids in the US. Noorani Qaida, Tajweed & Hifz with live teachers. 4 sessions/week, fixed schedule. Book a free assessment today.",
+  openGraph: {
+    title: "Online Quran Classes for Kids | Iqra Academy",
+    description:
+      "Live 1:1 and group Quran classes for children aged 5–15. Structured tracks from Noorani Qaida to Hifz. US time zones. Book a free assessment.",
+    type: "website",
+    locale: "en_US",
+    siteName: "Iqra Academy",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Online Quran Classes for Kids | Iqra Academy",
+    description:
+      "Live 1:1 and group Quran classes for children aged 5–15. US time zones. Book a free assessment.",
+  },
+  keywords: [
+    "online Quran classes for kids",
+    "online Noorani Qaida for kids",
+    "Quran memorization classes online",
+    "Tajweed classes for children",
+    "Hifz classes online",
+    "online Quran school US",
+    "kids Quran teacher online",
+  ],
 };
 
 export default function RootLayout({
@@ -24,9 +47,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#0a0a0f] text-white`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-[#faf9f6] text-gray-900`}
       >
         {children}
       </body>
