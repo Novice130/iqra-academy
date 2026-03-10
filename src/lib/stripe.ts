@@ -28,21 +28,27 @@
 import Stripe from "stripe";
 
 /**
- * Stripe server-side client instance.
+ * Stripe server-side client instance (lazy-initialized).
  *
- * WHY 2025-LATEST API VERSION?
- * Stripe regularly updates their API. Pinning to a version ensures
- * our code doesn't break when Stripe makes changes. We can upgrade
- * on our schedule.
+ * WHY LAZY? During `next build`, all modules are imported and evaluated.
+ * If STRIPE_SECRET_KEY is a dummy placeholder (e.g. in Docker build stage),
+ * `new Stripe(...)` throws immediately. By deferring initialization to
+ * the first actual API call, the build completes without error.
  *
  * FAILURE MODES:
  * - Missing STRIPE_SECRET_KEY → throws on any API call
  * - Invalid key → Stripe returns 401
  * - Rate limiting → Stripe returns 429 (auto-retry built into SDK)
  */
-export const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
-  typescript: true,
-});
+let _stripe: Stripe | null = null;
+function getStripe(): Stripe {
+  if (!_stripe) {
+    _stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+      typescript: true,
+    });
+  }
+  return _stripe;
+}
 
 // ============================================================================
 // PRICING CONSTANTS
@@ -91,7 +97,7 @@ export async function createStripeCustomer(
   name: string,
   orgId: string
 ): Promise<Stripe.Customer> {
-  return stripe.customers.create({
+  return getStripe().customers.create({
     email,
     name,
     metadata: {
@@ -147,7 +153,7 @@ export async function createManualInvoiceSubscription(
     subscriptionData.discounts = [{ coupon: couponId }];
   }
 
-  return stripe.subscriptions.create(subscriptionData);
+  return getStripe().subscriptions.create(subscriptionData);
 }
 
 /**
@@ -165,16 +171,16 @@ export async function createAutoChargeSubscription(
   paymentMethodId: string
 ): Promise<Stripe.Subscription> {
   // First, attach the payment method to the customer
-  await stripe.paymentMethods.attach(paymentMethodId, {
+  await getStripe().paymentMethods.attach(paymentMethodId, {
     customer: customerId,
   });
 
   // Set it as the default payment method
-  await stripe.customers.update(customerId, {
+  await getStripe().customers.update(customerId, {
     invoice_settings: { default_payment_method: paymentMethodId },
   });
 
-  return stripe.subscriptions.create({
+  return getStripe().subscriptions.create({
     customer: customerId,
     items: [{ price: priceId }],
     collection_method: "charge_automatically",
@@ -219,7 +225,7 @@ export async function issueRefund(
     refundParams.amount = amountCents;
   }
 
-  return stripe.refunds.create(refundParams);
+  return getStripe().refunds.create(refundParams);
 }
 
 // ============================================================================
@@ -267,7 +273,7 @@ export async function createStripeCoupon(params: {
     couponData.max_redemptions = params.maxRedemptions;
   }
 
-  return stripe.coupons.create(couponData);
+  return getStripe().coupons.create(couponData);
 }
 
 // ============================================================================
@@ -298,7 +304,7 @@ export function verifyWebhookSignature(
   body: string,
   signature: string
 ): Stripe.Event {
-  return stripe.webhooks.constructEvent(
+  return getStripe().webhooks.constructEvent(
     body,
     signature,
     process.env.STRIPE_WEBHOOK_SECRET!

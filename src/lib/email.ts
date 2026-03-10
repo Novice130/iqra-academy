@@ -26,14 +26,25 @@
 import { Resend } from "resend";
 
 /**
- * Resend client instance.
+ * Resend client instance (lazy-initialized).
+ *
+ * WHY LAZY? During `next build`, all modules are imported and evaluated.
+ * If RESEND_API_KEY is a dummy placeholder (e.g. in Docker build stage),
+ * `new Resend(...)` throws immediately. By deferring initialization to
+ * the first actual email send, the build completes without error.
  *
  * FAILURE MODES:
  * - Missing RESEND_API_KEY → all email sends fail
  * - Invalid API key → Resend returns 401
  * - Rate limiting → Resend returns 429 (100 emails/day on free plan)
  */
-const resend = new Resend(process.env.RESEND_API_KEY);
+let _resend: Resend | null = null;
+function getResend(): Resend {
+  if (!_resend) {
+    _resend = new Resend(process.env.RESEND_API_KEY);
+  }
+  return _resend;
+}
 
 /**
  * The "from" address for all transactional emails.
@@ -59,7 +70,7 @@ export async function sendWelcomeEmail(
   orgName: string
 ): Promise<void> {
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: FROM_EMAIL,
       to,
       subject: `Welcome to ${orgName} — Your Quran Learning Journey Begins!`,
@@ -107,7 +118,7 @@ export async function sendSessionReminder(
   joinUrl: string
 ): Promise<void> {
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: FROM_EMAIL,
       to,
       subject: `🕐 Your Quran class starts in 30 minutes — ${sessionTitle}`,
@@ -174,7 +185,7 @@ export async function sendWeeklyDigest(
     .join("");
 
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: FROM_EMAIL,
       to,
       subject: `📊 Weekly Quran Progress — ${parentName}'s Students`,
@@ -213,7 +224,7 @@ export async function sendPaymentReceipt(
   invoiceUrl: string
 ): Promise<void> {
   try {
-    await resend.emails.send({
+    await getResend().emails.send({
       from: FROM_EMAIL,
       to,
       subject: `💳 Payment Received — ${planName}`,
