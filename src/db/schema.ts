@@ -233,7 +233,7 @@ export const users = pgTable(
   "users",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
-    orgId: text("org_id").notNull().default("iqra_academy_main").references(() => organizations.id),
+    orgId: text("org_id").notNull().default("seed_org_iqra_academy").references(() => organizations.id),
     email: text("email").notNull(),
     emailVerified: boolean("email_verified").notNull().default(false),
     name: text("name").notNull(),
