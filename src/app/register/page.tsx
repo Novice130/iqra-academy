@@ -22,19 +22,18 @@ export default function RegisterPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/sign-up/email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password }),
+      const { data, error: authError } = await authClient.signUp.email({
+        email,
+        password,
+        name,
       });
-      if (res.ok) {
+      
+      if (authError) {
+        setError(authError.message || "Registration failed");
+      } else if (data) {
         router.push("/dashboard");
-      } else {
-        const data = await res.json();
-        setError(data.message || "Registration failed");
+        router.refresh(); // Force a hard navigation to update layout state
       }
-    } catch {
-      setError("Connection error. Please try again.");
     } finally {
       setLoading(false);
     }

@@ -22,19 +22,17 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/sign-in/email", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+      const { data, error: authError } = await authClient.signIn.email({
+        email,
+        password,
       });
-      if (res.ok) {
+
+      if (authError) {
+        setError(authError.message || "Invalid email or password");
+      } else if (data) {
         router.push("/dashboard");
-      } else {
-        const data = await res.json();
-        setError(data.message || "Invalid email or password");
+        router.refresh(); // Force a hard navigation to update layout state
       }
-    } catch {
-      setError("Connection error. Please try again.");
     } finally {
       setLoading(false);
     }
