@@ -89,14 +89,18 @@ echo "TWENTY_FILE_TOKEN_SECRET=$(openssl rand -base64 32)"
 
 ## 4. Deploy the Next.js App
 
-### In Dockploy:
+### In Dokploy:
 
 1. **Create New Project** → Name: `iqra-academy`
 2. **Add Service** → Type: **Application** → Source: **Git**
 3. Enter your **Git repository URL** and branch (`main`)
-4. **Build**: Dockploy will auto-detect the `Dockerfile`
+4. **Build**: Dokploy will auto-detect the `Dockerfile`
 5. **Domain**: Set to `quran.learnnovice.com`
-6. **SSL**: Enable (Dockploy auto-provisions via Let's Encrypt)
+6. **SSL**: Enable (Dokploy auto-provisions via Let's Encrypt)
+
+> **TIP:** All other services (Jitsi, Cal.com, CRM) are added as
+> additional services **inside this same `iqra-academy` project**.
+> No need to create separate projects.
 
 ### Environment Variables:
 
@@ -154,10 +158,10 @@ Expected: { "status": "ok", "database": "connected" }
 
 ## 5. Deploy Jitsi Meet
 
-### In Dockploy:
+### In Dokploy (same `iqra-academy` project):
 
-1. **Create New Project** → Name: `iqra-jitsi`
-2. **Add Service** → Type: **Compose**
+1. Open your `iqra-academy` project
+2. **Add Service** → Type: **Compose** → Name: `jitsi`
 3. Paste this compose content:
 
 ```yaml
@@ -254,12 +258,12 @@ Expected: Jitsi Meet welcome page (requires JWT to join rooms)
 
 ---
 
-## 6. Deploy Cal.com
+## 6. Deploy Cal.com (Optional — Add Later)
 
-### In Dockploy:
+### In Dokploy (same `iqra-academy` project):
 
-1. **Create New Project** → Name: `iqra-calcom`
-2. **Add Service** → Type: **Docker Image**
+1. Open your `iqra-academy` project
+2. **Add Service** → Type: **Docker Image** → Name: `calcom`
 3. Image: `calcom/cal.com:latest`
 4. **Port mapping**: Container port `3000`
 
@@ -302,12 +306,12 @@ Expected: Cal.com setup wizard (first-time configuration)
 
 ---
 
-## 7. Deploy Twenty CRM
+## 7. Deploy Twenty CRM (Optional — Add Later)
 
-### In Dockploy:
+### In Dokploy (same `iqra-academy` project):
 
-1. **Create New Project** → Name: `iqra-crm`
-2. **Add Service** → Type: **Compose**
+1. Open your `iqra-academy` project
+2. **Add Service** → Type: **Compose** → Name: `crm`
 3. Paste this compose:
 
 ```yaml
