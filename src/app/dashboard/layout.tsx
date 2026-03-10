@@ -34,9 +34,7 @@ export default async function DashboardLayout({
       }}>
         {/* Logo */}
         <div className="flex items-center gap-2.5 px-5 h-16" style={{ borderBottom: "1px solid var(--border)" }}>
-          <div className="w-7 h-7 rounded-md flex items-center justify-center text-white text-xs font-bold" style={{ background: "var(--accent)" }}>
-            ق
-          </div>
+          <img src="/logo.png" alt="Iqra Academy" className="w-7 h-7 rounded-md object-cover" />
           <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
             Iqra Academy
           </span>
@@ -91,9 +89,7 @@ export default async function DashboardLayout({
           borderBottom: "1px solid var(--border)",
         }}>
           <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-md flex items-center justify-center text-white text-xs font-bold" style={{ background: "var(--accent)" }}>
-              ق
-            </div>
+            <img src="/logo.png" alt="Iqra Academy" className="w-7 h-7 rounded-md object-cover" />
             <span className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Iqra Academy</span>
           </div>
           <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white" style={{ background: "var(--accent)" }}>

@@ -27,15 +27,11 @@ export default function Nav() {
         <div className="glass-panel rounded-[1.75rem] px-4 sm:px-5">
           <div className="flex h-[72px] items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-3 shrink-0">
-              <div
-                className="flex h-10 w-10 items-center justify-center rounded-2xl text-base font-bold text-white shadow-sm"
-                style={{
-                  background:
-                    "linear-gradient(135deg, #10b981 0%, #0f766e 100%)",
-                }}
-              >
-                ق
-              </div>
+              <img
+                src="/logo.png"
+                alt="Iqra Academy"
+                className="h-10 w-10 rounded-2xl object-cover shadow-sm"
+              />
               <div>
                 <div
                   className="text-[15px] font-semibold tracking-tight"

@@ -46,9 +46,7 @@ export default function LoginPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2.5 mb-8">
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center text-white text-base font-bold" style={{ background: "var(--accent)" }}>
-              ق
-            </div>
+            <img src="/logo.png" alt="Iqra Academy" className="w-9 h-9 rounded-lg object-cover" />
             <span className="text-lg font-semibold" style={{ color: "var(--text-primary)" }}>
               Iqra Academy
             </span>
