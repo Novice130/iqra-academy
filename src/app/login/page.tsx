@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { authClient } from "@/lib/auth-client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -126,7 +127,9 @@ export default function LoginPage() {
 
           {/* Google */}
           <button
-            onClick={() => { window.location.href = "/api/auth/sign-in/social?provider=google"; }}
+            onClick={async () => {
+              await authClient.signIn.social({ provider: "google", callbackURL: "/dashboard" });
+            }}
             className="btn-secondary w-full"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
