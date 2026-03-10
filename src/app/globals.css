@@ -6,15 +6,15 @@
   --font-mono: var(--font-geist-mono);
 
   /* CITCD-inspired palette */
-  --color-sage: #5C7C6F;
-  --color-sage-dark: #3D5A4C;
-  --color-sage-light: #7A998C;
-  --color-cream: #E8DED1;
-  --color-gold: #C9A962;
+  --color-sage: #5c7c6f;
+  --color-sage-dark: #3d5a4c;
+  --color-sage-light: #7a998c;
+  --color-cream: #e8ded1;
+  --color-gold: #c9a962;
   --color-gold-dark: #b8943f;
-  --color-warm-bg: #FDFBF7;
-  --color-charcoal: #2D3436;
-  --color-gray: #636E72;
+  --color-warm-bg: #fdfbf7;
+  --color-charcoal: #2d3436;
+  --color-gray: #636e72;
 }
 
 html {
@@ -27,4 +27,19 @@ body {
   font-family: var(--font-geist-sans);
   background: var(--color-warm-bg);
   color: var(--color-charcoal);
+}
+
+/* ── Scroll-reveal animations ─────────────────────────────────────────── */
+
+.fade-in-hidden {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 0.6s ease-out,
+    transform 0.6s ease-out;
+}
+
+.fade-in-visible {
+  opacity: 1;
+  transform: translateY(0);
 }

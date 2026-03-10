@@ -77,8 +77,12 @@ export default function FAQ() {
             key={i}
             className="rounded-[1.75rem] border bg-white p-2 shadow-sm transition-all duration-200"
             style={{
-              borderColor: isOpen ? "rgba(16, 185, 129, 0.28)" : "var(--border)",
-              boxShadow: isOpen ? "0 18px 40px rgba(15, 23, 42, 0.07)" : "var(--shadow-sm)",
+              borderColor: isOpen
+                ? "rgba(16, 185, 129, 0.28)"
+                : "var(--border)",
+              boxShadow: isOpen
+                ? "0 18px 40px rgba(15, 23, 42, 0.07)"
+                : "var(--shadow-sm)",
             }}
           >
             <button
@@ -99,8 +103,18 @@ export default function FAQ() {
                   transform: isOpen ? "rotate(45deg)" : "rotate(0deg)",
                 }}
               >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                <svg
+                  className="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
                 </svg>
               </span>
             </button>
@@ -108,7 +122,10 @@ export default function FAQ() {
             {isOpen && (
               <div className="animate-in px-4 pb-4 sm:px-5 sm:pb-5">
                 <div className="rounded-[1.25rem] bg-slate-50 px-4 py-4 sm:px-5 sm:py-5">
-                  <p className="text-sm leading-7 sm:text-[15px]" style={{ color: "var(--text-secondary)" }}>
+                  <p
+                    className="text-sm leading-7 sm:text-[15px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
                     {faq.a}
                   </p>
                 </div>

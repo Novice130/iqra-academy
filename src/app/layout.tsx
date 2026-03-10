@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import WhatsAppButton from "@/components/WhatsAppButton";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -30,6 +31,7 @@ export default function RootLayout({
         style={{ fontFamily: "var(--font-geist-sans)" }}
       >
         {children}
+        <WhatsAppButton />
       </body>
     </html>
   );

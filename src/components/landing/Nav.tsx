@@ -29,15 +29,24 @@ export default function Nav() {
             <Link href="/" className="flex items-center gap-3 shrink-0">
               <div
                 className="flex h-10 w-10 items-center justify-center rounded-2xl text-base font-bold text-white shadow-sm"
-                style={{ background: "linear-gradient(135deg, #10b981 0%, #0f766e 100%)" }}
+                style={{
+                  background:
+                    "linear-gradient(135deg, #10b981 0%, #0f766e 100%)",
+                }}
               >
                 ق
               </div>
               <div>
-                <div className="text-[15px] font-semibold tracking-tight" style={{ color: "var(--text-primary)" }}>
+                <div
+                  className="text-[15px] font-semibold tracking-tight"
+                  style={{ color: "var(--text-primary)" }}
+                >
                   Iqra Academy
                 </div>
-                <div className="hidden text-xs sm:block" style={{ color: "var(--text-secondary)" }}>
+                <div
+                  className="hidden text-xs sm:block"
+                  style={{ color: "var(--text-secondary)" }}
+                >
                   Online Quran learning
                 </div>
               </div>
@@ -70,7 +79,11 @@ export default function Nav() {
             </div>
 
             <div className="flex md:hidden items-center gap-2">
-              <Link href="/register" className="btn-primary" style={{ padding: "10px 14px", fontSize: "12px" }}>
+              <Link
+                href="/register"
+                className="btn-primary"
+                style={{ padding: "10px 14px", fontSize: "12px" }}
+              >
                 Trial
               </Link>
               <button
@@ -79,12 +92,32 @@ export default function Nav() {
                 aria-label="Toggle menu"
               >
                 {menuOpen ? (
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M6 18L18 6M6 6l12 12"
+                    />
                   </svg>
                 ) : (
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+                  <svg
+                    className="h-5 w-5"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 6h16M4 12h16M4 18h16"
+                    />
                   </svg>
                 )}
               </button>
