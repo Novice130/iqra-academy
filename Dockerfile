@@ -40,7 +40,7 @@ COPY . .
 # This needs all env vars that are used at build time (NEXT_PUBLIC_*)
 ARG NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
 ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY=""
-ARG BETTER_AUTH_SECRET=""
+ARG BETTER_AUTH_SECRET="dummy-secret-for-build-time-only-replaced-at-runtime"
 
 ENV NEXT_PUBLIC_APP_URL=${NEXT_PUBLIC_APP_URL}
 ENV NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}

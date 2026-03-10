@@ -68,67 +68,55 @@ export default function FAQ() {
   };
 
   return (
-    <section id="faq" className="py-20 lg:py-24">
-      <div className="max-w-3xl mx-auto px-6">
-        <div className="text-center mb-14">
-          <h2
-            className="text-3xl sm:text-4xl font-bold tracking-tight mb-4"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Frequently Asked Questions
-          </h2>
-          <p className="text-base" style={{ color: "var(--text-secondary)" }}>
-            Everything parents ask before enrolling
-          </p>
-        </div>
+    <div id="faq" className="space-y-4">
+      {FAQS.map((faq, i) => {
+        const isOpen = openIndex === i;
 
-        <div className="space-y-2">
-          {FAQS.map((faq, i) => (
-            <div
-              key={i}
-              className="rounded-2xl overflow-hidden transition-all"
-              style={{
-                background: openIndex === i ? "var(--bg-elevated)" : "transparent",
-                border: `1px solid ${openIndex === i ? "var(--border-hover)" : "var(--border)"}`,
-              }}
+        return (
+          <div
+            key={i}
+            className="rounded-[1.75rem] border bg-white p-2 shadow-sm transition-all duration-200"
+            style={{
+              borderColor: isOpen ? "rgba(16, 185, 129, 0.28)" : "var(--border)",
+              boxShadow: isOpen ? "0 18px 40px rgba(15, 23, 42, 0.07)" : "var(--shadow-sm)",
+            }}
+          >
+            <button
+              onClick={() => toggle(i)}
+              className="flex w-full items-start justify-between gap-6 rounded-[1.25rem] px-4 py-4 text-left sm:px-5 sm:py-5"
             >
-              <button
-                onClick={() => toggle(i)}
-                className="w-full flex items-center justify-between px-5 py-4 text-left"
+              <span
+                className="pr-2 text-base font-semibold leading-7 sm:text-lg"
+                style={{ color: "var(--text-primary)" }}
               >
-                <span
-                  className="text-[15px] font-medium pr-4"
-                  style={{ color: "var(--text-primary)" }}
-                >
-                  {faq.q}
-                </span>
-                <svg
-                  className="w-5 h-5 shrink-0 transition-transform"
-                  style={{
-                    color: "var(--text-tertiary)",
-                    transform: openIndex === i ? "rotate(45deg)" : "rotate(0deg)",
-                  }}
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
+                {faq.q}
+              </span>
+
+              <span
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 transition-all"
+                style={{
+                  color: isOpen ? "#059669" : "var(--text-tertiary)",
+                  transform: isOpen ? "rotate(45deg)" : "rotate(0deg)",
+                }}
+              >
+                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
                 </svg>
-              </button>
-              {openIndex === i && (
-                <div className="px-5 pb-5 animate-in">
-                  <p
-                    className="text-sm leading-relaxed"
-                    style={{ color: "var(--text-secondary)" }}
-                  >
+              </span>
+            </button>
+
+            {isOpen && (
+              <div className="animate-in px-4 pb-4 sm:px-5 sm:pb-5">
+                <div className="rounded-[1.25rem] bg-slate-50 px-4 py-4 sm:px-5 sm:py-5">
+                  <p className="text-sm leading-7 sm:text-[15px]" style={{ color: "var(--text-secondary)" }}>
                     {faq.a}
                   </p>
                 </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
