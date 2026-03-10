@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../services/auth_service.dart';
 import '../../config/theme.dart';
+import '../../widgets/brand_logo.dart';
 
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
@@ -65,6 +66,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 24),
+
+                const Center(
+                  child: BrandLogo(size: 72, radius: 18),
+                ),
+                const SizedBox(height: 20),
 
                 Text(
                   'Join Iqra Academy',

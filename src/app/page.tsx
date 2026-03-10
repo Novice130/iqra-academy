@@ -54,7 +54,11 @@ function Navbar() {
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
           <div className="w-9 h-9 flex items-center justify-center">
-            <img src="/logo.png" className="w-full h-full object-contain" alt="Logo" />
+            <img
+              src="/logo.svg"
+              className="w-full h-full object-contain"
+              alt="Logo"
+            />
           </div>
           <span className="text-lg font-bold text-[var(--color-charcoal)]">
             Iqra <span className="text-[var(--color-gold)]">Academy</span>
@@ -720,7 +724,11 @@ function Footer() {
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-white font-bold">
           <div className="w-8 h-8 flex items-center justify-center text-sm">
-            <img src="/logo.png" className="w-full h-full object-contain" alt="Logo" />
+            <img
+              src="/logo.svg"
+              className="w-full h-full object-contain"
+              alt="Logo"
+            />
           </div>
           Iqra <span className="text-[var(--color-gold)]">Academy</span>
         </div>

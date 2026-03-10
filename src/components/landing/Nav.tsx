@@ -28,7 +28,7 @@ export default function Nav() {
           <div className="flex h-[72px] items-center justify-between gap-4">
             <Link href="/" className="flex items-center gap-3 shrink-0">
               <img
-                src="/logo.png"
+                src="/logo.svg"
                 alt="Iqra Academy"
                 className="h-10 w-10 rounded-2xl object-cover shadow-sm"
               />

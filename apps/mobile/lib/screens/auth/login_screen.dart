@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../services/auth_service.dart';
 import '../../config/theme.dart';
+import '../../widgets/brand_logo.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -72,19 +73,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 Center(
                   child: Column(
                     children: [
-                      Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          color: IqraTheme.emerald.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Icon(
-                          Icons.menu_book_rounded,
-                          size: 40,
-                          color: IqraTheme.emerald,
-                        ),
-                      ),
+                      const BrandLogo(size: 80, radius: 20),
                       const SizedBox(height: 16),
                       Text(
                         'Iqra Academy',

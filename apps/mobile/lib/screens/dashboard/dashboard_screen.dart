@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
+import '../../widgets/brand_logo.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -23,7 +24,7 @@ class DashboardScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('🕌 Iqra Academy'),
+        title: const BrandWordmark(compact: true),
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),

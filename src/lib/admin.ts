@@ -35,12 +35,7 @@
 export const adminResources = {
   usersAndProfiles: {
     navigation: "Users & Profiles",
-    tables: [
-      "organizations",
-      "users",
-      "student_profiles",
-      "observer_emails",
-    ],
+    tables: ["organizations", "users", "student_profiles", "observer_emails"],
   },
   billing: {
     navigation: "Billing",
@@ -66,11 +61,7 @@ export const adminResources = {
   },
   content: {
     navigation: "Content & Progress",
-    tables: [
-      "lesson_content",
-      "progress_records",
-      "teacher_feedback",
-    ],
+    tables: ["lesson_content", "progress_records", "teacher_feedback"],
   },
   communication: {
     navigation: "Communication",
@@ -83,10 +74,7 @@ export const adminResources = {
   },
   system: {
     navigation: "System",
-    tables: [
-      "audit_logs",
-      "crm_sync_events",
-    ],
+    tables: ["audit_logs", "crm_sync_events"],
   },
 };
 
@@ -95,7 +83,7 @@ export const adminResources = {
  */
 export const adminBranding = {
   companyName: "Iqra Academy Admin",
-  logo: false as const, // Use text instead of logo image
+  logo: "/logo.svg",
   softwareBrothers: false, // Hide AdminJS branding
   theme: {
     colors: {

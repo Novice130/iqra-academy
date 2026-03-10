@@ -17,6 +17,10 @@ export const metadata: Metadata = {
   title: "Iqra Academy — Learn Quran Online",
   description:
     "Live 1:1 and group Quran lessons with certified teachers. Qaidah, Quran reading, and Hifz — from anywhere.",
+  icons: {
+    icon: "/logo.svg",
+    shortcut: "/logo.svg",
+  },
 };
 
 export default function RootLayout({

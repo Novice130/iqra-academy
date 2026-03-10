@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Iqra Academy logo</title>
+  <desc id="desc">Arabic word اقرأ in teal calligraphy with gold accents.</desc>
+  <defs>
+    <linearGradient id="emerald" x1="118" y1="118" x2="394" y2="394" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1B5C66" />
+      <stop offset="1" stop-color="#0B2D38" />
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#E7C57B" />
+      <stop offset="1" stop-color="#B78A38" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#0F2D34" flood-opacity="0.12" />
+    </filter>
+  </defs>
+
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="#FFFFFF" />
+
+  <g filter="url(#shadow)">
+    <text
+      x="256"
+      y="306"
+      fill="url(#emerald)"
+      text-anchor="middle"
+      direction="rtl"
+      unicode-bidi="bidi-override"
+      font-size="228"
+      font-weight="700"
+      font-family="Aldhabi, 'Noto Naskh Arabic', 'Segoe UI', Arial, sans-serif"
+      letter-spacing="0"
+    >اقرأ</text>
+
+    <g fill="url(#amber)">
+      <rect x="178" y="116" width="30" height="30" rx="6" transform="rotate(35 193 131)" />
+      <rect x="219" y="108" width="30" height="30" rx="6" transform="rotate(35 234 123)" />
+      <rect x="360" y="377" width="42" height="10" rx="5" transform="rotate(-14 381 382)" />
+    </g>
+  </g>
+</svg>
