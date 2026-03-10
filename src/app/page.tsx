@@ -53,8 +53,8 @@ function Navbar() {
     <nav className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-[var(--color-cream)]">
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
-          <div className="w-9 h-9 bg-[var(--color-sage)] rounded-xl flex items-center justify-center text-white font-bold text-sm">
-            ق
+          <div className="w-9 h-9 flex items-center justify-center">
+            <img src="/logo.png" className="w-full h-full object-contain" alt="Logo" />
           </div>
           <span className="text-lg font-bold text-[var(--color-charcoal)]">
             Iqra <span className="text-[var(--color-gold)]">Academy</span>
@@ -719,8 +719,8 @@ function Footer() {
     <footer className="bg-[var(--color-sage-dark)] text-white/80 py-10">
       <div className="max-w-6xl mx-auto px-6 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-2 text-white font-bold">
-          <div className="w-8 h-8 bg-[var(--color-sage)] rounded-lg flex items-center justify-center text-sm">
-            ق
+          <div className="w-8 h-8 flex items-center justify-center text-sm">
+            <img src="/logo.png" className="w-full h-full object-contain" alt="Logo" />
           </div>
           Iqra <span className="text-[var(--color-gold)]">Academy</span>
         </div>

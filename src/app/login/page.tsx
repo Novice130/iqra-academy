@@ -30,8 +30,7 @@ export default function LoginPage() {
       if (authError) {
         setError(authError.message || "Invalid email or password");
       } else if (data) {
-        router.push("/dashboard");
-        router.refresh(); // Force a hard navigation to update layout state
+        window.location.href = "/dashboard";
       }
     } finally {
       setLoading(false);

@@ -31,8 +31,7 @@ export default function RegisterPage() {
       if (authError) {
         setError(authError.message || "Registration failed");
       } else if (data) {
-        router.push("/dashboard");
-        router.refresh(); // Force a hard navigation to update layout state
+        window.location.href = "/dashboard";
       }
     } finally {
       setLoading(false);
