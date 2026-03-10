@@ -44,9 +44,9 @@ export default async function DashboardLayout({
           style={{ borderBottom: "1px solid var(--border)" }}
         >
           <img
-            src="/logo.svg"
+            src="/logo.png"
             alt="Iqra Academy"
-            className="w-7 h-7 rounded-md object-cover"
+            className="w-10 h-10 object-contain"
           />
           <span
             className="text-sm font-semibold"
@@ -162,9 +162,9 @@ export default async function DashboardLayout({
         >
           <div className="flex items-center gap-2">
             <img
-              src="/logo.svg"
+              src="/logo.png"
               alt="Iqra Academy"
-              className="w-7 h-7 rounded-md object-cover"
+              className="w-10 h-10 object-contain"
             />
             <span
               className="text-sm font-semibold"

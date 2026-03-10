@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 import '../config/theme.dart';
 
@@ -32,8 +31,8 @@ class BrandLogo extends StatelessWidget {
           ),
         ],
       ),
-      child: SvgPicture.asset(
-        'assets/images/logo.svg',
+      child: Image.asset(
+        'assets/images/logo.png',
         fit: BoxFit.contain,
       ),
     );

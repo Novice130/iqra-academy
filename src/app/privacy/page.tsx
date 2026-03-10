@@ -16,7 +16,7 @@ export default function PrivacyPage() {
           <Link href="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 flex items-center justify-center text-white text-sm font-bold">
               <img
-                src="/logo.svg"
+                src="/logo.png"
                 className="w-full h-full object-contain"
                 alt="Logo"
               />

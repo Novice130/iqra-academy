@@ -83,7 +83,7 @@ export const adminResources = {
  */
 export const adminBranding = {
   companyName: "Iqra Academy Admin",
-  logo: "/logo.svg",
+  logo: "/logo.png",
   softwareBrothers: false, // Hide AdminJS branding
   theme: {
     colors: {

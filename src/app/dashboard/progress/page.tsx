@@ -4,44 +4,47 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-
-// Demo data — will be replaced with real queries
-const DEMO_PROFILES = [
-  {
-    id: "1",
-    name: "Aisha",
-    track: "Noorani Qaidah",
-    level: "Lesson 8 — Connecting Letters",
-    totalLessons: 28,
-    completedLessons: 8,
-    streak: 3,
-    recentSessions: [
-      { date: "Mar 8", topic: "Lesson 7 — Heavy Letters", status: "completed" as const, notes: "Excellent reading!" },
-      { date: "Mar 6", topic: "Lesson 6 — Tanween Practice", status: "completed" as const, notes: "Needs more practice with Kasra Tanween" },
-      { date: "Mar 3", topic: "Lesson 5 — Sukoon", status: "completed" as const, notes: "Very good understanding" },
-    ],
-  },
-  {
-    id: "2",
-    name: "Yusuf",
-    track: "Quran Reading",
-    level: "Surah Al-Baqarah — Ayah 1-10",
-    totalLessons: 114,
-    completedLessons: 37,
-    streak: 5,
-    recentSessions: [
-      { date: "Mar 9", topic: "Al-Baqarah: Ayah 8-10", status: "completed" as const, notes: "Tajweed rules applied well" },
-      { date: "Mar 7", topic: "Al-Baqarah: Ayah 5-7", status: "completed" as const, notes: "Ikhfa and Idgham mastered" },
-      { date: "Mar 4", topic: "Al-Baqarah: Ayah 1-4", status: "completed" as const, notes: "Smooth reading, good pace" },
-    ],
-  },
-];
+import { db } from "@/lib/db";
+import { eq, and, desc, count } from "drizzle-orm";
+import { studentProfiles, progressRecords, lessonContent } from "@/db/schema";
+import { format } from "date-fns";
 
 export default async function ProgressPage() {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
-  const user = session?.user as { name?: string } | undefined;
-  const firstName = user?.name?.split(" ")[0] || "there";
+
+  if (!session) return null;
+
+  const user = session.user as { id: string; name?: string };
+  const firstName = user.name?.split(" ")[0] || "there";
+
+  // 1. Fetch Student Profiles with Progress and Lessons
+  const profiles = await db.query.studentProfiles.findMany({
+    where: eq(studentProfiles.userId, user.id),
+    with: {
+      progressRecords: {
+        where: eq(progressRecords.isCompleted, true),
+        with: {
+          lesson: true,
+          session: true, // For notes and date
+        },
+        orderBy: [desc(progressRecords.completedAt)],
+      },
+    },
+  });
+
+  // 2. Fetch total lesson counts per track (to calculate %)
+  const trackCounts = await db
+    .select({
+      track: lessonContent.track,
+      total: count(),
+    })
+    .from(lessonContent)
+    .groupBy(lessonContent.track);
+
+  const totalLessonsMap = Object.fromEntries(
+    trackCounts.map((tc) => [tc.track, tc.total])
+  );
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl">
@@ -55,93 +58,109 @@ export default async function ProgressPage() {
       </div>
 
       <div className="space-y-8">
-        {DEMO_PROFILES.map((profile) => {
-          const progress = Math.round((profile.completedLessons / profile.totalLessons) * 100);
-          return (
-            <div key={profile.id} className="card">
-              {/* Header */}
-              <div className="p-5" style={{ borderBottom: "1px solid var(--border)" }}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
-                      style={{ background: "var(--accent)" }}
-                    >
-                      {profile.name[0]}
-                    </div>
-                    <div>
-                      <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                        {profile.name}
-                      </div>
-                      <div className="badge badge-accent mt-1" style={{ fontSize: 10, padding: "2px 8px" }}>
-                        {profile.track}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-lg font-bold" style={{ color: "var(--accent)" }}>
-                      {profile.streak} 🔥
-                    </div>
-                    <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>week streak</div>
-                  </div>
-                </div>
-              </div>
+        {profiles.length > 0 ? (
+          profiles.map((profile) => {
+            const totalInTrack = totalLessonsMap[profile.track] || 1;
+            const completedCount = profile.progressRecords.length;
+            const progress = Math.round((completedCount / totalInTrack) * 100);
+            const latestRecord = profile.progressRecords[0];
 
-              {/* Progress */}
-              <div className="p-5" style={{ borderBottom: "1px solid var(--border)" }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
-                    {profile.level}
-                  </span>
-                  <span className="text-sm font-bold" style={{ color: "var(--accent)" }}>
-                    {progress}%
-                  </span>
-                </div>
-                <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--bg-secondary)" }}>
-                  <div
-                    className="h-full rounded-full transition-all duration-500"
-                    style={{ width: `${progress}%`, background: "var(--accent)" }}
-                  />
-                </div>
-                <div className="flex justify-between mt-1.5">
-                  <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-                    {profile.completedLessons} lessons completed
-                  </span>
-                  <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
-                    {profile.totalLessons - profile.completedLessons} remaining
-                  </span>
-                </div>
-              </div>
-
-              {/* Recent sessions */}
-              <div className="p-5">
-                <h3 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
-                  Recent Sessions
-                </h3>
-                <div className="space-y-3">
-                  {profile.recentSessions.map((s, i) => (
-                    <div key={i} className="flex items-start gap-3">
-                      <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: "var(--accent)", color: "#fff", fontSize: 10 }}>
-                        ✓
+            return (
+              <div key={profile.id} className="card">
+                {/* Header */}
+                <div className="p-5" style={{ borderBottom: "1px solid var(--border)" }}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white"
+                        style={{ background: "var(--accent)" }}
+                      >
+                        {profile.name[0]}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{s.topic}</span>
-                          <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>{s.date}</span>
+                      <div>
+                        <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
+                          {profile.name}
                         </div>
-                        {s.notes && (
-                          <p className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                            📝 {s.notes}
-                          </p>
-                        )}
+                        <div className="badge badge-accent mt-1" style={{ fontSize: 10, padding: "2px 8px" }}>
+                          {profile.track.charAt(0) + profile.track.slice(1).toLowerCase()}
+                        </div>
                       </div>
                     </div>
-                  ))}
+                    <div className="text-right">
+                      <div className="text-lg font-bold" style={{ color: "var(--accent)" }}>
+                        -- 🔥
+                      </div>
+                      <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>week streak</div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Progress */}
+                <div className="p-5" style={{ borderBottom: "1px solid var(--border)" }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
+                      {latestRecord ? `Last: ${latestRecord.lesson.title}` : "Just started..."}
+                    </span>
+                    <span className="text-sm font-bold" style={{ color: "var(--accent)" }}>
+                      {progress}%
+                    </span>
+                  </div>
+                  <div className="h-2 rounded-full overflow-hidden" style={{ background: "var(--bg-secondary)" }}>
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: `${progress}%`, background: "var(--accent)" }}
+                    />
+                  </div>
+                  <div className="flex justify-between mt-1.5">
+                    <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                      {completedCount} lessons completed
+                    </span>
+                    <span className="text-[11px]" style={{ color: "var(--text-tertiary)" }}>
+                      {Math.max(0, totalInTrack - completedCount)} remaining
+                    </span>
+                  </div>
+                </div>
+
+                {/* Recent sessions */}
+                <div className="p-5">
+                  <h3 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
+                    Recent History
+                  </h3>
+                  <div className="space-y-4">
+                    {profile.progressRecords.length > 0 ? (
+                      profile.progressRecords.slice(0, 5).map((record) => (
+                        <div key={record.id} className="flex items-start gap-3">
+                          <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: "var(--accent)", color: "#fff", fontSize: 10 }}>
+                            ✓
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center justify-between">
+                              <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{record.lesson.title}</span>
+                              <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
+                                {record.completedAt ? format(record.completedAt, "MMM d") : "Completed"}
+                              </span>
+                            </div>
+                            {record.teacherNotes && (
+                              <p className="text-xs mt-0.5 italic" style={{ color: "var(--text-secondary)" }}>
+                                &quot;{record.teacherNotes}&quot;
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>No records yet.</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          );
-        })}
+            );
+          })
+        ) : (
+          <div className="card p-10 text-center">
+            <p style={{ color: "var(--text-secondary)" }}>No student profiles found.</p>
+          </div>
+        )}
       </div>
     </div>
   );

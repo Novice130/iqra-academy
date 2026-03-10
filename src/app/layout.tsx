@@ -18,8 +18,8 @@ export const metadata: Metadata = {
   description:
     "Live 1:1 and group Quran lessons with certified teachers. Qaidah, Quran reading, and Hifz — from anywhere.",
   icons: {
-    icon: "/logo.svg",
-    shortcut: "/logo.svg",
+    icon: "/logo.png",
+    shortcut: "/logo.png",
   },
 };
 

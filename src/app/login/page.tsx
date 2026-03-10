@@ -47,9 +47,9 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2.5 mb-8">
             <img
-              src="/logo.svg"
+              src="/logo.png"
               alt="Iqra Academy"
-              className="w-9 h-9 rounded-lg object-cover"
+              className="w-12 h-12 object-contain"
             />
             <span
               className="text-lg font-semibold"

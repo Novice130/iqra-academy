@@ -1,42 +1,73 @@
-"use client";
-
-/**
- * Schedule Page — Weekly calendar view of upcoming classes
- */
-
-import { useState } from "react";
+import { headers } from "next/headers";
+import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { eq, and, gte, lte, asc } from "drizzle-orm";
+import { bookings, sessions, users as usersTable } from "@/db/schema";
+import { startOfWeek, addDays, format, isValid, parseISO } from "date-fns";
+import Link from "next/link";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const HOURS = Array.from({ length: 12 }, (_, i) => i + 8); // 8 AM to 7 PM
+const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7 AM to 8 PM
 
-// Demo data — will be replaced with API data
-const DEMO_SESSIONS = [
-  { id: 1, day: 1, hour: 16, student: "Aisha", subject: "Qaidah — Lesson 8", teacher: "Ustadh Ali", duration: 30 },
-  { id: 2, day: 3, hour: 10, student: "Yusuf", subject: "Quran Reading — Al-Baqarah", teacher: "Ustadh Ali", duration: 30 },
-  { id: 3, day: 5, hour: 14, student: "Aisha", subject: "Qaidah — Lesson 9", teacher: "Ustadh Ali", duration: 30 },
-  { id: 4, day: 6, hour: 11, student: "Yusuf", subject: "Tajweed Practice", teacher: "Ustadh Ali", duration: 30 },
-];
+interface Props {
+  searchParams: Promise<{ week?: string }>;
+}
 
-const STUDENT_COLORS: Record<string, string> = {
-  Aisha: "#5C7C6F",
-  Yusuf: "#C9A962",
-};
+export default async function SchedulePage({ searchParams }: Props) {
+  const p = await searchParams;
+  const weekOffset = parseInt(p.week || "0", 10);
+  
+  const headersList = await headers();
+  const session = await auth.api.getSession({ headers: headersList });
 
-export default function SchedulePage() {
-  const [weekOffset, setWeekOffset] = useState(0);
+  if (!session) return null;
 
+  const user = session.user as { id: string; orgId: string };
+
+  // Calculate week range
   const today = new Date();
-  const startOfWeek = new Date(today);
-  startOfWeek.setDate(today.getDate() - today.getDay() + weekOffset * 7);
+  const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 });
+  const weekStart = addDays(currentWeekStart, weekOffset * 7);
+  const weekEnd = addDays(weekStart, 6);
+  weekEnd.setHours(23, 59, 59, 999);
 
-  const weekDates = DAYS.map((_, i) => {
-    const d = new Date(startOfWeek);
-    d.setDate(startOfWeek.getDate() + i);
-    return d;
-  });
+  // 1. Fetch real bookings for this week
+  const weekBookings = await db
+    .select({
+      id: bookings.id,
+      studentName: sql<string>`(select name from student_profiles where id = ${bookings.studentProfileId})`,
+      studentId: bookings.studentProfileId,
+      track: sessions.track,
+      title: sessions.title,
+      teacherName: usersTable.name,
+      start: sessions.scheduledStart,
+      id_session: sessions.id,
+    })
+    .from(bookings)
+    .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+    .innerJoin(usersTable, eq(sessions.teacherId, usersTable.id))
+    .where(
+      and(
+        eq(bookings.userId, user.id),
+        eq(bookings.status, "CONFIRMED"),
+        gte(sessions.scheduledStart, weekStart),
+        lte(sessions.scheduledStart, weekEnd)
+      )
+    )
+    .orderBy(asc(sessions.scheduledStart));
+
+  const weekDates = DAYS.map((_, i) => addDays(weekStart, i));
 
   const isToday = (date: Date) =>
     date.toDateString() === today.toDateString();
+
+  // Color mapping based on student ID to keep colors consistent
+  const getStudentColor = (id: string | null) => {
+    if (!id) return "var(--accent)";
+    const colors = ["#5C7C6F", "#C9A962", "#7C5C64", "#5C647C", "#7C745C"];
+    const index = Math.abs(id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length;
+    return colors[index];
+  };
 
   return (
     <div className="p-6 lg:p-10 max-w-6xl">
@@ -50,38 +81,28 @@ export default function SchedulePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setWeekOffset((w) => w - 1)}
+          <Link
+            href={`/dashboard/schedule?week=${weekOffset - 1}`}
             className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
             style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
           >
             ← Prev
-          </button>
-          <button
-            onClick={() => setWeekOffset(0)}
+          </Link>
+          <Link
+            href="/dashboard/schedule?week=0"
             className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
             style={{ background: weekOffset === 0 ? "var(--accent)" : "var(--bg-elevated)", color: weekOffset === 0 ? "#fff" : "var(--text-secondary)", border: "1px solid var(--border)" }}
           >
             Today
-          </button>
-          <button
-            onClick={() => setWeekOffset((w) => w + 1)}
+          </Link>
+          <Link
+            href={`/dashboard/schedule?week=${weekOffset + 1}`}
             className="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
             style={{ background: "var(--bg-elevated)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
           >
             Next →
-          </button>
+          </Link>
         </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 mb-6">
-        {Object.entries(STUDENT_COLORS).map(([name, color]) => (
-          <div key={name} className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ background: color }} />
-            <span className="text-xs font-medium" style={{ color: "var(--text-secondary)" }}>{name}</span>
-          </div>
-        ))}
       </div>
 
       {/* Calendar grid */}
@@ -109,27 +130,33 @@ export default function SchedulePage() {
 
         {/* Time slots */}
         {HOURS.map((hour) => (
-          <div key={hour} className="grid grid-cols-8" style={{ borderBottom: "1px solid var(--border)", minHeight: 56 }}>
+          <div key={hour} className="grid grid-cols-8" style={{ borderBottom: "1px solid var(--border)", minHeight: 64 }}>
             <div className="p-2 text-xs font-medium text-right pr-3 pt-3" style={{ color: "var(--text-tertiary)", borderRight: "1px solid var(--border)" }}>
               {hour > 12 ? `${hour - 12} PM` : hour === 12 ? "12 PM" : `${hour} AM`}
             </div>
             {DAYS.map((_, dayIndex) => {
-              const session = DEMO_SESSIONS.find((s) => s.day === dayIndex && s.hour === hour);
+              // Find bookings at this hour/day
+              const bookingsAtSlot = weekBookings.filter(b => {
+                const date = b.start;
+                return date.getDay() === dayIndex && date.getHours() === hour;
+              });
+
               return (
                 <div
                   key={dayIndex}
-                  className="p-1 relative"
+                  className="p-1 relative min-h-[64px]"
                   style={{ borderRight: dayIndex < 6 ? "1px solid var(--border)" : undefined }}
                 >
-                  {session && (
+                  {bookingsAtSlot.map(booking => (
                     <div
-                      className="absolute inset-1 rounded-lg p-2 text-white text-xs cursor-pointer transition-transform hover:scale-[1.02]"
-                      style={{ background: STUDENT_COLORS[session.student] || "var(--accent)" }}
+                      key={booking.id}
+                      className="rounded-lg p-2 text-white text-[10px] cursor-pointer transition-transform hover:scale-[1.02] mb-1 leading-tight shadow-sm"
+                      style={{ background: getStudentColor(booking.studentId) }}
                     >
-                      <div className="font-semibold truncate">{session.student}</div>
-                      <div className="truncate opacity-80" style={{ fontSize: 10 }}>{session.subject}</div>
+                      <div className="font-bold truncate">{booking.studentName}</div>
+                      <div className="truncate opacity-90">{booking.track ? booking.track.toLowerCase() : "lesson"}</div>
                     </div>
-                  )}
+                  ))}
                 </div>
               );
             })}

@@ -8,12 +8,69 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
+import { db } from "@/lib/db";
+import { eq, and, gte, asc, sql } from "drizzle-orm";
+import { studentProfiles, bookings, subscriptions, sessions, users } from "@/db/schema";
+import { getQuotaStatus } from "@/lib/quota";
+import { format } from "date-fns";
 
 export default async function DashboardPage() {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
-  const user = session?.user as { name?: string } | undefined;
-  const firstName = user?.name?.split(" ")[0] || "there";
+
+  if (!session) return null;
+
+  const user = session.user as { id: string; name?: string; orgId: string };
+  const firstName = user.name?.split(" ")[0] || "there";
+
+  // 1. Fetch Student Profiles
+  const profiles = await db.query.studentProfiles.findMany({
+    where: eq(studentProfiles.userId, user.id),
+    with: {
+      progressRecords: {
+        orderBy: (pr, { desc }) => [desc(pr.createdAt)],
+        limit: 1,
+        with: { lesson: true },
+      },
+    },
+    orderBy: asc(studentProfiles.createdAt),
+  });
+
+  // 2. Fetch Next Upcoming Class
+  const upcomingBookings = await db
+    .select()
+    .from(bookings)
+    .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+    .innerJoin(users, eq(sessions.teacherId, users.id))
+    .where(
+      and(
+        eq(bookings.userId, user.id),
+        eq(bookings.status, "CONFIRMED"),
+        gte(sessions.scheduledStart, new Date())
+      )
+    )
+    .orderBy(asc(sessions.scheduledStart))
+    .limit(1);
+
+  const upcoming = upcomingBookings[0];
+
+  // 3. Get Subscription & Quota
+  const subscription = await db.query.subscriptions.findFirst({
+    where: and(eq(subscriptions.userId, user.id), eq(subscriptions.status, "ACTIVE")),
+    with: { plan: true },
+  });
+
+  const quota = subscription
+    ? await getQuotaStatus(subscription.id, user.id, user.orgId)
+    : { used: 0, totalAllowed: 0, remaining: 0 };
+
+  // 4. Calculate total sessions completed
+  const [sessionCount] = await db
+    .select({ count: sql<number>`count(*)::int` })
+    .from(bookings)
+    .where(and(eq(bookings.userId, user.id), eq(bookings.status, "COMPLETED")));
+
+  const totalCompleted = sessionCount?.count ?? 0;
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl">
@@ -28,32 +85,41 @@ export default async function DashboardPage() {
       </div>
 
       {/* Next class */}
-      <div className="card p-5 mb-8">
-        <div className="flex items-start justify-between flex-wrap gap-4">
-          <div>
-            <div className="badge badge-accent mb-3">Upcoming</div>
-            <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-              Qaidah — Lesson 8
-            </h2>
-            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Connecting Letters • Ustadh Ali Rahman • 30 min
-            </p>
-            <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>
-              Today at 4:00 PM
-            </p>
+      {upcoming ? (
+        <div className="card p-5 mb-8">
+          <div className="flex items-start justify-between flex-wrap gap-4">
+            <div>
+              <div className="badge badge-accent mb-3">Upcoming</div>
+              <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
+                {upcoming.sessions.track ? (upcoming.sessions.track.charAt(0) + upcoming.sessions.track.slice(1).toLowerCase()) : "Quran Class"} — {upcoming.sessions.title || "Lesson"}
+              </h2>
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Ustadh {upcoming.users?.name || "Teacher"} • 30 min
+              </p>
+              <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>
+                {format(upcoming.sessions.scheduledStart, "EEEE 'at' h:mm a")}
+              </p>
+            </div>
+            <Link href={`/dashboard/session/${upcoming.sessions.id}`} className="btn-primary" style={{ fontSize: "13px", padding: "10px 20px" }}>
+              Join Class
+            </Link>
           </div>
-          <Link href="/dashboard/session/demo" className="btn-primary" style={{ fontSize: "13px", padding: "10px 20px" }}>
-            Join Class
+        </div>
+      ) : (
+        <div className="card p-5 mb-8 text-center py-10">
+          <p className="text-sm" style={{ color: "var(--text-secondary)" }}>No upcoming classes scheduled.</p>
+          <Link href="/dashboard/booking" className="text-xs font-semibold mt-2 inline-block" style={{ color: "var(--accent)" }}>
+            Book a session →
           </Link>
         </div>
-      </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
-        <StatCard label="This week" value="1 of 4" sub="classes used" />
-        <StatCard label="Completed" value="12" sub="total sessions" />
-        <StatCard label="Streak" value="3 wks" sub="consecutive" />
-        <StatCard label="Next bill" value="$70" sub="Mar 15" />
+        <StatCard label="This week" value={`${quota.used} of ${quota.totalAllowed}`} sub="classes used" />
+        <StatCard label="Completed" value={String(totalCompleted)} sub="total sessions" />
+        <StatCard label="Streak" value="--" sub="coming soon" />
+        <StatCard label="Next bill" value={subscription ? `$${subscription.plan.priceInCents / 100}` : "--"} sub={subscription ? format(subscription.currentPeriodEnd, "MMM d") : "No plan"} />
       </div>
 
       {/* Quick actions */}
@@ -74,10 +140,30 @@ export default async function DashboardPage() {
         <h2 className="text-sm font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-tertiary)" }}>
           Student Profiles
         </h2>
-        <div className="grid lg:grid-cols-2 gap-4">
-          <ProfileCard name="Aisha" track="Qaidah" lesson="Lesson 8: Connecting Letters" progress={65} weekly="1/4" />
-          <ProfileCard name="Yusuf" track="Quran Reading" lesson="Surah Al-Baqarah: Ayah 1-10" progress={32} weekly="2/4" />
-        </div>
+        {profiles.length > 0 ? (
+          <div className="grid lg:grid-cols-2 gap-4">
+            {profiles.map((profile) => {
+              const latestRecord = profile.progressRecords[0];
+              return (
+                <ProfileCard
+                  key={profile.id}
+                  name={profile.name}
+                  track={profile.track.charAt(0) + profile.track.slice(1).toLowerCase()}
+                  lesson={latestRecord?.lesson?.title || "Beginning track..."}
+                  progress={latestRecord ? 50 : 0} // Placeholder for real % calculation
+                  weekly="--"
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <div className="card p-8 text-center">
+            <p className="text-sm" style={{ color: "var(--text-secondary)" }}>No student profiles created yet.</p>
+            <Link href="/dashboard/settings" className="btn-primary mt-4 inline-block" style={{ fontSize: 12 }}>
+              Add a Student
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
