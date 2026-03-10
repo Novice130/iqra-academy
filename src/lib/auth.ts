@@ -58,23 +58,27 @@ export const auth = betterAuth({
   baseURL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
 
   /**
-   * Database adapter — tells Better Auth how to read/write session data.
-   * We use Drizzle so all auth data lives alongside our business data.
-   * `usePlural: true` because our tables use plural names (users, sessions).
+   * Database adapter — explicit table mapping for Better Auth.
+   * Maps Better Auth's internal table names to our Drizzle tables.
+   * Note: `session` maps to `authSessions` (not `sessions` which is for classes!)
    */
   database: drizzleAdapter(db, {
     provider: "pg",
-    schema,
-    usePlural: true,
+    schema: {
+      user: schema.users,
+      session: schema.authSessions,
+      account: schema.accounts,
+      verification: schema.verifications,
+    },
   }),
 
   /**
    * Email + password authentication.
-   * `requireEmailVerification` is true in production to prevent fake accounts.
+   * Email verification disabled for now (until Resend domain is verified).
    */
   emailAndPassword: {
     enabled: true,
-    requireEmailVerification: process.env.NODE_ENV === "production",
+    requireEmailVerification: false,
   },
 
   /**
