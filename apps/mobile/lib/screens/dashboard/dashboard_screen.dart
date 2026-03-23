@@ -12,6 +12,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../config/theme.dart';
 import '../../services/auth_service.dart';
+import '../../providers/student_provider.dart';
 import '../../widgets/brand_logo.dart';
 
 class DashboardScreen extends ConsumerWidget {
@@ -21,6 +22,7 @@ class DashboardScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
     final userName = authState.user?['name'] ?? 'Student';
+    final studentState = ref.watch(studentProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -28,15 +30,13 @@ class DashboardScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {
-              // TODO: Notifications panel
-            },
+            onPressed: () {},
           ),
         ],
       ),
       body: RefreshIndicator(
         onRefresh: () async {
-          // TODO: Refresh dashboard data
+          await ref.read(studentProvider.notifier).refreshAll();
         },
         child: SingleChildScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -58,7 +58,17 @@ class DashboardScreen extends ConsumerWidget {
               const SizedBox(height: 24),
 
               // Next Class Card
-              _NextClassCard(),
+              if (studentState.bookings.isNotEmpty)
+                _NextClassCard(booking: studentState.bookings.first)
+              else
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Center(
+                      child: Text('No upcoming classes booked.', style: TextStyle(color: IqraTheme.slate400)),
+                    ),
+                  ),
+                ),
 
               const SizedBox(height: 16),
 
@@ -89,9 +99,7 @@ class DashboardScreen extends ConsumerWidget {
                       icon: Icons.video_call,
                       label: 'Join Now',
                       color: IqraTheme.amber,
-                      onTap: () {
-                        // TODO: Join next available session
-                      },
+                      onTap: () {},
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -100,9 +108,7 @@ class DashboardScreen extends ConsumerWidget {
                       icon: Icons.bar_chart,
                       label: 'Progress',
                       color: const Color(0xFF8B5CF6),
-                      onTap: () {
-                        // TODO: Progress screen
-                      },
+                      onTap: () {},
                     ),
                   ),
                 ],
@@ -117,13 +123,20 @@ class DashboardScreen extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
 
-              // Placeholder profiles — will be populated from API
-              _ChildProfileCard(
-                name: 'Loading...',
-                track: 'QAIDAH',
-                level: '...',
-                progress: 0.0,
-              ),
+              if (studentState.isLoading && studentState.profiles.isEmpty)
+                const Center(child: CircularProgressIndicator())
+              else if (studentState.profiles.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: Text('No active student profiles.'),
+                )
+              else
+                ...studentState.profiles.map((p) => _ChildProfileCard(
+                  name: p['name'] ?? '?',
+                  track: p['learningTrack'] ?? 'N/A',
+                  level: p['currentLevel'] ?? 'NEW',
+                  progress: ((p['completionRate'] as num?)?.toDouble() ?? 0) / 100.0,
+                )),
             ],
           ),
         ),
@@ -135,6 +148,8 @@ class DashboardScreen extends ConsumerWidget {
 // ── Sub-Widgets ──────────────────────────────────────────────────────────────
 
 class _NextClassCard extends StatelessWidget {
+  final Map<String, dynamic> booking;
+  const _NextClassCard({required this.booking});
   @override
   Widget build(BuildContext context) {
     return Card(

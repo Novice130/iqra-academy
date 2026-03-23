@@ -11,3 +11,11 @@ bios/
 *.ps1
 dist/
 coverage/
+
+**/node_modules/
+**/.next/
+**/build/
+**/.dart_tool/
+**/.flutter-plugins*
+**/.packages
+**/.pub-cache

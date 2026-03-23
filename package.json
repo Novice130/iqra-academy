@@ -1,44 +1,16 @@
 {
-  "name": "quran-lms",
-  "version": "0.1.0",
+  "name": "quran-lms-monorepo",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "eslint",
-    "db:push": "npx drizzle-kit push",
-    "db:generate": "npx drizzle-kit generate",
-    "db:migrate": "npx drizzle-kit migrate",
-    "db:seed": "npx tsx src/db/seed.ts"
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint"
   },
-  "dependencies": {
-    "@paralleldrive/cuid2": "^3.3.0",
-    "@stripe/stripe-js": "^8.7.0",
-    "better-auth": "^1.4.18",
-    "date-fns": "^4.1.0",
-    "dotenv": "^17.3.1",
-    "drizzle-orm": "^0.45.1",
-    "jose": "^6.1.3",
-    "next": "16.1.6",
-    "postgres": "^3.4.8",
-    "react": "^19.2.4",
-    "react-dom": "^19.2.4",
-    "resend": "^6.9.2",
-    "stripe": "^20.3.1",
-    "web-push": "^3.6.7",
-    "zod": "^4.3.6"
-  },
+  "workspaces": [
+    "apps/*"
+  ],
+  "packageManager": "npm@10.0.0",
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
-    "@types/node": "^25.2.3",
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19",
-    "@types/web-push": "^3.6.4",
-    "drizzle-kit": "^0.31.9",
-    "eslint": "^9.39.2",
-    "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4",
-    "typescript": "^5"
+    "turbo": "^2.1.3"
   }
 }
