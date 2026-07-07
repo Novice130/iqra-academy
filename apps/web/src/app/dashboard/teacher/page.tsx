@@ -17,7 +17,7 @@ export default async function TeacherDashboard() {
 
   if (!session) return null;
 
-  const user = session.user as { id: string; name?: string; role: string };
+  const user = session.user as unknown as { id: string; name?: string; role: string };
   const firstName = user.name?.split(" ")[0] || "Ustadh";
 
   const todayStart = startOfDay(new Date());
@@ -91,7 +91,7 @@ export default async function TeacherDashboard() {
           <div className="card">
             {todaySessions.length > 0 ? (
               todaySessions.map((s, i) => {
-                const studentNames = s.bookings.map(b => b.studentProfile.name).join(", ") || "No student";
+                const studentNames = s.bookings.map(b => b.studentProfile?.name).filter(Boolean).join(", ") || "No student";
                 const isUpcoming = s.status === "SCHEDULED";
                 return (
                   <div

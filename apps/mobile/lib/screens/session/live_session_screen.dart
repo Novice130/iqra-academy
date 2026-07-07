@@ -29,7 +29,7 @@ class LiveSessionScreen extends ConsumerStatefulWidget {
 }
 
 class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen> {
-  String? _jitsiUrl;
+  String? _sessionUrl;
   bool _isLoading = true;
   String? _error;
 
@@ -48,7 +48,7 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen> {
 
       if (response.statusCode == 200) {
         setState(() {
-          _jitsiUrl = response.data['jitsiUrl'];
+          _sessionUrl = response.data['joinUrl'];
           _isLoading = false;
         });
       } else {
@@ -164,9 +164,9 @@ class _LiveSessionScreenState extends ConsumerState<LiveSessionScreen> {
       );
     }
 
-    if (_jitsiUrl != null) {
+    if (_sessionUrl != null) {
       return InAppWebView(
-        initialUrlRequest: URLRequest(url: WebUri(_jitsiUrl!)),
+        initialUrlRequest: URLRequest(url: WebUri(_sessionUrl!)),
         initialSettings: InAppWebViewSettings(
           mediaPlaybackRequiresUserGesture: false,
           allowsInlineMediaPlayback: true,

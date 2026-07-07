@@ -2,7 +2,7 @@
 
 > A production-ready, multi-tenant platform for teaching Qaidah, Quran reading, and Hifz (memorization) via live 1:1, group, and webinar sessions.
 
-**Built with**: Next.js 16 · TypeScript · Drizzle ORM · Neon Postgres · Better Auth · Stripe · Cal.com · Jitsi · Resend · Flutter
+**Built with**: Next.js 16 · TypeScript · Drizzle ORM · Neon Postgres · Better Auth · Stripe · Cal.com · LiveKit · Resend · Flutter
 
 ---
 
@@ -15,13 +15,13 @@
 ├─────────────────────────────────────────────────────────────┤
 │                     MOBILE APP                              │
 │  Flutter (Dart) → iOS + Android                             │
-│  Riverpod state · Dio HTTP · Jitsi WebView                  │
+│  Riverpod state · Dio HTTP · LiveKit WebView                │
 ├─────────────────────────────────────────────────────────────┤
 │                  API LAYER (23+ routes)                      │
 │  ├─ /api/auth/[...all]  → Better Auth + Google OAuth        │
 │  ├─ /api/students/*     → Profiles, Bookings, Progress     │
 │  ├─ /api/teachers/*     → Sessions, Feedback, Call Now      │
-│  ├─ /api/sessions/*     → Join (Jitsi JWT), Extend          │
+│  ├─ /api/sessions/*     → Join (LiveKit Token), Extend      │
 │  ├─ /api/chat/*         → Rooms, Messages, Moderation       │
 │  ├─ /api/admin/*        → Users, Refunds, Exports, Admin UI│
 │  ├─ /api/super/*        → Org Management                   │
@@ -34,7 +34,7 @@
 │  ├─ admin.ts    → AdminJS panel config (25 tables)          │
 │  ├─ audit.ts    → Append-only audit logging                 │
 │  ├─ stripe.ts   → Manual invoice subscriptions             │
-│  ├─ jitsi.ts    → JWT room generation                      │
+│  ├─ livekit.ts  → Token room generation                    │
 │  ├─ email.ts    → Transactional emails (Resend)            │
 │  └─ push.ts     → Web Push notifications (VAPID)           │
 ├─────────────────────────────────────────────────────────────┤
@@ -46,7 +46,7 @@
 
        EXTERNAL SERVICES
   ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-  │  Stripe  │ │  Cal.com │ │  Jitsi   │ │  Resend  │ │  Twenty  │
+  │  Stripe  │ │  Cal.com │ │  LiveKit │ │  Resend  │ │  Twenty  │
   │ Payments │ │Scheduling│ │  Video   │ │  Email   │ │   CRM    │
   └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
@@ -63,7 +63,7 @@
 | **Session Types** | 1:1, Group (3), Siblings (3 kids), Webinar (20 muted) |
 | **Pricing** | Free, Individual ($70), Group ($50), Siblings ($100/3 kids) |
 | **Per-child Quotas** | Siblings plan: 4 classes/week **per child**, not shared |
-| **Live Classes** | Jitsi JWT rooms + teacher moderator controls |
+| **Live Classes** | LiveKit secure rooms + teacher moderator controls |
 | **Google Sign-In** | One-tap login via Better Auth social provider |
 | **Admin Panel** | Built-in at `/admin` — CRUD for all 25 tables |
 | **RLS Security** | Postgres Row-Level Security as defense-in-depth |
@@ -73,7 +73,7 @@
 | **Audio Feedback** | Teachers record Tajweed pronunciation feedback |
 | **Observer Emails** | Weekly digest to family members |
 | **Impersonation** | Admins debug student issues as that user |
-| **Mobile App** | Flutter (iOS + Android) with Jitsi WebView |
+| **Mobile App** | Flutter (iOS + Android) with LiveKit WebView |
 | **Audit Logs** | Every sensitive action with actor, IP, timestamp |
 
 ---
@@ -99,7 +99,7 @@ quran-lms/
 │       ├── crm.ts                     # Twenty CRM integration
 │       ├── quota.ts                   # Per-child ledger quota system
 │       ├── stripe.ts                  # Stripe payment helpers
-│       ├── jitsi.ts                   # JWT room generation
+│       ├── livekit.ts                 # LiveKit token helper
 │       ├── audit.ts                   # Append-only audit logging
 │       ├── email.ts                   # Transactional emails (Resend)
 │       ├── push.ts                    # Web Push (VAPID)
@@ -127,14 +127,14 @@ quran-lms/
 │           ├── booking/
 │           │   └── booking_screen.dart    # Track, date, slot selection
 │           ├── session/
-│           │   └── live_session_screen.dart  # Jitsi WebView
+│           │   └── live_session_screen.dart  # LiveKit WebView
 │           └── settings/
 │               └── settings_screen.dart
 │
 ├── docs/                              # ── Integration Guides ──
 │   ├── integration-stripe.md
 │   ├── integration-calcom.md
-│   ├── integration-jitsi.md
+│   ├── integration-livekit.md
 │   └── deployment-runbook.md
 ├── .env.example                       # All env vars with setup instructions
 ├── Dockerfile
@@ -223,7 +223,7 @@ Payment default: **Manual invoice** (Stripe `send_invoice`, 7-day due).
 Additional security:
 - **Webhook verification**: Stripe signature + Cal.com HMAC-SHA256
 - **Audit logging**: Every sensitive action → append-only table
-- **JWT scoping**: Jitsi tokens are room-specific and time-limited (2h)
+- **Token scoping**: LiveKit tokens are room-specific and time-limited (2h)
 - **Input validation**: Zod schemas on every API route
 - **Secure token storage**: Mobile app uses Keychain (iOS) / Keystore (Android)
 
@@ -272,7 +272,7 @@ npm run db:seed      # Seed database with test data
 | **CRM** | Twenty (open-source) | Self-hosted, Postgres-based |
 | **Payments** | Stripe | Manual invoice support |
 | **Scheduling** | Cal.com (self-hosted) | Open-source scheduling engine |
-| **Video** | Jitsi (self-hosted) | JWT-secured video rooms |
+| **Video** | LiveKit (self-hosted) | Token-secured video rooms |
 | **Email** | Resend | Developer-first transactional email |
 | **Notifications** | Web Push (VAPID) | No app install needed |
 | **Deploy** | Docker + Dockploy | VPS-friendly, multi-project |
@@ -289,7 +289,7 @@ The Flutter app lives in `apps/mobile/` and communicates with the same Next.js A
 | **Register** | New account creation |
 | **Dashboard** | Next class, weekly quota, child profiles, quick actions |
 | **Booking** | Track selector, child picker, date carousel, time slots |
-| **Live Session** | Jitsi video call via InAppWebView with mic/camera permissions |
+| **Live Session** | LiveKit video call via InAppWebView with mic/camera permissions |
 | **Settings** | Profile, observer emails, subscription, notifications, sign out |
 
 **State management**: Riverpod (similar to React Context + hooks)
@@ -334,7 +334,7 @@ Key files to study:
 - [ ] App Store / Play Store submission
 
 ### Infrastructure
-- [x] Docker Compose for all 4 services (Next.js, Jitsi, Cal.com, Twenty CRM)
+- [x] Docker Compose for all services (Next.js, LiveKit, Redis, Cal.com, Twenty CRM)
 - [x] Dockploy deployment guide with step-by-step instructions
 - [ ] Create dedicated Postgres `app_user` role (not superuser) for RLS enforcement
 - [ ] Set up CI/CD pipeline
@@ -350,7 +350,7 @@ Key files to study:
 | Service | Subdomain | Docker Image |
 |---------|-----------|-------------|
 | Next.js App | `quran.learnnovice.com` | Built from `Dockerfile` |
-| Jitsi Meet | `meet.learnnovice.com` | `jitsi/web:stable-9823` |
+| LiveKit Server | `meet.learnnovice.com` | `livekit/livekit-server:latest` |
 | Cal.com | `cal.learnnovice.com` | `calcom/cal.com:latest` |
 | Twenty CRM | `crm.learnnovice.com` | `twentycrm/twenty:latest` |
 

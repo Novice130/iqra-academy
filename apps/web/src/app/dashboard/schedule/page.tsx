@@ -1,7 +1,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { eq, and, gte, lte, asc } from "drizzle-orm";
+import { eq, and, gte, lte, asc, sql } from "drizzle-orm";
 import { bookings, sessions, users as usersTable } from "@/db/schema";
 import { startOfWeek, addDays, format, isValid, parseISO } from "date-fns";
 import Link from "next/link";
@@ -22,7 +22,7 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   if (!session) return null;
 
-  const user = session.user as { id: string; orgId: string };
+  const user = session.user as unknown as { id: string; orgId: string };
 
   // Calculate week range
   const today = new Date();

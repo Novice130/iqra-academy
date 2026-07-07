@@ -68,7 +68,7 @@ export default async function DashboardPage() {
     });
 
     const quota = subscription
-      ? await getQuotaStatus(subscription.id, user.id, user.orgId)
+      ? await getQuotaStatus(subscription.id, user.id, ctx.orgId)
       : { used: 0, totalAllowed: 0, remaining: 0 };
 
     // 4. Calculate total sessions completed

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useSession } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 import { format } from "date-fns";
 
 interface Message {
@@ -13,7 +13,7 @@ interface Message {
 }
 
 export default function ChatPage() {
-  const { data: session } = useSession();
+  const { data: session } = authClient.useSession();
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);

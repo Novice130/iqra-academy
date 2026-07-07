@@ -23,7 +23,7 @@ export default async function TeacherStudentsPage() {
     .select({
       id: studentProfiles.id,
       name: studentProfiles.name,
-      age: studentProfiles.age,
+      dateOfBirth: studentProfiles.dateOfBirth,
       track: studentProfiles.track,
       lastClass: sql<Date>`max(${sessions.scheduledStart})`,
     })
@@ -73,6 +73,9 @@ export default async function TeacherStudentsPage() {
 
             const totalInTrack = totalLessonsMap[student.track] || 1;
             const progress = Math.round((completed[0].count / totalInTrack) * 100);
+            const age = student.dateOfBirth
+              ? new Date().getFullYear() - new Date(student.dateOfBirth).getFullYear()
+              : "N/A";
 
             return (
               <div key={student.id} className="card">
@@ -85,7 +88,7 @@ export default async function TeacherStudentsPage() {
                       <div>
                         <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{student.name}</div>
                         <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                          Age {student.age} • {student.track.toLowerCase()}
+                          Age {age} • {student.track.toLowerCase()}
                         </div>
                       </div>
                     </div>

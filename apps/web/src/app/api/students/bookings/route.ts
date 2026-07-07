@@ -8,6 +8,17 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { requireRole } from "@/lib/rbac";
+import { withRLS } from "@/lib/db";
+import { bookings, subscriptions, sessions } from "@/db/schema";
+import { and, eq, desc } from "drizzle-orm";
+import { getQuotaStatus, consumeQuota } from "@/lib/quota";
+import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
+import { logAudit, getClientIp } from "@/lib/audit";
+
+const bookingSchema = z.object({
+  sessionId: z.string().min(1),
+});
 /** GET /api/students/bookings — returns bookings + weekly quota */
 export async function GET(request: NextRequest) {
   try {

@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
-import { generateJitsiJwt, generateRoomName, buildJitsiUrl } from "@/lib/jitsi";
+import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
 
 export async function GET(
   request: NextRequest,
@@ -43,7 +43,7 @@ export async function GET(
       where: eq(users.id, ctx.userId),
     });
 
-    const jwt = await generateJitsiJwt({
+    const token = await generateLiveKitToken({
       roomName,
       userName: user?.name || "Participant",
       userEmail: user?.email || "",
@@ -51,17 +51,19 @@ export async function GET(
     });
 
     // Update room name on session if not set
-    if (!session.jitsiRoomName) {
+    if (!session.videoRoomName) {
       await db
         .update(sessions)
-        .set({ jitsiRoomName: roomName })
+        .set({ videoRoomName: roomName })
         .where(eq(sessions.id, sessionId));
     }
 
     return NextResponse.json({
       roomName,
-      jwt,
-      joinUrl: buildJitsiUrl(roomName, jwt),
+      token,
+      serverUrl: process.env.LIVEKIT_URL || "wss://meet.learnnovice.com",
+      userName: user?.name || "Participant",
+      joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://quran.learnnovice.com"}/dashboard/session/${sessionId}`,
       isModerator: isTeacher,
     });
   } catch (error) {

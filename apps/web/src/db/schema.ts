@@ -567,9 +567,8 @@ export const sessions = pgTable(
      */
     consumesQuota: boolean("consumes_quota").notNull().default(true),
 
-    // Jitsi integration
-    jitsiRoomName: text("jitsi_room_name").unique(),
-    jitsiJwt: text("jitsi_jwt"),
+    // Video integration (LiveKit)
+    videoRoomName: text("video_room_name").unique(),
 
     // Recording — teacher decides per session
     recordingUrl: text("recording_url"),

@@ -13,7 +13,7 @@ import { sessions, users } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError, NotFoundError } from "@/lib/errors";
 import { sendCallNowNotification } from "@/lib/push";
-import { generateJitsiJwt, generateRoomName, buildJitsiUrl } from "@/lib/jitsi";
+import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
 
 const callNowSchema = z.object({
   sessionId: z.string().min(1),
@@ -43,15 +43,15 @@ export async function POST(request: NextRequest) {
     });
     if (!student) throw new NotFoundError("Student");
 
-    // Generate Jitsi room for the session
+    // Generate LiveKit room token for the session
     const roomName = generateRoomName(sessionId);
-    const studentJwt = await generateJitsiJwt({
+    const studentToken = await generateLiveKitToken({
       roomName,
       userName: student.name,
       userEmail: student.email,
       isModerator: false,
     });
-    const joinUrl = buildJitsiUrl(roomName, studentJwt);
+    const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://quran.learnnovice.com"}/dashboard/session/${sessionId}`;
 
     // Update session with room info and set to IN_PROGRESS
     const teacher = await db.query.users.findFirst({
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
     await db
       .update(sessions)
       .set({
-        jitsiRoomName: roomName,
+        videoRoomName: roomName,
         status: "IN_PROGRESS",
         actualStart: new Date(),
       })

@@ -15,7 +15,7 @@ export default async function BillingPage() {
 
   if (!session) return null;
 
-  const user = session.user as { id: string; orgId: string };
+  const user = session.user as unknown as { id: string; orgId: string };
 
   // 1. Fetch All Available Plans
   const availablePlans = await db.query.plans.findMany({

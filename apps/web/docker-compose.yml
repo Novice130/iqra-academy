@@ -63,10 +63,10 @@ services:
       - CALCOM_API_URL=https://cal.learnnovice.com
       - CALCOM_WEBHOOK_SECRET=${CALCOM_WEBHOOK_SECRET}
 
-      # ── Jitsi ──
-      - JITSI_DOMAIN=meet.learnnovice.com
-      - JITSI_APP_ID=${JITSI_APP_ID}
-      - JITSI_JWT_SECRET=${JITSI_JWT_SECRET}
+      # ── LiveKit ──
+      - LIVEKIT_URL=wss://meet.learnnovice.com
+      - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
 
       # ── Email (Resend) ──
       - RESEND_API_KEY=${RESEND_API_KEY}
@@ -110,93 +110,21 @@ services:
 # scale the video bridge (jvb) independently when you have many calls.
 # ============================================================================
 
-  jitsi-web:
-    image: jitsi/web:stable-9823
-    ports:
-      - "8443:443"
-    environment:
-      - ENABLE_AUTH=1
-      - AUTH_TYPE=jwt
-      - JWT_APP_ID=${JITSI_APP_ID}
-      - JWT_APP_SECRET=${JITSI_JWT_SECRET}
-      - JWT_ACCEPTED_ISSUERS=iqra-academy
-      - JWT_ACCEPTED_AUDIENCES=jitsi
-      - ENABLE_RECORDING=0
-      - ENABLE_LIVESTREAMING=0
-      - ENABLE_TRANSCRIPTIONS=0
-      - PUBLIC_URL=https://meet.learnnovice.com
-      - TZ=UTC
-      - XMPP_DOMAIN=meet.jitsi
-      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
-      - XMPP_BOSH_URL_BASE=http://jitsi-prosody:5280
-      - XMPP_MUC_DOMAIN=muc.meet.jitsi
+  livekit:
+    image: livekit/livekit-server:latest
+    network_mode: host
     volumes:
-      - jitsi-web-config:/config
+      - ./livekit.yaml:/etc/livekit.yaml
+    command: --config /etc/livekit.yaml
     restart: unless-stopped
-    depends_on:
-      - jitsi-prosody
-    networks:
-      - iqra-network
 
-  jitsi-prosody:
-    image: jitsi/prosody:stable-9823
-    environment:
-      - ENABLE_AUTH=1
-      - AUTH_TYPE=jwt
-      - JWT_APP_ID=${JITSI_APP_ID}
-      - JWT_APP_SECRET=${JITSI_JWT_SECRET}
-      - JWT_ACCEPTED_ISSUERS=iqra-academy
-      - JWT_ACCEPTED_AUDIENCES=jitsi
-      - XMPP_DOMAIN=meet.jitsi
-      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
-      - XMPP_MUC_DOMAIN=muc.meet.jitsi
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
-      - TZ=UTC
-    volumes:
-      - jitsi-prosody-config:/config
-      - jitsi-prosody-plugins:/prosody-plugins-custom
-    restart: unless-stopped
-    networks:
-      - iqra-network
-
-  jitsi-jicofo:
-    image: jitsi/jicofo:stable-9823
-    environment:
-      - ENABLE_AUTH=1
-      - AUTH_TYPE=jwt
-      - XMPP_DOMAIN=meet.jitsi
-      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
-      - XMPP_MUC_DOMAIN=muc.meet.jitsi
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
-      - XMPP_SERVER=jitsi-prosody
-      - JICOFO_AUTH_USER=focus
-      - JICOFO_AUTH_PASSWORD=${JICOFO_AUTH_PASSWORD}
-      - TZ=UTC
-    restart: unless-stopped
-    depends_on:
-      - jitsi-prosody
-    networks:
-      - iqra-network
-
-  jitsi-jvb:
-    image: jitsi/jvb:stable-9823
+  redis:
+    image: redis:7-alpine
     ports:
-      - "10000:10000/udp"   # Video stream port (UDP for low latency)
-      - "8080:8080"          # Health/stats API
-    environment:
-      - XMPP_DOMAIN=meet.jitsi
-      - XMPP_AUTH_DOMAIN=auth.meet.jitsi
-      - XMPP_SERVER=jitsi-prosody
-      - XMPP_INTERNAL_MUC_DOMAIN=internal-muc.meet.jitsi
-      - JVB_AUTH_USER=jvb
-      - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
-      - JVB_PORT=10000
-      - JVB_STUN_SERVERS=meet-jit-si-turnrelay.jitsi.net:443
-      - PUBLIC_URL=https://meet.learnnovice.com
-      - TZ=UTC
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
     restart: unless-stopped
-    depends_on:
-      - jitsi-prosody
     networks:
       - iqra-network
 
@@ -302,12 +230,8 @@ services:
 # ============================================================================
 
 volumes:
-  jitsi-web-config:
-    name: iqra-jitsi-web-config
-  jitsi-prosody-config:
-    name: iqra-jitsi-prosody-config
-  jitsi-prosody-plugins:
-    name: iqra-jitsi-prosody-plugins
+  redis-data:
+    name: iqra-redis-data
   twenty-db-data:
     name: iqra-twenty-db-data
 

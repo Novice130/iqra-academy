@@ -119,7 +119,7 @@ export async function sendPushNotification(
  * 1. Teacher clicks "Call Now" for a student
  * 2. We look up the student's push subscriptions
  * 3. We send a push notification to ALL their devices
- * 4. Student clicks the notification → opens the Jitsi room
+ * 4. Student clicks the notification → opens the video room
  *
  * WHY ALL DEVICES? The student might be on their phone but the push
  * subscription could be on their laptop. We blast all subscriptions
@@ -128,7 +128,7 @@ export async function sendPushNotification(
  * @param subscriptions - All push subscriptions for the student
  * @param teacherName - Teacher's name (shown in notification)
  * @param sessionTitle - Session title
- * @param joinUrl - URL to join the Jitsi room
+ * @param joinUrl - URL to join the video room
  * @returns Number of successful deliveries
  */
 export async function sendCallNowNotification(

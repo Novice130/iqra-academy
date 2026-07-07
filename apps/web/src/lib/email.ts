@@ -107,7 +107,7 @@ export async function sendWelcomeEmail(
  * @param sessionTitle - Session title (e.g., "Qaida Lesson 5")
  * @param teacherName - Teacher's name
  * @param startTime - Session start time (formatted for display)
- * @param joinUrl - URL to join the Jitsi room
+ * @param joinUrl - URL to join the video room
  */
 export async function sendSessionReminder(
   to: string,
