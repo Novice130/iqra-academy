@@ -30,9 +30,27 @@ function patchStyledJsx() {
   return patched;
 }
 
-// Step 1: Run full opennext build (includes next build + bundling)
-console.log("🔨 Forcing @noble/ciphers to 2.1.1 to fix ESM subpath export bug...");
-execSync("npm install @noble/ciphers@2.1.1 --no-save", { stdio: "inherit", cwd: root });
+// Step 1: Patch @noble/ciphers directly
+console.log("🔨 Patching @noble/ciphers to fix ESM subpath export bug...");
+try {
+  // Cloudflare runs this in apps/web, so root is apps/web. The package is hoisted to the repo root.
+  const repoRoot = path.join(root, "..", "..");
+  const ciphersPkgPath = path.join(repoRoot, "node_modules", "@noble", "ciphers", "package.json");
+  if (fs.existsSync(ciphersPkgPath)) {
+    const pkg = JSON.parse(fs.readFileSync(ciphersPkgPath, "utf8"));
+    if (pkg.exports && !pkg.exports["./utils"]) {
+      pkg.exports["./utils"] = pkg.exports["./utils.js"] || "./utils.js";
+      fs.writeFileSync(ciphersPkgPath, JSON.stringify(pkg, null, 2));
+      console.log("✅ Successfully patched @noble/ciphers/package.json exports!");
+    } else {
+      console.log("ℹ️ @noble/ciphers already has ./utils export or no exports field.");
+    }
+  } else {
+    console.log("⚠️ @noble/ciphers package.json not found at " + ciphersPkgPath);
+  }
+} catch (err) {
+  console.error("❌ Failed to patch @noble/ciphers:", err.message);
+}
 
 console.log("🔨 Running @opennextjs/cloudflare build...");
 const buildResult = spawnSync(
