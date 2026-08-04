@@ -13,6 +13,7 @@ import { eq, and, gte, asc, sql } from "drizzle-orm";
 import { studentProfiles, bookings, subscriptions, sessions, users } from "@/db/schema";
 import { getQuotaStatus } from "@/lib/quota";
 import { format } from "date-fns";
+import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
   const headersList = await headers();
@@ -21,6 +22,11 @@ export default async function DashboardPage() {
   if (!session) return null;
 
   const user = session.user as { id: string; name?: string; orgId?: string; role?: string };
+  
+  if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "")) {
+    redirect("/dashboard/teacher");
+  }
+
   const firstName = user.name?.split(" ")[0] || "there";
 
   const ctx = {

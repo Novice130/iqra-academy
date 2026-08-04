@@ -84,7 +84,7 @@ export default async function DashboardLayout({
           <SidebarItem href="/dashboard/settings" label="Settings" />
           <SidebarItem href="/dashboard/billing" label="Billing" />
 
-          {user.role === "TEACHER" && (
+          {["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "") && (
             <>
               <div className="pt-5 pb-1.5 px-3">
                 <div

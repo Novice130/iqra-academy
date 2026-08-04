@@ -8,10 +8,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { sessions, users } from "@/db/schema";
+import { sessions, users, bookings, studentProfiles } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { createId } from "@paralleldrive/cuid2";
 
 export async function GET(
   request: NextRequest,
@@ -30,19 +31,40 @@ export async function GET(
 
     if (!session) throw new NotFoundError("Session");
 
-    // Verify user has access (teacher or booked student)
-    const isTeacher = session.teacherId === ctx.userId;
-    const isStudent = session.bookings.some((b) => b.userId === ctx.userId);
+    const user = await db.query.users.findFirst({
+      where: eq(users.id, ctx.userId),
+    });
+    if (!user) throw new NotFoundError("User");
+
+    const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role);
+    const isTeacher = session.teacherId === ctx.userId || isAdmin;
+    let isStudent = session.bookings.some((b: any) => b.userId === ctx.userId);
+    const isInstantMeeting = session.consumesQuota === false && session.title?.startsWith("Instant Meeting");
+
+    // Auto-book students if it's an instant meeting
+    if (isInstantMeeting && !isStudent && !isTeacher) {
+      const profiles = await db.query.studentProfiles.findMany({
+        where: eq(studentProfiles.userId, ctx.userId)
+      });
+      
+      if (profiles.length > 0) {
+         await db.insert(bookings).values({
+           id: createId(),
+           orgId: session.orgId,
+           userId: ctx.userId,
+           studentProfileId: profiles[0].id,
+           sessionId: session.id,
+           status: "CONFIRMED",
+         });
+         isStudent = true;
+      }
+    }
 
     if (!isTeacher && !isStudent) {
       throw new ForbiddenError("You are not part of this session.");
     }
 
     const roomName = generateRoomName(sessionId);
-    const user = await db.query.users.findFirst({
-      where: eq(users.id, ctx.userId),
-    });
-
     const token = await generateLiveKitToken({
       roomName,
       userName: user?.name || "Participant",
