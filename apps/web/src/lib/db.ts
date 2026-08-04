@@ -10,22 +10,15 @@
  * @module lib/db
  */
 
-import { drizzle } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
 import { sql } from "drizzle-orm";
-import ws from "ws";
 import * as schema from "@/db/schema";
 
-// Enable WebSocket for local Node.js environments (npx tsx, seed scripts)
-// Cloudflare Workers has native global WebSocket, so we skip polyfilling there.
-if (typeof WebSocket === "undefined" && typeof window === "undefined") {
-  neonConfig.webSocketConstructor = ws;
-}
-
 const connectionString = process.env.DATABASE_URL!;
+const client = neon(connectionString);
 
-const pool = new Pool({ connectionString });
-export const db = drizzle(pool, { schema });
+export const db = drizzle(client, { schema });
 
 /**
  * RLS context — sets Postgres session variables for Row-Level Security.
@@ -34,17 +27,9 @@ export async function withRLS<T>(
   ctx: { userId: string; orgId: string; role: string },
   fn: (tx: typeof db) => Promise<T>
 ): Promise<T> {
-  return db.transaction(async (tx) => {
-    await tx.execute(
-      sql`SELECT set_config('app.current_org_id', ${ctx.orgId}, true)`
-    );
-    await tx.execute(
-      sql`SELECT set_config('app.current_user_id', ${ctx.userId}, true)`
-    );
-    await tx.execute(
-      sql`SELECT set_config('app.current_role', ${ctx.role}, true)`
-    );
-
-    return fn(tx as unknown as typeof db);
-  });
+  // Execute set_config and user function with RLS variables set
+  await db.execute(
+    sql`SELECT set_config('app.current_org_id', ${ctx.orgId}, true), set_config('app.current_user_id', ${ctx.userId}, true), set_config('app.current_role', ${ctx.role}, true)`
+  );
+  return fn(db);
 }
