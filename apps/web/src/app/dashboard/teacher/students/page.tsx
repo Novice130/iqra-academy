@@ -1,14 +1,15 @@
 /**
- * Teacher Students Page — View and manage assigned students
+ * Teacher & Admin Students Page — View and manage assigned students
  */
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db } from "@/lib/db";
-import { eq, and, sql, count, desc } from "drizzle-orm";
-import { bookings, sessions, studentProfiles, progressRecords, lessonContent } from "@/db/schema";
+import { eq, and, sql, count, desc, inArray } from "drizzle-orm";
+import { bookings, sessions, studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
 import { format } from "date-fns";
 import Link from "next/link";
+import AssignStudentModal from "./AssignStudentModal";
 
 export default async function TeacherStudentsPage() {
   const headersList = await headers();
@@ -16,22 +17,58 @@ export default async function TeacherStudentsPage() {
 
   if (!session) return null;
 
-  const user = session.user as { id: string };
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, session.user.id),
+    columns: { id: true, role: true },
+  });
 
-  // 1. Fetch unique students taught by this teacher
-  const studentsResult = await db
-    .select({
-      id: studentProfiles.id,
-      name: studentProfiles.name,
-      dateOfBirth: studentProfiles.dateOfBirth,
-      track: studentProfiles.track,
-      lastClass: sql<Date>`max(${sessions.scheduledStart})`,
-    })
-    .from(studentProfiles)
-    .innerJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
-    .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-    .where(eq(sessions.teacherId, user.id))
-    .groupBy(studentProfiles.id);
+  const role = dbUser?.role || "STUDENT";
+  const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(role);
+
+  // 1. Fetch Students
+  let studentsResult: any[] = [];
+  if (isAdmin) {
+    // Admin sees ALL student profiles in org
+    studentsResult = await db
+      .select({
+        id: studentProfiles.id,
+        name: studentProfiles.name,
+        dateOfBirth: studentProfiles.dateOfBirth,
+        track: studentProfiles.track,
+        lastClass: sql<Date>`max(${sessions.scheduledStart})`,
+      })
+      .from(studentProfiles)
+      .leftJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
+      .leftJoin(sessions, eq(bookings.sessionId, sessions.id))
+      .groupBy(studentProfiles.id);
+  } else {
+    // Teacher sees students assigned to them
+    studentsResult = await db
+      .select({
+        id: studentProfiles.id,
+        name: studentProfiles.name,
+        dateOfBirth: studentProfiles.dateOfBirth,
+        track: studentProfiles.track,
+        lastClass: sql<Date>`max(${sessions.scheduledStart})`,
+      })
+      .from(studentProfiles)
+      .innerJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
+      .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+      .where(eq(sessions.teacherId, dbUser?.id || session.user.id))
+      .groupBy(studentProfiles.id);
+  }
+
+  // Fetch all teachers and all students for the admin modal
+  const allStudentProfiles = isAdmin
+    ? await db.query.studentProfiles.findMany({ columns: { id: true, name: true, track: true } })
+    : [];
+
+  const allTeachers = isAdmin
+    ? await db.query.users.findMany({
+        where: inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+        columns: { id: true, name: true, email: true },
+      })
+    : [];
 
   // 2. Fetch total lesson counts per track
   const trackCounts = await db
@@ -48,18 +85,24 @@ export default async function TeacherStudentsPage() {
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
-            My Students
+            {isAdmin ? "All Registered Students" : "My Students"}
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
             {studentsResult.length} active students
           </p>
         </div>
+
+        {isAdmin && (
+          <AssignStudentModal
+            students={allStudentProfiles}
+            teachers={allTeachers}
+          />
+        )}
       </div>
 
       <div className="space-y-4">
         {studentsResult.length > 0 ? (
           await Promise.all(studentsResult.map(async (student) => {
-            // Fetch progress for this specific student
             const completed = await db
               .select({ count: count() })
               .from(progressRecords)
@@ -72,7 +115,7 @@ export default async function TeacherStudentsPage() {
             });
 
             const totalInTrack = totalLessonsMap[student.track] || 1;
-            const progress = Math.round((completed[0].count / totalInTrack) * 100);
+            const progress = Math.round((completed[0]?.count || 0 / totalInTrack) * 100);
             const age = student.dateOfBirth
               ? new Date().getFullYear() - new Date(student.dateOfBirth).getFullYear()
               : "N/A";
@@ -83,7 +126,7 @@ export default async function TeacherStudentsPage() {
                   <div className="flex items-start justify-between mb-4">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ background: "var(--accent)" }}>
-                        {student.name.split(" ").map((n) => n[0]).join("")}
+                        {student.name.split(" ").map((n: string) => n[0]).join("")}
                       </div>
                       <div>
                         <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{student.name}</div>
@@ -94,7 +137,7 @@ export default async function TeacherStudentsPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                        Last Class: {student.lastClass ? format(student.lastClass, "MMM d") : "Never"}
+                        Last Class: {student.lastClass ? format(new Date(student.lastClass), "MMM d") : "Never"}
                       </span>
                     </div>
                   </div>
@@ -127,7 +170,7 @@ export default async function TeacherStudentsPage() {
           }))
         ) : (
           <div className="card p-10 text-center">
-            <p style={{ color: "var(--text-tertiary)" }}>You haven&apos;t been assigned any students yet.</p>
+            <p style={{ color: "var(--text-tertiary)" }}>No students found.</p>
           </div>
         )}
       </div>

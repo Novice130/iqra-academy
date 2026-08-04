@@ -21,18 +21,25 @@ export default async function DashboardPage() {
 
   if (!session) return null;
 
-  const user = session.user as { id: string; name?: string; orgId?: string; role?: string };
+  const user = session.user;
+
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, user.id),
+    columns: { role: true, orgId: true },
+  });
+
+  const role = dbUser?.role || "STUDENT";
   
-  if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "")) {
+  if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role)) {
     redirect("/dashboard/teacher");
   }
 
-  const firstName = user.name?.split(" ")[0] || "there";
+  const firstName = session.user.name?.split(" ")[0] || "there";
 
   const ctx = {
-    userId: user.id,
-    orgId: user.orgId || '',
-    role: user.role || 'STUDENT',
+    userId: session.user.id,
+    orgId: dbUser?.orgId || '',
+    role: role,
   };
 
   return await withRLS(ctx, async (tx) => {
