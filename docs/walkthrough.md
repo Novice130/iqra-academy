@@ -49,7 +49,7 @@
 ## Docker Deployment
 
 - 9 containers: Next.js, 4× Jitsi, Cal.com, 3× Twenty CRM
-- 4 subdomains: quran, meet, cal, crm (.learnnovice.com)
+- 4 subdomains: quran, meet, cal, crm (.novicetutor.com)
 - Full step-by-step guide in `docs/deployment-dockploy.md`
 
 ## Web Pages (Apple/Malewicz Design)

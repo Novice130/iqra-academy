@@ -61,9 +61,9 @@ export async function GET(
     return NextResponse.json({
       roomName,
       token,
-      serverUrl: process.env.LIVEKIT_URL || "wss://meet.learnnovice.com",
+      serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
       userName: user?.name || "Participant",
-      joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://quran.learnnovice.com"}/dashboard/session/${sessionId}`,
+      joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
       isModerator: isTeacher,
     });
   } catch (error) {

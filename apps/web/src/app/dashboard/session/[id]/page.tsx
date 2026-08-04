@@ -27,7 +27,7 @@ export default function SessionRoomPage() {
         }
         const data = await res.json();
         setToken(data.jwt || data.token); // accept either jwt or token
-        setServerUrl(data.serverUrl || 'wss://meet.learnnovice.com');
+        setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
         if (data.userName) {
           setUserName(data.userName);
         }

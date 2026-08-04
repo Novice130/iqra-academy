@@ -97,6 +97,22 @@ function Navbar() {
             Start Free Trial
           </a>
         </div>
+
+        {/* Mobile Nav Actions */}
+        <div className="flex md:hidden items-center gap-2">
+          <Link
+            href="/login"
+            className="text-xs font-semibold px-3.5 py-1.5 rounded-lg border border-[var(--color-gray)]/30 text-[var(--color-charcoal)] hover:bg-black/5 transition-colors"
+          >
+            Login
+          </Link>
+          <a
+            href="#cta"
+            className="bg-[var(--color-sage)] text-white text-xs font-semibold px-3.5 py-1.5 rounded-lg transition-all"
+          >
+            Free Trial
+          </a>
+        </div>
       </div>
     </nav>
   );

@@ -8,13 +8,13 @@
                     │  (manages all Docker containers)  │
                     ├──────────────────────────────────┤
                     │                                    │
- quran.learnnovice.com ───→  🌐 Next.js App (:3000)    │
+ novicetutor.com ─────→  🌐 Next.js App (:3000)    │
                     │                                    │
- cal.learnnovice.com ────→  📅 Cal.com (:3001)          │
+ cal.novicetutor.com ────→  📅 Cal.com (:3001)          │
                     │                                    │
- meet.learnnovice.com ───→  📹 Jitsi Meet (:8443)      │
+ meet.novicetutor.com ───→  📹 LiveKit / Video (:7880)  │
                     │                                    │
- crm.learnnovice.com ────→  📊 Twenty CRM (:3002)      │
+ crm.novicetutor.com ────→  📊 Twenty CRM (:3002)      │
                     │                                    │
                     └──────────────────────────────────┘
                                     │

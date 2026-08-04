@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
       userEmail: student.email,
       isModerator: false,
     });
-    const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://quran.learnnovice.com"}/dashboard/session/${sessionId}`;
+    const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`;
 
     // Update session with room info and set to IN_PROGRESS
     const teacher = await db.query.users.findFirst({

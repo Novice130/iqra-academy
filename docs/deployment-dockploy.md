@@ -52,12 +52,12 @@ Add these **A records** pointing to your VPS IP address:
 > **Where to do this:** Go to your domain registrar (e.g., Namecheap, Cloudflare)
 > → DNS Management → Add Record.
 >
-> These create: `quran.learnnovice.com`, `meet.learnnovice.com`, etc.
+> These create: `quran.novicetutor.com`, `meet.novicetutor.com`, etc.
 
 **Wait 5-10 minutes** for DNS propagation, then verify:
 ```bash
 # On your local machine:
-nslookup quran.learnnovice.com
+nslookup quran.novicetutor.com
 # Should return your VPS IP
 ```
 
@@ -95,7 +95,7 @@ echo "TWENTY_FILE_TOKEN_SECRET=$(openssl rand -base64 32)"
 2. **Add Service** → Type: **Application** → Source: **Git**
 3. Enter your **Git repository URL** and branch (`main`)
 4. **Build**: Dokploy will auto-detect the `Dockerfile`
-5. **Domain**: Set to `quran.learnnovice.com`
+5. **Domain**: Set to `quran.novicetutor.com`
 6. **SSL**: Enable (Dokploy auto-provisions via Let's Encrypt)
 
 > **TIP:** All other services (Jitsi, Cal.com, CRM) are added as
@@ -109,7 +109,7 @@ Set these in Dockploy → Project → Environment:
 ```env
 # ── Core ──
 NODE_ENV=production
-NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+NEXT_PUBLIC_APP_URL=https://quran.novicetutor.com
 
 # ── Database (Neon) ──
 DATABASE_URL=postgresql://user:pass@ep-xxx.us-east-2.aws.neon.tech/iqra?sslmode=require
@@ -125,32 +125,32 @@ STRIPE_SECRET_KEY=sk_live_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
 # ── Cal.com ──
-CALCOM_API_URL=https://cal.learnnovice.com
+CALCOM_API_URL=https://cal.novicetutor.com
 CALCOM_WEBHOOK_SECRET=<your-calcom-webhook-secret>
 
 # ── Jitsi ──
-JITSI_DOMAIN=meet.learnnovice.com
+JITSI_DOMAIN=meet.novicetutor.com
 JITSI_APP_ID=iqra-academy
 JITSI_JWT_SECRET=<generated-above>
 
 # ── Email ──
 RESEND_API_KEY=re_...
-EMAIL_FROM=Iqra Academy <noreply@learnnovice.com>
+EMAIL_FROM=Iqra Academy <noreply@novicetutor.com>
 
 # ── Web Push ──
 NEXT_PUBLIC_VAPID_PUBLIC_KEY=<your-vapid-public-key>
 VAPID_PRIVATE_KEY=<your-vapid-private-key>
-VAPID_SUBJECT=mailto:admin@learnnovice.com
+VAPID_SUBJECT=mailto:admin@novicetutor.com
 
 # ── CRM ──
-TWENTY_API_URL=https://crm.learnnovice.com/api
+TWENTY_API_URL=https://crm.novicetutor.com/api
 TWENTY_API_KEY=<from-twenty-settings>
 CRM_SYNC_ENABLED=true
 ```
 
 ### Verify:
 ```
-Visit: https://quran.learnnovice.com/api/health
+Visit: https://quran.novicetutor.com/api/health
 Expected: { "status": "ok", "database": "connected" }
 ```
 
@@ -177,7 +177,7 @@ services:
       - JWT_APP_SECRET=${JITSI_JWT_SECRET}
       - JWT_ACCEPTED_ISSUERS=iqra-academy
       - JWT_ACCEPTED_AUDIENCES=jitsi
-      - PUBLIC_URL=https://meet.learnnovice.com
+      - PUBLIC_URL=https://meet.novicetutor.com
       - XMPP_DOMAIN=meet.jitsi
       - XMPP_AUTH_DOMAIN=auth.meet.jitsi
       - XMPP_BOSH_URL_BASE=http://jitsi-prosody:5280
@@ -227,7 +227,7 @@ services:
       - JVB_AUTH_PASSWORD=${JVB_AUTH_PASSWORD}
       - JVB_PORT=10000
       - JVB_STUN_SERVERS=meet-jit-si-turnrelay.jitsi.net:443
-      - PUBLIC_URL=https://meet.learnnovice.com
+      - PUBLIC_URL=https://meet.novicetutor.com
     depends_on:
       - jitsi-prosody
 ```
@@ -241,11 +241,11 @@ JVB_AUTH_PASSWORD=<generated-in-step-3>
 ```
 
 ### Domain:
-Set `meet.learnnovice.com` → point to `jitsi-web` container, port `443`.
+Set `meet.novicetutor.com` → point to `jitsi-web` container, port `443`.
 
 ### Verify:
 ```
-Visit: https://meet.learnnovice.com
+Visit: https://meet.novicetutor.com
 Expected: Jitsi Meet welcome page (requires JWT to join rooms)
 ```
 
@@ -282,17 +282,17 @@ DATABASE_URL=postgresql://user:pass@ep-xxx.aws.neon.tech/calcom?sslmode=require
 DATABASE_DIRECT_URL=postgresql://user:pass@ep-xxx.aws.neon.tech/calcom?sslmode=require
 NEXTAUTH_SECRET=<generated-in-step-3>
 CALENDSO_ENCRYPTION_KEY=<generated-in-step-3>
-NEXT_PUBLIC_WEBAPP_URL=https://cal.learnnovice.com
-NEXT_PUBLIC_API_V2_URL=https://cal.learnnovice.com/api/v2
+NEXT_PUBLIC_WEBAPP_URL=https://cal.novicetutor.com
+NEXT_PUBLIC_API_V2_URL=https://cal.novicetutor.com/api/v2
 CALCOM_TELEMETRY_DISABLED=1
 ```
 
 ### Domain:
-Set to `cal.learnnovice.com`, SSL enabled.
+Set to `cal.novicetutor.com`, SSL enabled.
 
 ### Verify:
 ```
-Visit: https://cal.learnnovice.com
+Visit: https://cal.novicetutor.com
 Expected: Cal.com setup wizard (first-time configuration)
 ```
 
@@ -300,7 +300,7 @@ Expected: Cal.com setup wizard (first-time configuration)
 1. Create an admin account in Cal.com
 2. Create teacher event types (30-minute sessions)
 3. Go to Settings → Webhooks → Add webhook:
-   - URL: `https://quran.learnnovice.com/api/webhooks/calcom`
+   - URL: `https://quran.novicetutor.com/api/webhooks/calcom`
    - Events: `BOOKING_CREATED`, `BOOKING_CANCELLED`, `BOOKING_RESCHEDULED`
    - Secret: Use the same `CALCOM_WEBHOOK_SECRET` from Step 4
 
@@ -322,8 +322,8 @@ services:
       - "3000:3000"
     environment:
       - PG_DATABASE_URL=postgres://twenty:${TWENTY_DB_PASSWORD}@twenty-db:5432/twenty
-      - FRONT_BASE_URL=https://crm.learnnovice.com
-      - SERVER_URL=https://crm.learnnovice.com
+      - FRONT_BASE_URL=https://crm.novicetutor.com
+      - SERVER_URL=https://crm.novicetutor.com
       - ACCESS_TOKEN_SECRET=${TWENTY_ACCESS_TOKEN_SECRET}
       - LOGIN_TOKEN_SECRET=${TWENTY_LOGIN_TOKEN_SECRET}
       - REFRESH_TOKEN_SECRET=${TWENTY_REFRESH_TOKEN_SECRET}
@@ -373,11 +373,11 @@ TWENTY_FILE_TOKEN_SECRET=<generated-in-step-3>
 ```
 
 ### Domain:
-Set `crm.learnnovice.com` → point to `twenty-server`, port `3000`.
+Set `crm.novicetutor.com` → point to `twenty-server`, port `3000`.
 
 ### Verify:
 ```
-Visit: https://crm.learnnovice.com
+Visit: https://crm.novicetutor.com
 Expected: Twenty CRM signup/login page
 ```
 
@@ -392,11 +392,11 @@ Expected: Twenty CRM signup/login page
 
 After all 4 services are running, verify everything works together:
 
-- [ ] `https://quran.learnnovice.com/api/health` → `{ "status": "ok" }`
-- [ ] `https://quran.learnnovice.com/admin` → Admin panel loads
-- [ ] `https://meet.learnnovice.com` → Jitsi welcome page
-- [ ] `https://cal.learnnovice.com` → Cal.com UI
-- [ ] `https://crm.learnnovice.com` → Twenty CRM login
+- [ ] `https://quran.novicetutor.com/api/health` → `{ "status": "ok" }`
+- [ ] `https://quran.novicetutor.com/admin` → Admin panel loads
+- [ ] `https://meet.novicetutor.com` → Jitsi welcome page
+- [ ] `https://cal.novicetutor.com` → Cal.com UI
+- [ ] `https://crm.novicetutor.com` → Twenty CRM login
 - [ ] Google Sign-In works on the main app
 - [ ] Port `10000/udp` is open (for Jitsi video)
 - [ ] Push the Drizzle schema to Neon: `npm run db:push`
@@ -405,14 +405,14 @@ After all 4 services are running, verify everything works together:
 
 ### Stripe Webhook Setup:
 1. Go to Stripe Dashboard → Webhooks
-2. Add endpoint: `https://quran.learnnovice.com/api/webhooks/stripe`
+2. Add endpoint: `https://quran.novicetutor.com/api/webhooks/stripe`
 3. Select events: `invoice.paid`, `invoice.payment_failed`, `customer.subscription.*`
 4. Copy webhook signing secret → set as `STRIPE_WEBHOOK_SECRET`
 
 ### Google OAuth Redirect URI:
 Update your Google Cloud Console to add the production redirect:
 ```
-https://quran.learnnovice.com/api/auth/callback/google
+https://quran.novicetutor.com/api/auth/callback/google
 ```
 
 ---

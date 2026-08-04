@@ -7,13 +7,13 @@
 # Docker Compose takes this file and spins up each service as a container.
 #
 # SERVICES:
-# 1. app          — Next.js web app + API (quran.learnnovice.com)
-# 2. jitsi-web    — Jitsi Meet web interface (meet.learnnovice.com)
+# 1. app          — Next.js web app + API (novicetutor.com)
+# 2. jitsi-web    — Jitsi Meet web interface (meet.novicetutor.com)
 # 3. jitsi-prosody — Jitsi XMPP server (chat signaling)
 # 4. jitsi-jicofo  — Jitsi focus component (manages conferences)
 # 5. jitsi-jvb     — Jitsi video bridge (handles video streams)
-# 6. calcom       — Cal.com scheduling (cal.learnnovice.com)
-# 7. twenty-server — Twenty CRM backend (crm.learnnovice.com)
+# 6. calcom       — Cal.com scheduling (cal.novicetutor.com)
+# 7. twenty-server — Twenty CRM backend (crm.novicetutor.com)
 # 8. twenty-worker — Twenty CRM background jobs
 # 9. twenty-db     — Postgres for Twenty CRM (separate from Neon)
 #
@@ -27,7 +27,7 @@
 # ============================================================================
 # 1. MAIN APPLICATION (Next.js)
 # ============================================================================
-# Domain: quran.learnnovice.com
+# Domain: novicetutor.com
 # This is YOUR app — the one you wrote in TypeScript.
 # ============================================================================
 
@@ -37,14 +37,14 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+        - NEXT_PUBLIC_APP_URL=https://novicetutor.com
         - NEXT_PUBLIC_VAPID_PUBLIC_KEY=${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
     ports:
       - "3000:3000"
     environment:
       # ── Core ──
       - NODE_ENV=production
-      - NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+      - NEXT_PUBLIC_APP_URL=https://novicetutor.com
 
       # ── Database (Neon — managed externally) ──
       - DATABASE_URL=${DATABASE_URL}
@@ -60,11 +60,11 @@ services:
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
 
       # ── Cal.com ──
-      - CALCOM_API_URL=https://cal.learnnovice.com
+      - CALCOM_API_URL=https://cal.novicetutor.com
       - CALCOM_WEBHOOK_SECRET=${CALCOM_WEBHOOK_SECRET}
 
       # ── LiveKit ──
-      - LIVEKIT_URL=wss://meet.learnnovice.com
+      - LIVEKIT_URL=wss://meet.novicetutor.com
       - LIVEKIT_API_KEY=${LIVEKIT_API_KEY}
       - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET}
 
@@ -97,7 +97,7 @@ services:
 # ============================================================================
 # 2. JITSI MEET (Video Conferencing)
 # ============================================================================
-# Domain: meet.learnnovice.com
+# Domain: meet.novicetutor.com
 #
 # 📚 Jitsi requires 4 containers:
 # - web:     Serves the meeting UI
@@ -131,7 +131,7 @@ services:
 # ============================================================================
 # 3. CAL.COM (Scheduling)
 # ============================================================================
-# Domain: cal.learnnovice.com
+# Domain: cal.novicetutor.com
 #
 # 📚 Cal.com is the open-source alternative to Calendly.
 # Teachers set their availability here, and students book sessions.
@@ -148,8 +148,8 @@ services:
       - DATABASE_DIRECT_URL=${CALCOM_DATABASE_URL}
       - NEXTAUTH_SECRET=${CALCOM_NEXTAUTH_SECRET}
       - CALENDSO_ENCRYPTION_KEY=${CALCOM_ENCRYPTION_KEY}
-      - NEXT_PUBLIC_WEBAPP_URL=https://cal.learnnovice.com
-      - NEXT_PUBLIC_API_V2_URL=https://cal.learnnovice.com/api/v2
+      - NEXT_PUBLIC_WEBAPP_URL=https://cal.novicetutor.com
+      - NEXT_PUBLIC_API_V2_URL=https://cal.novicetutor.com/api/v2
       # Disable telemetry
       - CALCOM_TELEMETRY_DISABLED=1
       - NEXT_PUBLIC_IS_E2E=0
@@ -160,7 +160,7 @@ services:
 # ============================================================================
 # 4. TWENTY CRM
 # ============================================================================
-# Domain: crm.learnnovice.com
+# Domain: crm.novicetutor.com
 #
 # 📚 Twenty is an open-source CRM (like HubSpot but free).
 # It has its own Postgres database (separate from Neon).
@@ -174,8 +174,8 @@ services:
     environment:
       - IS_SIGN_UP_DISABLED=false
       - PG_DATABASE_URL=postgres://twenty:${TWENTY_DB_PASSWORD}@twenty-db:5432/twenty
-      - FRONT_BASE_URL=https://crm.learnnovice.com
-      - SERVER_URL=https://crm.learnnovice.com
+      - FRONT_BASE_URL=https://crm.novicetutor.com
+      - SERVER_URL=https://crm.novicetutor.com
       - PORT=3000
       - ACCESS_TOKEN_SECRET=${TWENTY_ACCESS_TOKEN_SECRET}
       - LOGIN_TOKEN_SECRET=${TWENTY_LOGIN_TOKEN_SECRET}
@@ -193,7 +193,7 @@ services:
     command: ["node", "dist/src/queue-worker/queue-worker.module.js"]
     environment:
       - PG_DATABASE_URL=postgres://twenty:${TWENTY_DB_PASSWORD}@twenty-db:5432/twenty
-      - SERVER_URL=https://crm.learnnovice.com
+      - SERVER_URL=https://crm.novicetutor.com
       - ACCESS_TOKEN_SECRET=${TWENTY_ACCESS_TOKEN_SECRET}
       - LOGIN_TOKEN_SECRET=${TWENTY_LOGIN_TOKEN_SECRET}
       - REFRESH_TOKEN_SECRET=${TWENTY_REFRESH_TOKEN_SECRET}

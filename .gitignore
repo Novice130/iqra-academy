@@ -1,16 +1,32 @@
+# Environment & sensitive credential files
+.env*
+!.env.example
+*.exp
+.iqra-ssh.exp
+.rsync.exp
+*.pem
+*.key
+.wrangler/
+.cloudflared/
 
-# Generated files
+# Generated files & logs
 node_modules/
 .next/
+.turbo/
 build/
 .cache/
-bios/
 *.log
-*.txt
-*.json
-*.ps1
 dist/
 coverage/
+
+.open-next/
+**.open-next/
+*.txt
+*.ps1
+*.json.tmp
+repos*.json
+repo_files.json
+.commandcode/
 
 **/node_modules/
 **/.next/

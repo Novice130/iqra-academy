@@ -38,7 +38,7 @@ COPY . .
 
 # Build Next.js (output: standalone mode creates a self-contained server)
 # This needs all env vars that are used at build time (NEXT_PUBLIC_*)
-ARG NEXT_PUBLIC_APP_URL=https://quran.learnnovice.com
+ARG NEXT_PUBLIC_APP_URL=https://novicetutor.com
 ARG NEXT_PUBLIC_VAPID_PUBLIC_KEY=""
 ARG BETTER_AUTH_SECRET="dummy-secret-for-build-time-only-replaced-at-runtime"
 ARG STRIPE_SECRET_KEY="sk_dummy_for_build_only"

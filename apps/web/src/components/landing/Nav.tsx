@@ -29,7 +29,7 @@ export default function Nav() {
             <Link href="/" className="flex items-center gap-3 shrink-0">
               <img
                 src="/logo.png"
-                alt="Iqra Academy"
+                alt="NoviceTutor"
                 className="h-10 w-10 rounded-2xl object-cover shadow-sm"
               />
               <div>
@@ -37,13 +37,13 @@ export default function Nav() {
                   className="text-[15px] font-semibold tracking-tight"
                   style={{ color: "var(--text-primary)" }}
                 >
-                  Iqra Academy
+                  NoviceTutor
                 </div>
                 <div
                   className="hidden text-xs sm:block"
                   style={{ color: "var(--text-secondary)" }}
                 >
-                  Online Quran learning
+                  Online Quran & Academic Tutoring
                 </div>
               </div>
             </Link>
@@ -70,21 +70,27 @@ export default function Nav() {
                 Log In
               </Link>
               <Link href="/register" className="btn-primary">
-                Start Free Trial
+                Register
               </Link>
             </div>
 
             <div className="flex md:hidden items-center gap-2">
               <Link
+                href="/login"
+                className="rounded-full px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50"
+              >
+                Log In
+              </Link>
+              <Link
                 href="/register"
                 className="btn-primary"
-                style={{ padding: "10px 14px", fontSize: "12px" }}
+                style={{ padding: "8px 12px", fontSize: "12px" }}
               >
-                Trial
+                Register
               </Link>
               <button
                 onClick={() => setMenuOpen(!menuOpen)}
-                className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50"
+                className="flex h-9 w-9 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50"
                 aria-label="Toggle menu"
               >
                 {menuOpen ? (
@@ -122,26 +128,35 @@ export default function Nav() {
 
           {menuOpen && (
             <div className="border-t border-slate-200 pb-4 pt-2 md:hidden">
-              <div className="space-y-1 rounded-[1.5rem] bg-white/70 p-2">
+              <div className="space-y-1.5 rounded-[1.5rem] bg-white/70 p-2">
                 {links.map((link) => (
                   <a
                     key={link.href}
                     href={link.href}
                     onClick={() => setMenuOpen(false)}
-                    className="block rounded-2xl px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-100"
+                    className="block rounded-2xl px-4 py-2.5 text-sm font-medium transition-colors hover:bg-slate-100"
                     style={{ color: "var(--text-secondary)" }}
                   >
                     {link.label}
                   </a>
                 ))}
-                <Link
-                  href="/login"
-                  onClick={() => setMenuOpen(false)}
-                  className="block rounded-2xl px-4 py-3 text-sm font-medium transition-colors hover:bg-slate-100"
-                  style={{ color: "var(--text-secondary)" }}
-                >
-                  Log In
-                </Link>
+                <div className="pt-2 flex flex-col gap-2">
+                  <Link
+                    href="/login"
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-center rounded-2xl px-4 py-2.5 text-sm font-semibold border border-slate-200 bg-white text-slate-800"
+                  >
+                    Log In
+                  </Link>
+                  <Link
+                    href="/register"
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-center btn-primary"
+                    style={{ width: "100%", padding: "10px 16px" }}
+                  >
+                    Register / Start Free Trial
+                  </Link>
+                </div>
               </div>
             </div>
           )}

@@ -345,14 +345,14 @@ Key files to study:
 
 ## 🏗️ Deployment (Dockploy)
 
-**Domain**: `quran.learnnovice.com`
+**Domain**: `novicetutor.com`
 
 | Service | Subdomain | Docker Image |
 |---------|-----------|-------------|
-| Next.js App | `quran.learnnovice.com` | Built from `Dockerfile` |
-| LiveKit Server | `meet.learnnovice.com` | `livekit/livekit-server:latest` |
-| Cal.com | `cal.learnnovice.com` | `calcom/cal.com:latest` |
-| Twenty CRM | `crm.learnnovice.com` | `twentycrm/twenty:latest` |
+| Next.js App | `novicetutor.com` | Built from `Dockerfile` |
+| LiveKit Server | `meet.novicetutor.com` | `livekit/livekit-server:latest` |
+| Cal.com | `cal.novicetutor.com` | `calcom/cal.com:latest` |
+| Twenty CRM | `crm.novicetutor.com` | `twentycrm/twenty:latest` |
 
 **Full guide**: See [docs/deployment-dockploy.md](docs/deployment-dockploy.md) for step-by-step instructions.
 

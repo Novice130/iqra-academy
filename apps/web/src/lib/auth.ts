@@ -55,7 +55,13 @@ export const auth = betterAuth({
   /**
    * Base URL of the application. Used for redirect URLs after login/signup.
    */
-  baseURL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+  baseURL: process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com",
+  trustedOrigins: [
+    "https://novicetutor.com",
+    "https://www.novicetutor.com",
+    "https://app.novicetutor.com",
+    ...(process.env.BETTER_AUTH_TRUSTED_ORIGINS ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",") : []),
+  ],
 
   /**
    * Database adapter — explicit table mapping for Better Auth.
