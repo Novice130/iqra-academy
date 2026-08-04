@@ -69,7 +69,12 @@ if (buildResult.status === 0) {
   }
 }
 
-// Step 4: Deploy with wrangler
+// Step 4: Deploy with wrangler (Skip if inside Cloudflare's automated Git CI, which runs wrangler deploy itself)
+if (process.env.CF_PAGES || process.env.CI || process.env.CLOUDFLARE_BUILD_ENVIRONMENT) {
+  console.log("ℹ️ Running inside Cloudflare CI — skipping internal wrangler deploy (Cloudflare will deploy automatically).");
+  process.exit(0);
+}
+
 console.log("🚀 Deploying to Cloudflare Workers...");
 const deployResult = spawnSync("npx", ["wrangler", "deploy"], {
   stdio: "inherit",

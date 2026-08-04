@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "npx @opennextjs/cloudflare build",
     "postbuild": "node scripts/patch-styled-jsx.cjs",
     "start": "next start",
     "deploy:cf": "node scripts/cf-build.cjs",
