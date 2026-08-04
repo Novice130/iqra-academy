@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "branchName": "master",
+  "worktreePath": "/Users/abdulhannan/Documents/Phet/Quran learning/quran-lms",
+  "upstream": "origin/master",
+  "mergeBase": "6bd808e855f078bf50173afc2cb0abb6584e0aed",
+  "firstSeenHead": "6bd808e855f078bf50173afc2cb0abb6584e0aed",
+  "lastSeenHead": "6bd808e855f078bf50173afc2cb0abb6584e0aed",
+  "lastAnalyzedHead": "6bd808e855f078bf50173afc2cb0abb6584e0aed",
+  "stale": false,
+  "staleReason": null,
+  "staleSince": null,
+  "lifecycleEvent": null,
+  "createdAt": "2026-08-04T22:01:51.080Z",
+  "updatedAt": "2026-08-04T22:01:51.080Z"
+}
