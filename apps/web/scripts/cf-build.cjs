@@ -31,6 +31,9 @@ function patchStyledJsx() {
 }
 
 // Step 1: Run full opennext build (includes next build + bundling)
+console.log("🔨 Forcing @noble/ciphers to 2.1.1 to fix ESM subpath export bug...");
+execSync("npm install @noble/ciphers@2.1.1 --no-save", { stdio: "inherit", cwd: root });
+
 console.log("🔨 Running @opennextjs/cloudflare build...");
 const buildResult = spawnSync(
   "npx",
