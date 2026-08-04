@@ -10,7 +10,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
 
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -19,6 +19,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -194,6 +195,7 @@ export default async function DashboardLayout({
       </main>
     </div>
   );
+  });
 }
 
 function SidebarItem({ href, label }: { href: string; label: string }) {

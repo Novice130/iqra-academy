@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, isNull, desc } from "drizzle-orm";
 import { organizations } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -23,40 +23,44 @@ const createOrgSchema = z.object({
 
 /** GET /api/super/orgs — list all organizations (super admin only) */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["SUPER_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["SUPER_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
 
-    const orgs = await db.query.organizations.findMany({
-      where: isNull(organizations.deletedAt),
-      orderBy: desc(organizations.createdAt),
-    });
+      const orgs = await db.query.organizations.findMany({
+        where: isNull(organizations.deletedAt),
+        orderBy: desc(organizations.createdAt),
+      });
 
-    return NextResponse.json({ organizations: orgs });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ organizations: orgs });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/super/orgs — create a new organization */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["SUPER_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["SUPER_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
 
-    const body = await request.json();
-    const data = createOrgSchema.parse(body);
+      const body = await request.json();
+      const data = createOrgSchema.parse(body);
 
-    // Check slug uniqueness
-    const existing = await db.query.organizations.findFirst({
-      where: eq(organizations.slug, data.slug),
-    });
-    if (existing) throw new ConflictError(`Organization with slug "${data.slug}" already exists.`);
+      // Check slug uniqueness
+      const existing = await db.query.organizations.findFirst({
+        where: eq(organizations.slug, data.slug),
+      });
+      if (existing) throw new ConflictError(`Organization with slug "${data.slug}" already exists.`);
 
-    const [org] = await db.insert(organizations).values(data).returning();
+      const [org] = await db.insert(organizations).values(data).returning();
 
-    return NextResponse.json({ organization: org }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ organization: org }, { status: 201 });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

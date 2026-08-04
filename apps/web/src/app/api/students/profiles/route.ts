@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db, withRLS } from "@/lib/db";
+import { withRLS, withDb } from "@/lib/db";
 import { eq, and, asc, sql } from "drizzle-orm";
 import { studentProfiles, subscriptions } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -29,87 +29,91 @@ const createProfileSchema = z.object({
 
 /** GET /api/students/profiles */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["STUDENT"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["STUDENT"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    return await withRLS(ctx, async (tx) => {
-      const profiles = await tx.query.studentProfiles.findMany({
-        where: and(
-          eq(studentProfiles.userId, ctx.userId),
-          eq(studentProfiles.orgId, ctx.orgId)
-        ),
-        with: {
-          progressRecords: {
-            orderBy: (pr, { desc }) => [desc(pr.createdAt)],
-            limit: 5,
+      return await withRLS(ctx, async (tx) => {
+        const profiles = await tx.query.studentProfiles.findMany({
+          where: and(
+            eq(studentProfiles.userId, ctx.userId),
+            eq(studentProfiles.orgId, ctx.orgId)
+          ),
+          with: {
+            progressRecords: {
+              orderBy: (pr, { desc }) => [desc(pr.createdAt)],
+              limit: 5,
+            },
           },
-        },
-        orderBy: asc(studentProfiles.createdAt),
-      });
+          orderBy: asc(studentProfiles.createdAt),
+        });
 
-      return NextResponse.json({ profiles });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+        return NextResponse.json({ profiles });
+      });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/students/profiles */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["STUDENT"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["STUDENT"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = createProfileSchema.parse(body);
+      const body = await request.json();
+      const data = createProfileSchema.parse(body);
 
-    return await withRLS(ctx, async (tx) => {
-      // Check profile limit based on subscription
-      const subscription = await tx.query.subscriptions.findFirst({
-        where: and(eq(subscriptions.userId, ctx.userId), eq(subscriptions.status, "ACTIVE")),
-        with: { plan: true },
+      return await withRLS(ctx, async (tx) => {
+        // Check profile limit based on subscription
+        const subscription = await tx.query.subscriptions.findFirst({
+          where: and(eq(subscriptions.userId, ctx.userId), eq(subscriptions.status, "ACTIVE")),
+          with: { plan: true },
+        });
+
+        const maxProfiles = subscription?.plan.maxStudents ?? 1;
+        const [countResult] = await tx
+          .select({ count: sql<number>`count(*)::int` })
+          .from(studentProfiles)
+          .where(eq(studentProfiles.userId, ctx.userId));
+
+        const currentCount = countResult?.count ?? 0;
+
+        if (currentCount >= maxProfiles) {
+          throw new BusinessRuleError(
+            `Your plan allows up to ${maxProfiles} student profile(s). ` +
+            `Upgrade to the Siblings plan for up to 3 profiles.`
+          );
+        }
+
+        const [profile] = await tx.insert(studentProfiles).values({
+          orgId: ctx.orgId,
+          userId: ctx.userId,
+          name: data.name,
+          dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
+          track: data.track,
+          currentLevel: data.currentLevel,
+          notes: data.notes,
+        }).returning();
+
+        await logAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.userId,
+          action: "USER_CREATED",
+          target: `profile:${profile.id}`,
+          metadata: { profileName: data.name },
+          ipAddress: getClientIp(request.headers),
+        });
+
+        return NextResponse.json({ profile }, { status: 201 });
       });
-
-      const maxProfiles = subscription?.plan.maxStudents ?? 1;
-      const [countResult] = await tx
-        .select({ count: sql<number>`count(*)::int` })
-        .from(studentProfiles)
-        .where(eq(studentProfiles.userId, ctx.userId));
-
-      const currentCount = countResult?.count ?? 0;
-
-      if (currentCount >= maxProfiles) {
-        throw new BusinessRuleError(
-          `Your plan allows up to ${maxProfiles} student profile(s). ` +
-          `Upgrade to the Siblings plan for up to 3 profiles.`
-        );
-      }
-
-      const [profile] = await tx.insert(studentProfiles).values({
-        orgId: ctx.orgId,
-        userId: ctx.userId,
-        name: data.name,
-        dateOfBirth: data.dateOfBirth ? new Date(data.dateOfBirth) : undefined,
-        track: data.track,
-        currentLevel: data.currentLevel,
-        notes: data.notes,
-      }).returning();
-
-      await logAudit({
-        orgId: ctx.orgId,
-        actorId: ctx.userId,
-        action: "USER_CREATED",
-        target: `profile:${profile.id}`,
-        metadata: { profileName: data.name },
-        ipAddress: getClientIp(request.headers),
-      });
-
-      return NextResponse.json({ profile }, { status: 201 });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

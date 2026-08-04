@@ -4,12 +4,13 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, desc, count } from "drizzle-orm";
 import { studentProfiles, progressRecords, lessonContent } from "@/db/schema";
 import { format } from "date-fns";
 
 export default async function ProgressPage() {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -164,4 +165,5 @@ export default async function ProgressPage() {
       </div>
     </div>
   );
+  });
 }

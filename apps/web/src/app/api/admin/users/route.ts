@@ -9,10 +9,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db, withRLS } from "@/lib/db";
-import { eq, and, isNull, ilike, or, sql, desc } from "drizzle-orm";
-import { users, studentProfiles, bookings } from "@/db/schema";
-import { requireRole, orgScope } from "@/lib/rbac";
+import { withRLS, withDb } from "@/lib/db";
+import { eq, and, isNull, ilike, or, desc } from "drizzle-orm";
+import { users } from "@/db/schema";
+import { requireRole } from "@/lib/rbac";
 import { handleApiError, ConflictError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 
@@ -32,119 +32,125 @@ const updateUserSchema = z.object({
 
 /** GET /api/admin/users — list all org users */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["ORG_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const { searchParams } = new URL(request.url);
-    const role = searchParams.get("role");
-    const search = searchParams.get("search");
+      const { searchParams } = new URL(request.url);
+      const role = searchParams.get("role");
+      const search = searchParams.get("search");
 
-    return await withRLS(ctx, async (tx) => {
-      const conditions = [
-        eq(users.orgId, ctx.orgId),
-        isNull(users.deletedAt),
-      ];
-      if (role) conditions.push(eq(users.role, role as typeof users.role.enumValues[number]));
-      if (search) {
-        conditions.push(or(
-          ilike(users.name, `%${search}%`),
-          ilike(users.email, `%${search}%`),
-        )!);
-      }
+      return await withRLS(ctx, async (tx) => {
+        const conditions = [
+          eq(users.orgId, ctx.orgId),
+          isNull(users.deletedAt),
+        ];
+        if (role) conditions.push(eq(users.role, role as typeof users.role.enumValues[number]));
+        if (search) {
+          conditions.push(or(
+            ilike(users.name, `%${search}%`),
+            ilike(users.email, `%${search}%`),
+          )!);
+        }
 
-      const result = await tx
-        .select({
-          id: users.id,
-          email: users.email,
-          name: users.name,
-          role: users.role,
-          phone: users.phone,
-          createdAt: users.createdAt,
-          emailVerified: users.emailVerified,
-        })
-        .from(users)
-        .where(and(...conditions))
-        .orderBy(desc(users.createdAt));
+        const result = await tx
+          .select({
+            id: users.id,
+            email: users.email,
+            name: users.name,
+            role: users.role,
+            phone: users.phone,
+            createdAt: users.createdAt,
+            emailVerified: users.emailVerified,
+          })
+          .from(users)
+          .where(and(...conditions))
+          .orderBy(desc(users.createdAt));
 
-      return NextResponse.json({ users: result });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+        return NextResponse.json({ users: result });
+      });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/admin/users — create a user in the org */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["ORG_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = createUserSchema.parse(body);
+      const body = await request.json();
+      const data = createUserSchema.parse(body);
 
-    return await withRLS(ctx, async (tx) => {
-      // Check duplicate email within org
-      const existing = await tx.query.users.findFirst({
-        where: and(eq(users.email, data.email), eq(users.orgId, ctx.orgId)),
+      return await withRLS(ctx, async (tx) => {
+        // Check duplicate email within org
+        const existing = await tx.query.users.findFirst({
+          where: and(eq(users.email, data.email), eq(users.orgId, ctx.orgId)),
+        });
+        if (existing) throw new ConflictError("A user with this email already exists in your organization.");
+
+        const [user] = await tx.insert(users).values({
+          ...data,
+          role: data.role as typeof users.role.enumValues[number],
+          orgId: ctx.orgId,
+        }).returning();
+
+        await logAudit({
+          orgId: ctx.orgId, actorId: ctx.userId,
+          action: "USER_CREATED", target: `user:${user.id}`,
+          metadata: { email: data.email, role: data.role },
+          ipAddress: getClientIp(request.headers),
+        });
+
+        return NextResponse.json({ user }, { status: 201 });
       });
-      if (existing) throw new ConflictError("A user with this email already exists in your organization.");
-
-      const [user] = await tx.insert(users).values({
-        ...data,
-        role: data.role as typeof users.role.enumValues[number],
-        orgId: ctx.orgId,
-      }).returning();
-
-      await logAudit({
-        orgId: ctx.orgId, actorId: ctx.userId,
-        action: "USER_CREATED", target: `user:${user.id}`,
-        metadata: { email: data.email, role: data.role },
-        ipAddress: getClientIp(request.headers),
-      });
-
-      return NextResponse.json({ user }, { status: 201 });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** PATCH /api/admin/users — update a user */
 export async function PATCH(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["ORG_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = updateUserSchema.parse(body);
+      const body = await request.json();
+      const data = updateUserSchema.parse(body);
 
-    const updates: Record<string, unknown> = {};
-    if (data.name) updates.name = data.name;
-    if (data.role) updates.role = data.role;
-    if (data.phone) updates.phone = data.phone;
+      const updates: Record<string, unknown> = {};
+      if (data.name) updates.name = data.name;
+      if (data.role) updates.role = data.role;
+      if (data.phone) updates.phone = data.phone;
 
-    return await withRLS(ctx, async (tx) => {
-      const [user] = await tx
-        .update(users)
-        .set(updates)
-        .where(eq(users.id, data.userId))
-        .returning();
+      return await withRLS(ctx, async (tx) => {
+        const [user] = await tx
+          .update(users)
+          .set(updates)
+          .where(eq(users.id, data.userId))
+          .returning();
 
-      await logAudit({
-        orgId: ctx.orgId, actorId: ctx.userId,
-        action: data.role ? "ROLE_CHANGED" : "USER_UPDATED",
-        target: `user:${user.id}`,
-        metadata: { changes: data },
-        ipAddress: getClientIp(request.headers),
+        await logAudit({
+          orgId: ctx.orgId, actorId: ctx.userId,
+          action: data.role ? "ROLE_CHANGED" : "USER_UPDATED",
+          target: `user:${user.id}`,
+          metadata: { changes: data },
+          ipAddress: getClientIp(request.headers),
+        });
+
+        return NextResponse.json({ user });
       });
-
-      return NextResponse.json({ user });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

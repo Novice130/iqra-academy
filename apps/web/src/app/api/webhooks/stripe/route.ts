@@ -15,7 +15,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { subscriptions } from "@/db/schema";
 import { verifyWebhookSignature } from "@/lib/stripe";
@@ -55,33 +55,35 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 400 });
   }
 
-  try {
-    switch (event.type) {
-      case "invoice.paid":
-        await handleInvoicePaid(event.data.object as unknown as Record<string, unknown>);
-        break;
+  return withDb(async () => {
+    try {
+      switch (event.type) {
+        case "invoice.paid":
+          await handleInvoicePaid(event.data.object as unknown as Record<string, unknown>);
+          break;
 
-      case "invoice.payment_failed":
-        await handlePaymentFailed(event.data.object as unknown as Record<string, unknown>);
-        break;
+        case "invoice.payment_failed":
+          await handlePaymentFailed(event.data.object as unknown as Record<string, unknown>);
+          break;
 
-      case "customer.subscription.updated":
-        await handleSubscriptionUpdated(event.data.object as unknown as Record<string, unknown>);
-        break;
+        case "customer.subscription.updated":
+          await handleSubscriptionUpdated(event.data.object as unknown as Record<string, unknown>);
+          break;
 
-      case "customer.subscription.deleted":
-        await handleSubscriptionDeleted(event.data.object as unknown as Record<string, unknown>);
-        break;
+        case "customer.subscription.deleted":
+          await handleSubscriptionDeleted(event.data.object as unknown as Record<string, unknown>);
+          break;
 
-      default:
-        console.log(`[STRIPE WEBHOOK] Unhandled event type: ${event.type}`);
+        default:
+          console.log(`[STRIPE WEBHOOK] Unhandled event type: ${event.type}`);
+      }
+
+      return NextResponse.json({ received: true });
+    } catch (error) {
+      console.error(`[STRIPE WEBHOOK] Error handling ${event.type}:`, error);
+      return NextResponse.json({ received: true, error: "Processing failed" });
     }
-
-    return NextResponse.json({ received: true });
-  } catch (error) {
-    console.error(`[STRIPE WEBHOOK] Error handling ${event.type}:`, error);
-    return NextResponse.json({ received: true, error: "Processing failed" });
-  }
+  });
 }
 
 /** Handles invoice.paid — the student has paid their invoice. */

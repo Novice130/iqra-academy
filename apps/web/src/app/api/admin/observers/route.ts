@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, desc } from "drizzle-orm";
 import { observerEmails } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
@@ -22,41 +22,45 @@ const observerSchema = z.object({
 
 /** GET /api/admin/observers — list observer emails for the current user */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireAuth(request);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireAuth(request);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const observers = await db.query.observerEmails.findMany({
-      where: eq(observerEmails.userId, ctx.userId),
-      orderBy: desc(observerEmails.createdAt),
-    });
+      const observers = await db.query.observerEmails.findMany({
+        where: eq(observerEmails.userId, ctx.userId),
+        orderBy: desc(observerEmails.createdAt),
+      });
 
-    return NextResponse.json({ observers });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ observers });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/admin/observers — add an observer email */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireAuth(request);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireAuth(request);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = observerSchema.parse(body);
+      const body = await request.json();
+      const data = observerSchema.parse(body);
 
-    const [observer] = await db.insert(observerEmails).values({
-      userId: ctx.userId,
-      email: data.email,
-      profileIds: data.profileIds,
-      frequency: data.frequency,
-    }).returning();
+      const [observer] = await db.insert(observerEmails).values({
+        userId: ctx.userId,
+        email: data.email,
+        profileIds: data.profileIds,
+        frequency: data.frequency,
+      }).returning();
 
-    return NextResponse.json({ observer }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ observer }, { status: 201 });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

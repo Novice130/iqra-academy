@@ -4,12 +4,13 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { subscriptions, plans, invoices } from "@/db/schema";
 import { format } from "date-fns";
 
 export default async function BillingPage() {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -198,4 +199,5 @@ export default async function BillingPage() {
       </section>
     </div>
   );
+  });
 }

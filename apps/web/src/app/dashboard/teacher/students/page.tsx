@@ -4,7 +4,7 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, sql, count, desc, inArray } from "drizzle-orm";
 import { bookings, sessions, studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
 import { format } from "date-fns";
@@ -12,6 +12,7 @@ import Link from "next/link";
 import AssignStudentModal from "./AssignStudentModal";
 
 export default async function TeacherStudentsPage() {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -176,4 +177,5 @@ export default async function TeacherStudentsPage() {
       </div>
     </div>
   );
+  });
 }

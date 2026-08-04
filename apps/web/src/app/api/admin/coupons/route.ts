@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, desc } from "drizzle-orm";
 import { coupons } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -28,65 +28,69 @@ const createCouponSchema = z.object({
 
 /** GET /api/admin/coupons — list org coupons */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["ORG_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const result = await db.query.coupons.findMany({
-      where: eq(coupons.orgId, ctx.orgId),
-      with: { redemptions: true },
-      orderBy: desc(coupons.createdAt),
-    });
+      const result = await db.query.coupons.findMany({
+        where: eq(coupons.orgId, ctx.orgId),
+        with: { redemptions: true },
+        orderBy: desc(coupons.createdAt),
+      });
 
-    return NextResponse.json({ coupons: result });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ coupons: result });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/admin/coupons — create coupon (local + Stripe) */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["ORG_ADMIN"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = createCouponSchema.parse(body);
+      const body = await request.json();
+      const data = createCouponSchema.parse(body);
 
-    // Create Stripe coupon
-    const stripeCoupon = await createStripeCoupon({
-      name: `${data.code} — ${data.description || "Discount"}`,
-      percentOff: data.discountPercent,
-      amountOffCents: data.discountAmountCents,
-      duration: "repeating",
-      durationInMonths: 1,
-      maxRedemptions: data.maxRedemptions,
-    });
+      // Create Stripe coupon
+      const stripeCoupon = await createStripeCoupon({
+        name: `${data.code} — ${data.description || "Discount"}`,
+        percentOff: data.discountPercent,
+        amountOffCents: data.discountAmountCents,
+        duration: "repeating",
+        durationInMonths: 1,
+        maxRedemptions: data.maxRedemptions,
+      });
 
-    // Create local coupon linked to Stripe
-    const [coupon] = await db.insert(coupons).values({
-      orgId: ctx.orgId,
-      code: data.code,
-      description: data.description,
-      discountPercent: data.discountPercent,
-      discountAmountCents: data.discountAmountCents,
-      maxRedemptions: data.maxRedemptions,
-      validUntil: data.validUntil ? new Date(data.validUntil) : undefined,
-      applicableTiers: data.applicableTiers,
-      stripeCouponId: stripeCoupon.id,
-    }).returning();
+      // Create local coupon linked to Stripe
+      const [coupon] = await db.insert(coupons).values({
+        orgId: ctx.orgId,
+        code: data.code,
+        description: data.description,
+        discountPercent: data.discountPercent,
+        discountAmountCents: data.discountAmountCents,
+        maxRedemptions: data.maxRedemptions,
+        validUntil: data.validUntil ? new Date(data.validUntil) : undefined,
+        applicableTiers: data.applicableTiers,
+        stripeCouponId: stripeCoupon.id,
+      }).returning();
 
-    await logAudit({
-      orgId: ctx.orgId, actorId: ctx.userId,
-      action: "COUPON_CREATED", target: `coupon:${coupon.id}`,
-      metadata: { code: data.code, stripeCouponId: stripeCoupon.id },
-      ipAddress: getClientIp(request.headers),
-    });
+      await logAudit({
+        orgId: ctx.orgId, actorId: ctx.userId,
+        action: "COUPON_CREATED", target: `coupon:${coupon.id}`,
+        metadata: { code: data.code, stripeCouponId: stripeCoupon.id },
+        ipAddress: getClientIp(request.headers),
+      });
 
-    return NextResponse.json({ coupon }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ coupon }, { status: 201 });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

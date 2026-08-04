@@ -17,7 +17,7 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { canAccessAdmin, adminResources, adminBranding, adminMeta } from "@/lib/admin";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { sql, eq } from "drizzle-orm";
 
@@ -26,6 +26,7 @@ import { sql, eq } from "drizzle-orm";
  * Verifies auth and role before rendering.
  */
 export default async function AdminPage() {
+  return withDb(async () => {
   // Verify authentication
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
@@ -39,7 +40,7 @@ export default async function AdminPage() {
     where: eq(users.email, session.user.email),
     columns: { role: true },
   });
-  
+
   const role = dbUser?.role || "STUDENT";
   if (!canAccessAdmin(role)) {
     redirect("/dashboard?error=unauthorized");
@@ -234,6 +235,7 @@ export default async function AdminPage() {
       </main>
     </div>
   );
+  });
 }
 
 /**

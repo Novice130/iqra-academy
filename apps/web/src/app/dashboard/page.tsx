@@ -8,7 +8,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
-import { db, withRLS } from "@/lib/db";
+import { db, withRLS, withDb } from "@/lib/db";
 import { eq, and, gte, asc, sql } from "drizzle-orm";
 import { studentProfiles, bookings, subscriptions, sessions, users } from "@/db/schema";
 import { getQuotaStatus } from "@/lib/quota";
@@ -16,6 +16,7 @@ import { format } from "date-fns";
 import { redirect } from "next/navigation";
 
 export default async function DashboardPage() {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -187,6 +188,7 @@ export default async function DashboardPage() {
         </div>
       </div>
     );
+  });
   });
 }
 

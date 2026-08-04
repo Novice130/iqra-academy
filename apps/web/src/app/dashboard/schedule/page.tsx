@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, sql } from "drizzle-orm";
 import { bookings, sessions, users as usersTable } from "@/db/schema";
 import { startOfWeek, addDays, format, isValid, parseISO } from "date-fns";
@@ -14,6 +14,7 @@ interface Props {
 }
 
 export default async function SchedulePage({ searchParams }: Props) {
+  return withDb(async () => {
   const p = await searchParams;
   const weekOffset = parseInt(p.week || "0", 10);
   
@@ -165,4 +166,5 @@ export default async function SchedulePage({ searchParams }: Props) {
       </div>
     </div>
   );
+  });
 }

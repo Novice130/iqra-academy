@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { chatMessages, chatModerationActions } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -22,47 +22,49 @@ const moderateSchema = z.object({
 
 /** POST /api/chat/moderate — hide or unhide a message */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["TEACHER"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["TEACHER"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const { messageId, action, reason } = moderateSchema.parse(body);
+      const body = await request.json();
+      const { messageId, action, reason } = moderateSchema.parse(body);
 
-    const message = await db.query.chatMessages.findFirst({
-      where: and(eq(chatMessages.id, messageId), eq(chatMessages.orgId, ctx.orgId)),
-    });
-    if (!message) throw new NotFoundError("Message");
+      const message = await db.query.chatMessages.findFirst({
+        where: and(eq(chatMessages.id, messageId), eq(chatMessages.orgId, ctx.orgId)),
+      });
+      if (!message) throw new NotFoundError("Message");
 
-    await db
-      .update(chatMessages)
-      .set({
-        isHidden: action === "hide",
-        isDeleted: action === "delete",
-      })
-      .where(eq(chatMessages.id, messageId));
+      await db
+        .update(chatMessages)
+        .set({
+          isHidden: action === "hide",
+          isDeleted: action === "delete",
+        })
+        .where(eq(chatMessages.id, messageId));
 
-    // Log the moderation action in a separate audit table
-    await db.insert(chatModerationActions).values({
-      orgId: ctx.orgId,
-      messageId,
-      moderatorId: ctx.userId,
-      action: action.toUpperCase(),
-      reason: reason || null,
-    });
+      // Log the moderation action in a separate audit table
+      await db.insert(chatModerationActions).values({
+        orgId: ctx.orgId,
+        messageId,
+        moderatorId: ctx.userId,
+        action: action.toUpperCase(),
+        reason: reason || null,
+      });
 
-    await logAudit({
-      orgId: ctx.orgId,
-      actorId: ctx.userId,
-      action: action === "delete" ? "CHAT_MESSAGE_DELETED" : "CHAT_MESSAGE_HIDDEN",
-      target: `message:${messageId}`,
-      metadata: { action, senderId: message.senderId, reason },
-      ipAddress: getClientIp(request.headers),
-    });
+      await logAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.userId,
+        action: action === "delete" ? "CHAT_MESSAGE_DELETED" : "CHAT_MESSAGE_HIDDEN",
+        target: `message:${messageId}`,
+        metadata: { action, senderId: message.senderId, reason },
+        ipAddress: getClientIp(request.headers),
+      });
 
-    return NextResponse.json({ success: true });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ success: true });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

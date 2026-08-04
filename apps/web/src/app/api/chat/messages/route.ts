@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db, withRLS } from "@/lib/db";
+import { withRLS, withDb } from "@/lib/db";
 import { eq, and, asc } from "drizzle-orm";
 import { chatMessages, chatRooms, subscriptions } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
@@ -21,100 +21,104 @@ const sendMessageSchema = z.object({
 
 /** GET /api/chat/messages — fetch messages for a session */
 export async function GET(request: NextRequest) {
-  try {
-    const authResult = await requireAuth(request);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireAuth(request);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const sessionId = new URL(request.url).searchParams.get("sessionId");
-    if (!sessionId) {
-      return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
-    }
-
-    return await withRLS(ctx, async (tx) => {
-      // Look up the chat room for this session
-      const room = await tx.query.chatRooms.findFirst({
-        where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
-      });
-      if (!room) throw new NotFoundError("Chat room for this session");
-
-      const isTeacherOrAdmin = ctx.role === "TEACHER" || ctx.role === "ORG_ADMIN" || ctx.role === "SUPER_ADMIN";
-
-      const conditions = [
-        eq(chatMessages.roomId, room.id),
-        eq(chatMessages.orgId, ctx.orgId),
-      ];
-      // Students don't see hidden or deleted messages
-      if (!isTeacherOrAdmin) {
-        conditions.push(eq(chatMessages.isHidden, false));
-        conditions.push(eq(chatMessages.isDeleted, false));
+      const sessionId = new URL(request.url).searchParams.get("sessionId");
+      if (!sessionId) {
+        return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
       }
 
-      const messages = await tx.query.chatMessages.findMany({
-        where: and(...conditions),
-        with: { sender: { columns: { id: true, name: true, role: true } } },
-        orderBy: asc(chatMessages.createdAt),
-      });
+      return await withRLS(ctx, async (tx) => {
+        // Look up the chat room for this session
+        const room = await tx.query.chatRooms.findFirst({
+          where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+        });
+        if (!room) throw new NotFoundError("Chat room for this session");
 
-      return NextResponse.json({ messages });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+        const isTeacherOrAdmin = ctx.role === "TEACHER" || ctx.role === "ORG_ADMIN" || ctx.role === "SUPER_ADMIN";
+
+        const conditions = [
+          eq(chatMessages.roomId, room.id),
+          eq(chatMessages.orgId, ctx.orgId),
+        ];
+        // Students don't see hidden or deleted messages
+        if (!isTeacherOrAdmin) {
+          conditions.push(eq(chatMessages.isHidden, false));
+          conditions.push(eq(chatMessages.isDeleted, false));
+        }
+
+        const messages = await tx.query.chatMessages.findMany({
+          where: and(...conditions),
+          with: { sender: { columns: { id: true, name: true, role: true } } },
+          orderBy: asc(chatMessages.createdAt),
+        });
+
+        return NextResponse.json({ messages });
+      });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }
 
 /** POST /api/chat/messages — send a message (free tier can't chat) */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireAuth(request);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireAuth(request);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const { sessionId, content } = sendMessageSchema.parse(body);
+      const body = await request.json();
+      const { sessionId, content } = sendMessageSchema.parse(body);
 
-    return await withRLS(ctx, async (tx) => {
-      // Free tier students can't send chat messages
-      if (ctx.role === "STUDENT") {
-        const sub = await tx.query.subscriptions.findFirst({
-          where: and(eq(subscriptions.userId, ctx.userId), eq(subscriptions.status, "ACTIVE")),
-          with: { plan: true },
-        });
-        if (!sub || sub.plan.tier === "FREE") {
-          throw new ForbiddenError("Chat is not available on the Free plan. Upgrade to send messages.");
+      return await withRLS(ctx, async (tx) => {
+        // Free tier students can't send chat messages
+        if (ctx.role === "STUDENT") {
+          const sub = await tx.query.subscriptions.findFirst({
+            where: and(eq(subscriptions.userId, ctx.userId), eq(subscriptions.status, "ACTIVE")),
+            with: { plan: true },
+          });
+          if (!sub || sub.plan.tier === "FREE") {
+            throw new ForbiddenError("Chat is not available on the Free plan. Upgrade to send messages.");
+          }
         }
-      }
 
-      // Find or create chat room for this session
-      let room = await tx.query.chatRooms.findFirst({
-        where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
-      });
-      if (!room) {
-        // Auto-create a chat room for the session
-        const [newRoom] = await tx.insert(chatRooms).values({
+        // Find or create chat room for this session
+        let room = await tx.query.chatRooms.findFirst({
+          where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+        });
+        if (!room) {
+          // Auto-create a chat room for the session
+          const [newRoom] = await tx.insert(chatRooms).values({
+            orgId: ctx.orgId,
+            name: `Session ${sessionId}`,
+            sessionId,
+          }).returning();
+          room = newRoom;
+        }
+
+        const [message] = await tx.insert(chatMessages).values({
           orgId: ctx.orgId,
-          name: `Session ${sessionId}`,
-          sessionId,
+          roomId: room.id,
+          senderId: ctx.userId,
+          content,
         }).returning();
-        room = newRoom;
-      }
 
-      const [message] = await tx.insert(chatMessages).values({
-        orgId: ctx.orgId,
-        roomId: room.id,
-        senderId: ctx.userId,
-        content,
-      }).returning();
+        // Fetch sender info for response
+        const messageWithSender = await tx.query.chatMessages.findFirst({
+          where: eq(chatMessages.id, message.id),
+          with: { sender: { columns: { id: true, name: true, role: true } } },
+        });
 
-      // Fetch sender info for response
-      const messageWithSender = await tx.query.chatMessages.findFirst({
-        where: eq(chatMessages.id, message.id),
-        with: { sender: { columns: { id: true, name: true, role: true } } },
+        return NextResponse.json({ message: messageWithSender }, { status: 201 });
       });
-
-      return NextResponse.json({ message: messageWithSender }, { status: 201 });
-    });
-  } catch (error) {
-    return handleApiError(error);
-  }
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

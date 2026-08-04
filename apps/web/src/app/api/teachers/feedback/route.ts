@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { sessions, teacherFeedback } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -24,40 +24,42 @@ const feedbackSchema = z.object({
 
 /** POST /api/teachers/feedback — submit audio feedback */
 export async function POST(request: NextRequest) {
-  try {
-    const authResult = await requireRole(request, ["TEACHER"]);
-    if (authResult instanceof NextResponse) return authResult;
-    const ctx = authResult;
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["TEACHER"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
 
-    const body = await request.json();
-    const data = feedbackSchema.parse(body);
+      const body = await request.json();
+      const data = feedbackSchema.parse(body);
 
-    // Verify teacher is assigned to this session
-    const session = await db.query.sessions.findFirst({
-      where: and(eq(sessions.id, data.sessionId), eq(sessions.teacherId, ctx.userId)),
-    });
-    if (!session) throw new NotFoundError("Session");
+      // Verify teacher is assigned to this session
+      const session = await db.query.sessions.findFirst({
+        where: and(eq(sessions.id, data.sessionId), eq(sessions.teacherId, ctx.userId)),
+      });
+      if (!session) throw new NotFoundError("Session");
 
-    const [feedback] = await db.insert(teacherFeedback).values({
-      sessionId: data.sessionId,
-      teacherId: ctx.userId,
-      studentProfileId: data.studentProfileId,
-      audioUrl: data.audioUrl,
-      duration: data.duration,
-      notes: data.notes,
-    }).returning();
+      const [feedback] = await db.insert(teacherFeedback).values({
+        sessionId: data.sessionId,
+        teacherId: ctx.userId,
+        studentProfileId: data.studentProfileId,
+        audioUrl: data.audioUrl,
+        duration: data.duration,
+        notes: data.notes,
+      }).returning();
 
-    await logAudit({
-      orgId: ctx.orgId,
-      actorId: ctx.userId,
-      action: "SESSION_COMPLETED",
-      target: `feedback:${feedback.id}`,
-      metadata: { sessionId: data.sessionId, studentProfileId: data.studentProfileId },
-      ipAddress: getClientIp(request.headers),
-    });
+      await logAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.userId,
+        action: "SESSION_COMPLETED",
+        target: `feedback:${feedback.id}`,
+        metadata: { sessionId: data.sessionId, studentProfileId: data.studentProfileId },
+        ipAddress: getClientIp(request.headers),
+      });
 
-    return NextResponse.json({ feedback }, { status: 201 });
-  } catch (error) {
-    return handleApiError(error);
-  }
+      return NextResponse.json({ feedback }, { status: 201 });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
 }

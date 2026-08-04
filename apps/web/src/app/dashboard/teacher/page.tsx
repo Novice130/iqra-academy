@@ -5,7 +5,7 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, desc, sql, count, isNull, or } from "drizzle-orm";
 import { sessions, bookings, studentProfiles, users as usersTable } from "@/db/schema";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, format, formatDistanceToNow } from "date-fns";
@@ -13,6 +13,7 @@ import Link from "next/link";
 import StartInstantMeetingButton from "./StartInstantMeetingButton";
 
 export default async function TeacherDashboard() {
+  return withDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -226,6 +227,7 @@ export default async function TeacherDashboard() {
       </div>
     </div>
   );
+  });
 }
 
 function StatCard({ label, value, sub }: { label: string; value: string; sub: string }) {

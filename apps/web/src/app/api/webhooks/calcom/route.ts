@@ -9,7 +9,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, withDb } from "@/lib/db";
 import { eq, and, sql } from "drizzle-orm";
 import { users, sessions, bookings } from "@/db/schema";
 import { verifyCalcomWebhook, mapCalcomEventType } from "@/lib/calcom";
@@ -28,30 +28,32 @@ export async function POST(request: NextRequest) {
 
   const event: CalcomWebhookPayload = JSON.parse(body);
 
-  try {
-    switch (event.triggerEvent) {
-      case "BOOKING_CREATED":
-      case "BOOKING_CONFIRMED":
-        await handleBookingCreated(event);
-        break;
+  return withDb(async () => {
+    try {
+      switch (event.triggerEvent) {
+        case "BOOKING_CREATED":
+        case "BOOKING_CONFIRMED":
+          await handleBookingCreated(event);
+          break;
 
-      case "BOOKING_CANCELLED":
-        await handleBookingCancelled(event);
-        break;
+        case "BOOKING_CANCELLED":
+          await handleBookingCancelled(event);
+          break;
 
-      case "BOOKING_RESCHEDULED":
-        await handleBookingRescheduled(event);
-        break;
+        case "BOOKING_RESCHEDULED":
+          await handleBookingRescheduled(event);
+          break;
 
-      default:
-        console.log(`[CALCOM] Unhandled event: ${event.triggerEvent}`);
+        default:
+          console.log(`[CALCOM] Unhandled event: ${event.triggerEvent}`);
+      }
+
+      return NextResponse.json({ received: true });
+    } catch (error) {
+      console.error(`[CALCOM] Error handling ${event.triggerEvent}:`, error);
+      return NextResponse.json({ received: true });
     }
-
-    return NextResponse.json({ received: true });
-  } catch (error) {
-    console.error(`[CALCOM] Error handling ${event.triggerEvent}:`, error);
-    return NextResponse.json({ received: true });
-  }
+  });
 }
 
 /** Creates a Session and Booking from a Cal.com booking event */
