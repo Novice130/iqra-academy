@@ -343,16 +343,15 @@ Key files to study:
 
 ---
 
-## 🏗️ Deployment (Dockploy)
+## 🏗️ Deployment (Cloudflare Workers & Dockploy)
 
 **Domain**: `novicetutor.com`
 
-| Service | Subdomain | Docker Image |
-|---------|-----------|-------------|
-| Next.js App | `novicetutor.com` | Built from `Dockerfile` |
-| LiveKit Server | `meet.novicetutor.com` | `livekit/livekit-server:latest` |
-| Cal.com | `cal.novicetutor.com` | `calcom/cal.com:latest` |
-| Twenty CRM | `crm.novicetutor.com` | `twentycrm/twenty:latest` |
+| Service | Hosting | URL |
+|---------|---------|-----|
+| Next.js Web App | **Cloudflare Workers** (OpenNext) | `https://novicetutor.com` |
+| LiveKit Video | **LiveKit Cloud** | `wss://novice-tutor-kl6pco38.livekit.cloud` |
+| Database | **Neon Postgres** | Cloud Serverless DB |
 
 **Full guide**: See [docs/deployment-dockploy.md](docs/deployment-dockploy.md) for step-by-step instructions.
 
