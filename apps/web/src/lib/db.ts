@@ -17,7 +17,8 @@ import ws from "ws";
 import * as schema from "@/db/schema";
 
 // Enable WebSocket for local Node.js environments (npx tsx, seed scripts)
-if (typeof window === "undefined" && !process.env.OPENNEXT_CLOUDFLARE) {
+// Cloudflare Workers has native global WebSocket, so we skip polyfilling there.
+if (typeof WebSocket === "undefined" && typeof window === "undefined") {
   neonConfig.webSocketConstructor = ws;
 }
 
