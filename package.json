@@ -5,7 +5,7 @@
     "build": "turbo run build",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
-    "postinstall": "node -e \"const fs=require('fs');const src='node_modules/styled-jsx/dist/index/index.js';const dst='node_modules/styled-jsx/index.js';if(fs.existsSync(src)){const c=fs.readFileSync(src,'utf8');if(!c.includes('_interopDefaultLegacy')){return}if(fs.existsSync(dst)&&fs.readFileSync(dst,'utf8').length>1000){return}fs.copyFileSync(src,dst);console.log('✅ Patched styled-jsx index.js')}\""
+    "postinstall": "node -e \"const fs=require('fs');const src='node_modules/styled-jsx/dist/index/index.js';const dst='node_modules/styled-jsx/index.js';if(fs.existsSync(src)){const c=fs.readFileSync(src,'utf8');if(!c.includes('_interopDefaultLegacy'))process.exit(0);if(fs.existsSync(dst)&&fs.readFileSync(dst,'utf8').length>1000)process.exit(0);fs.copyFileSync(src,dst);console.log('✅ Patched styled-jsx index.js')}\""
   },
   "workspaces": [
     "apps/*"
