@@ -2,8 +2,11 @@
  * @fileoverview Session End API
  *
  * RBAC: TEACHER, ORG_ADMIN, SUPER_ADMIN (must own the session or be an admin)
- * POST /api/sessions/[id]/end — Marks a session COMPLETED when the host leaves,
- * so instant meetings stop showing as perpetually "in progress".
+ * POST /api/sessions/[id]/end — Marks a session COMPLETED when the host
+ * leaves, AND force-closes the underlying LiveKit room. Previously this
+ * only touched the DB — the LiveKit room stayed open and kept billing
+ * participant-minutes for anyone still connected (or slow to disconnect)
+ * until LiveKit's own empty-room timeout eventually caught it.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,6 +15,7 @@ import { eq } from "drizzle-orm";
 import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 
 export async function POST(
   request: NextRequest,
@@ -45,6 +49,12 @@ export async function POST(
           .set({ status: "COMPLETED", actualEnd: new Date() })
           .where(eq(sessions.id, sessionId));
       }
+
+      // Force-close the room immediately — disconnects any straggling
+      // participants right now instead of waiting on LiveKit's empty-room
+      // timeout. Not fatal if the room's already gone.
+      const roomName = session.videoRoomName || generateRoomName(sessionId);
+      await getRoomServiceClient().deleteRoom(roomName).catch(() => {});
 
       return NextResponse.json({ success: true });
     } catch (error) {

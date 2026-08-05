@@ -1,14 +1,21 @@
 "use client";
 
+import { usePathname } from "next/navigation";
+
 /**
  * Floating WhatsApp button — fixed at bottom-right.
  * Links to WhatsApp with pre-filled message.
  */
 export default function WhatsAppButton() {
+  const pathname = usePathname();
   const phoneNumber = "1234567890"; // Replace with actual number
   const message = encodeURIComponent(
     "Assalamu Alaikum! I'm interested in Quran classes for my child at Novice Tutor."
   );
+
+  // Fixed bottom-right at z-50 sits directly on top of the fullscreen call's
+  // control bar (mic/camera/leave buttons) and eats touches meant for it.
+  if (pathname?.startsWith("/dashboard/session/")) return null;
 
   return (
     <a
