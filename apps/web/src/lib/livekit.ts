@@ -38,14 +38,8 @@ export async function generateLiveKitToken(
     identity,
     name: userName,
     metadata: JSON.stringify({ email: userEmail, avatar: userAvatar || "" }),
-    ttl: `${expiresInSeconds}s`, // LiveKit ttl can accept string or number. Let's make sure it's correct. Wait, livekit-server-sdk TTL can be a number (seconds). Let's pass expiresInSeconds.
+    ttl: `${expiresInSeconds}s`,
   });
-
-  // Let's pass TTL as a number or options. In livekit-server-sdk:
-  // ttl: string | number. If it is number, it is seconds.
-  // Wait, let's just pass expiresInSeconds as number or string. Let's check `ttl: expiresInSeconds`. That's safer.
-  
-  token.ttl = expiresInSeconds;
 
   token.addGrant({
     room: roomName,
