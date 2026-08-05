@@ -4,6 +4,21 @@ This document serves as the authoritative, queryable context guide for AI agents
 
 ---
 
+## 🚦 0. Handover Summary (read this first)
+
+**As of 2026-08-05 ~7 AM**: `master` live on `novicetutor.com` and pushed to GitHub. Video calls and chat fixed and verified working (#11–#13).
+
+**Deploy**: `cd apps/web && npm run deploy:cf` — builds and deploys straight to Cloudflare, independent of git. `git push origin master` separately.
+
+**Open items**: none logged. Ask the user what else is broken before starting.
+
+**Rules, don't break these again**:
+- Every route/page touching `db` must wrap in `withDb()` (`@/lib/db`).
+- Never reassign `token.ttl` after constructing a LiveKit `AccessToken`.
+- Don't swap to the `neon-http` driver without rewriting `withRLS` and `quota.ts`.
+
+---
+
 ## 📋 1. Chronological Log of All User Requests & Features
 
 1. **Initial Platform Setup**:
@@ -34,18 +49,16 @@ This document serves as the authoritative, queryable context guide for AI agents
 10. **Graphify Knowledge Graph Integration**:
     - Installed `@sentropic/graphify` in project repository.
     - Executed codebase analysis generating `.graphify/graph.json` and `.graphify/GRAPH_REPORT.md` (536 nodes, 1223 edges, 43 code communities).
-11. **Video Call Reliability Overhaul** (superseded #3's DB fix entirely — see below):
-    - **Root cause of "Failed to Join Class" / random 500s**: `lib/db.ts` created one Neon `Pool` at module load and reused it across every request. Cloudflare Workers forbids reusing I/O objects across requests ("Cannot perform I/O on behalf of a different request") — the request would hang and time out. Confirmed live via `wrangler tail`.
-    - **Fix**: `lib/db.ts` rewritten to hand each request its own `Pool` via `AsyncLocalStorage`. `db` is a `Proxy` resolving to the current request's pool; a new `withDb(fn)` wrapper (in `lib/db.ts`) must wrap every route handler and server-component page (~30 files) so nested calls — including Better-Auth's session lookups — share one pool per request. Real interactive transactions (`withRLS`, `quota.ts`) still work unchanged.
-    - **Reverted a bad interim fix**: a parallel session had swapped the driver to `neon-http` (commit `8f6e42f`) to dodge the same symptom, but that silently broke RLS scoping (`set_config` outside a real transaction never took effect) and would have broken `quota.ts`'s dependent-query transactions. Do not reintroduce `neon-http` without rewriting those.
-    - **Root cause of "connects then Disconnected"**: `lib/livekit.ts`'s `generateLiveKitToken` set `token.ttl` twice — once correctly via the `AccessToken` constructor (`ttl: "7200s"`), then again via `token.ttl = 7200` (a bare number). The second assignment bypassed the SDK's duration parsing and wrote the raw number straight into the JWT's `exp` claim, so every token was issued already "expired" (exp = 1970-01-01 + 7200s). LiveKit accepted the signaling handshake, then killed the client once it validated the token. **Fix**: removed the redundant reassignment — the constructor option alone is correct. Confirmed by decoding the actual issued JWT before/after.
-    - **Missing `LIVEKIT_URL` secret**: never set on Cloudflare, so code fell back to a dead hardcoded host (`meet.novicetutor.com`, doesn't resolve). Set via `wrangler secret put` to the real LiveKit Cloud host.
-    - **Shareable join links were `http://localhost:3000/...` in production**: `.env.local` has `NEXT_PUBLIC_APP_URL=http://localhost:3000` for local dev, and Next.js loads `.env.local` over `.env` even during production builds. `scripts/cf-build.cjs` now force-sets `NEXT_PUBLIC_APP_URL=https://novicetutor.com` as an explicit env var passed to the build subprocess, so `.env.local` can never leak into a deploy again.
-    - **No way to end/clean up meetings**: instant-meeting sessions never left `IN_PROGRESS`, piling up in Today's Schedule and the admin's active-classes panel forever, with no shareable-link UI either.
-      - `LiveKitRoom.tsx` now POSTs `/api/sessions/[id]/end` when the moderator disconnects (marks `COMPLETED`; a student leaving doesn't end it for others).
-      - Added `DELETE /api/sessions/[id]` (deletes a session + all dependent rows: bookings, attendees, chat, feedback, progress) and `POST /api/teachers/instant-meeting/cleanup` (bulk-delete — own meetings for teachers, org-wide for admins).
-      - `StartInstantMeetingButton.tsx` now shows the join URL with a copy button before entering, instead of redirecting immediately. `SessionRowActions.tsx` and `CleanupInstantMeetingsButton.tsx` add per-row End/Delete and a one-click bulk-clear on `/dashboard/teacher`.
-    - **`/dashboard/chat` (general "Messages" page) was completely non-functional**: it called `/api/chat/messages` with no `sessionId`, but the API required one and 400'd every time. The `chatRooms` schema already had a nullable `sessionId` for exactly this case (comment: "Null = persistent room") but no code used that path. Added a per-student persistent support room (`chatRooms.name = "Support: {userId}"`, `sessionId: null`) used whenever no `sessionId` is given. Also fixed two response-shape bugs in `chat/page.tsx` that would've broken rendering regardless (`data.messages` vs bare array; `sender.name` vs a `senderName` field that never existed on the API response). **Known gap**: student-side only — teachers/admins have no inbox/room-list UI yet to see who's messaging.
+11. **Video Call Reliability Overhaul** (supersedes #3's DB fix):
+    - *"Failed to Join Class" / random 500s* — `lib/db.ts` reused one Neon `Pool` across every request; Cloudflare Workers forbids that ("Cannot perform I/O on behalf of a different request"), causing hangs. Fixed: per-request `Pool` via `AsyncLocalStorage`, `db` is a `Proxy` onto it, every route/page wraps in `withDb()`. Real transactions (`withRLS`, `quota.ts`) unaffected.
+    - Reverted a same-symptom interim fix from a parallel session that swapped to the `neon-http` driver (commit `8f6e42f`) — it silently broke RLS scoping. Don't reintroduce without rewriting `withRLS`/`quota.ts`.
+    - *Call connects then "Disconnected"* — `lib/livekit.ts` set `token.ttl` twice; the second (bare-number) assignment corrupted the JWT's `exp` claim to a 1970 timestamp, so every token was born expired. Fixed: removed the redundant reassignment.
+    - `LIVEKIT_URL` secret was never set on Cloudflare (dead fallback host). Set via `wrangler secret put`.
+    - Join links were `http://localhost:3000/...` in prod — `.env.local` overrides `.env` even in production builds. Fixed: `cf-build.cjs` force-sets `NEXT_PUBLIC_APP_URL` for the build.
+    - Instant meetings never left `IN_PROGRESS` (piled up, no share link). Added: end-on-disconnect (`/api/sessions/[id]/end`), delete (`DELETE /api/sessions/[id]`), bulk cleanup (`/api/teachers/instant-meeting/cleanup`), copy-link UI, per-row End/Delete on `/dashboard/teacher`.
+    - `/dashboard/chat` 400'd on every request (called the API with no `sessionId`, which was required). Added the persistent support-room path the schema already had a slot for (`chatRooms.sessionId: null`), plus fixed two response-shape mismatches in the frontend.
+12. **Teacher/Admin Messages Inbox**: staff had no way to see/reply to student threads. Added `studentId` param to `GET`/`POST /api/chat/messages` (staff-only) and `/dashboard/teacher/messages` (thread list, links to `/dashboard/chat?studentId=X`).
+13. **Git/CI Hygiene**: #11–#12 were deployed via `wrangler` before being pushed — deploy and git are independent, don't assume one implies the other. `.github/workflows/ci.yml` triggered on `main`, an abandoned branch 22 commits behind `master`; fixed to trigger on `master`.
 
 ---
 
