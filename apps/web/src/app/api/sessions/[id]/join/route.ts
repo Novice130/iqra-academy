@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { sessions, users, bookings, studentProfiles } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
-import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { generateLiveKitToken, generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 import { createId } from "@paralleldrive/cuid2";
 
 export async function GET(
@@ -66,6 +66,21 @@ export async function GET(
       }
 
       const roomName = generateRoomName(sessionId);
+
+      // Default the room's spotlight to the teacher so students land on a
+      // stable "teacher is the main view" layout instead of LiveKit's
+      // default active-speaker auto-focus. createRoom is a no-op against an
+      // already-created room, so this never clobbers a spotlight the
+      // teacher later set manually (e.g. spotlighting a student reciting).
+      if (isTeacher) {
+        await getRoomServiceClient()
+          .createRoom({
+            name: roomName,
+            metadata: JSON.stringify({ spotlightIdentity: user.email }),
+          })
+          .catch(() => {});
+      }
+
       const token = await generateLiveKitToken({
         roomName,
         userName: user?.name || "Participant",

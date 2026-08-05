@@ -87,7 +87,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
                 <span className={`w-2 h-2 rounded-full ${audioEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
                 Microphone
               </span>
-              <span className="font-semibold text-sm">{audioEnabled ? 'ON' : 'OFF'}</span>
+              <span className="font-semibold text-sm ml-3">{audioEnabled ? 'ON' : 'OFF'}</span>
             </button>
           </div>
 

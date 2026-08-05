@@ -1,4 +1,4 @@
-import { AccessToken } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 
 const LIVEKIT_CONFIG = {
   host: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
@@ -55,4 +55,17 @@ export async function generateLiveKitToken(
 
 export function generateRoomName(sessionId: string): string {
   return `qlms-${sessionId}`;
+}
+
+let roomServiceClient: RoomServiceClient | null = null;
+
+export function getRoomServiceClient(): RoomServiceClient {
+  if (!roomServiceClient) {
+    if (!LIVEKIT_CONFIG.apiKey || !LIVEKIT_CONFIG.apiSecret) {
+      throw new Error("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be configured");
+    }
+    const httpHost = LIVEKIT_CONFIG.host.replace(/^wss:\/\//, "https://").replace(/^ws:\/\//, "http://");
+    roomServiceClient = new RoomServiceClient(httpHost, LIVEKIT_CONFIG.apiKey, LIVEKIT_CONFIG.apiSecret);
+  }
+  return roomServiceClient;
 }
