@@ -11,6 +11,8 @@ import { sessions, bookings, studentProfiles, users as usersTable } from "@/db/s
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, format, formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import StartInstantMeetingButton from "./StartInstantMeetingButton";
+import CleanupInstantMeetingsButton from "./CleanupInstantMeetingsButton";
+import SessionRowActions from "./SessionRowActions";
 
 export default async function TeacherDashboard() {
   return withDb(async () => {
@@ -147,9 +149,12 @@ export default async function TeacherDashboard() {
                         Start Class
                       </Link>
                     ) : (
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{ background: "#dcfce7", color: "#166534" }}>
-                        {s.status.toLowerCase()}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{ background: "#dcfce7", color: "#166534" }}>
+                          {s.status.toLowerCase()}
+                        </span>
+                        <SessionRowActions sessionId={s.id} showEnd={s.status === "IN_PROGRESS"} />
+                      </div>
                     )}
                   </div>
                 );
@@ -169,6 +174,7 @@ export default async function TeacherDashboard() {
           </h2>
           <div className="space-y-3">
             <StartInstantMeetingButton />
+            <CleanupInstantMeetingsButton />
             <Link href="/dashboard/teacher/students" className="card p-4 block hover:opacity-80 transition-opacity">
               <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>👨‍🎓 My Students</div>
               <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>View progress & add feedback</div>
@@ -205,13 +211,16 @@ export default async function TeacherDashboard() {
                             with {s.teacher?.name || "Unknown Teacher"} • Started {s.actualStart ? formatDistanceToNow(s.actualStart) + " ago" : "recently"}
                           </div>
                         </div>
-                        <Link
-                          href={`/dashboard/session/${s.id}`}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-                          style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-                        >
-                          Observe
-                        </Link>
+                        <div className="flex items-center gap-2">
+                          <Link
+                            href={`/dashboard/session/${s.id}`}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                            style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
+                          >
+                            Observe
+                          </Link>
+                          <SessionRowActions sessionId={s.id} showEnd={true} />
+                        </div>
                       </div>
                     );
                   })
