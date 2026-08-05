@@ -9,8 +9,11 @@
  */
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
+import MeetingNotificationBanner from "./MeetingNotificationBanner";
+import IncomingCallOverlay from "./IncomingCallOverlay";
+import { authClient } from "@/lib/auth-client";
 
 interface DashboardUser {
   name?: string;
@@ -26,8 +29,14 @@ export default function DashboardChrome({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const isCallRoute = pathname?.startsWith("/dashboard/session/");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const signOut = async () => {
+    await authClient.signOut();
+    router.push("/login");
+  };
 
   if (isCallRoute) {
     return <>{children}</>;
@@ -42,6 +51,8 @@ export default function DashboardChrome({
       className="min-h-screen flex"
       style={{ background: "var(--bg-secondary)" }}
     >
+      <IncomingCallOverlay />
+
       {/* Sidebar */}
       <aside
         className="hidden lg:flex flex-col w-60 shrink-0"
@@ -151,9 +162,9 @@ export default function DashboardChrome({
               </div>
             </div>
           </div>
-          <a
-            href="/api/auth/sign-out"
-            className="mt-3 flex items-center justify-center w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+          <button
+            onClick={signOut}
+            className="mt-3 flex items-center justify-center w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
             style={{
               background: "var(--bg-secondary)",
               color: "var(--text-secondary)",
@@ -161,7 +172,7 @@ export default function DashboardChrome({
             }}
           >
             Sign Out
-          </a>
+          </button>
         </div>
       </aside>
 
@@ -254,9 +265,9 @@ export default function DashboardChrome({
                 </nav>
 
                 <div className="p-2" style={{ borderTop: "1px solid var(--border)" }}>
-                  <a
-                    href="/api/auth/sign-out"
-                    className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors"
+                  <button
+                    onClick={signOut}
+                    className="flex items-center justify-center w-full px-3 py-2 rounded-lg text-xs font-medium transition-colors cursor-pointer"
                     style={{
                       background: "var(--bg-secondary)",
                       color: "var(--text-secondary)",
@@ -264,13 +275,14 @@ export default function DashboardChrome({
                     }}
                   >
                     Sign Out
-                  </a>
+                  </button>
                 </div>
               </div>
             </>
           )}
         </header>
 
+        <MeetingNotificationBanner />
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
     </div>

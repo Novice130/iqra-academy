@@ -11,6 +11,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -18,6 +19,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
       navigator.mediaDevices
         .getUserMedia({ video: true, audio: false })
         .then((s) => {
+          setCameraError(null);
           setStream(s);
           if (videoRef.current) {
             videoRef.current.srcObject = s;
@@ -25,6 +27,15 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
         })
         .catch((err) => {
           console.error('Error accessing camera:', err);
+          setCameraError(
+            err?.name === 'NotAllowedError'
+              ? 'Camera access denied. Allow camera permission in your browser settings and try again.'
+              : err?.name === 'NotFoundError'
+              ? 'No camera found on this device.'
+              : err?.name === 'NotReadableError'
+              ? 'Camera is already in use by another app or tab.'
+              : 'Could not access camera. Please check your device and permissions.'
+          );
           setVideoEnabled(false);
         });
     } else {
@@ -61,7 +72,10 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
 
           <div className="flex flex-col gap-4">
             <button
-              onClick={() => setVideoEnabled(!videoEnabled)}
+              onClick={() => {
+                setCameraError(null);
+                setVideoEnabled(!videoEnabled);
+              }}
               className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
                 videoEnabled
                   ? 'bg-slate-800/80 border-emerald-500/30 text-white'
@@ -90,6 +104,12 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
               <span className="font-semibold text-sm ml-3">{audioEnabled ? 'ON' : 'OFF'}</span>
             </button>
           </div>
+
+          {cameraError && (
+            <p className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
+              {cameraError}
+            </p>
+          )}
 
           <button
             onClick={handleJoin}

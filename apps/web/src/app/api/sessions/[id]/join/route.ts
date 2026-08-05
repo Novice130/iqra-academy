@@ -25,16 +25,17 @@ export async function GET(
       const ctx = authResult;
       const { id: sessionId } = await params;
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-        with: { bookings: true },
-      });
+      const [session, user] = await Promise.all([
+        db.query.sessions.findFirst({
+          where: eq(sessions.id, sessionId),
+          with: { bookings: true },
+        }),
+        db.query.users.findFirst({
+          where: eq(users.id, ctx.userId),
+        }),
+      ]);
 
       if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
       if (!user) throw new NotFoundError("User");
 
       const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role);
@@ -72,29 +73,28 @@ export async function GET(
       // default active-speaker auto-focus. createRoom is a no-op against an
       // already-created room, so this never clobbers a spotlight the
       // teacher later set manually (e.g. spotlighting a student reciting).
-      if (isTeacher) {
-        await getRoomServiceClient()
-          .createRoom({
-            name: roomName,
-            metadata: JSON.stringify({ spotlightIdentity: user.email }),
-          })
-          .catch(() => {});
-      }
-
-      const token = await generateLiveKitToken({
-        roomName,
-        userName: user?.name || "Participant",
-        userEmail: user?.email || "",
-        isModerator: isTeacher,
-      });
-
-      // Update room name on session if not set
-      if (!session.videoRoomName) {
-        await db
-          .update(sessions)
-          .set({ videoRoomName: roomName })
-          .where(eq(sessions.id, sessionId));
-      }
+      const [token] = await Promise.all([
+        generateLiveKitToken({
+          roomName,
+          userName: user?.name || "Participant",
+          userEmail: user?.email || "",
+          isModerator: isTeacher,
+        }),
+        isTeacher
+          ? getRoomServiceClient()
+              .createRoom({
+                name: roomName,
+                metadata: JSON.stringify({ spotlightIdentity: user.email }),
+              })
+              .catch(() => {})
+          : Promise.resolve(),
+        !session.videoRoomName
+          ? db
+              .update(sessions)
+              .set({ videoRoomName: roomName })
+              .where(eq(sessions.id, sessionId))
+          : Promise.resolve(),
+      ]);
 
       return NextResponse.json({
         roomName,

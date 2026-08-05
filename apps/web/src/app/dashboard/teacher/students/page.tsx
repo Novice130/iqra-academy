@@ -10,6 +10,7 @@ import { bookings, sessions, studentProfiles, progressRecords, lessonContent, us
 import { format } from "date-fns";
 import Link from "next/link";
 import AssignStudentModal from "./AssignStudentModal";
+import CallStudentButton from "./CallStudentButton";
 
 export default async function TeacherStudentsPage() {
   return withDb(async () => {
@@ -157,13 +158,16 @@ export default async function TeacherStudentsPage() {
                     <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>
                       {latestNote?.teacherNotes ? `📝 ${latestNote.teacherNotes}` : "No feedback yet."}
                     </p>
-                    <Link 
-                      href={`/dashboard/teacher/students/${student.id}`}
-                      className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-opacity-10 hover:bg-accent" 
-                      style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-                    >
-                      View Details
-                    </Link>
+                    <div className="flex items-center gap-2">
+                      <CallStudentButton studentProfileId={student.id} studentName={student.name} />
+                      <Link
+                        href={`/dashboard/teacher/students/${student.id}`}
+                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-opacity-10 hover:bg-accent"
+                        style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
+                      >
+                        View Details
+                      </Link>
+                    </div>
                   </div>
                 </div>
               </div>

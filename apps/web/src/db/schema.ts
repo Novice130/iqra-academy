@@ -158,6 +158,20 @@ export const recordingAccessEnum = pgEnum("RecordingAccess", [
  * CRM sync event types.
  * Tracks what was synced to the external CRM (e.g., HubSpot).
  */
+/** Notification categories — extend as new in-app notification types are needed. */
+export const notificationTypeEnum = pgEnum("NotificationType", [
+  "MEETING_STARTED",
+]);
+
+/** Direct call ring state machine. */
+export const callStatusEnum = pgEnum("CallStatus", [
+  "RINGING",
+  "ACCEPTED",
+  "DECLINED",
+  "CANCELLED",
+  "EXPIRED",
+]);
+
 export const crmSyncTypeEnum = pgEnum("CrmSyncType", [
   "CONTACT_CREATED",
   "CONTACT_UPDATED",
@@ -630,6 +644,30 @@ export const sessionAttendees = pgTable(
   },
   (t) => [
     uniqueIndex("session_attendees_unique_idx").on(t.sessionId, t.studentProfileId),
+  ]
+);
+
+/**
+ * Notification — in-app alert for a user (e.g. "your teacher started a meeting").
+ * 📚 No push/real-time transport yet — delivered via client polling
+ * (GET /api/notifications/unread). isRead is set once the client
+ * acknowledges/dismisses it.
+ */
+export const notifications = pgTable(
+  "notifications",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    userId: text("user_id").notNull().references(() => users.id),
+    type: notificationTypeEnum("type").notNull(),
+    sessionId: text("session_id").references(() => sessions.id),
+    message: text("message").notNull(),
+    isRead: boolean("is_read").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("notifications_user_idx").on(t.userId),
+    index("notifications_session_idx").on(t.sessionId),
   ]
 );
 
@@ -1116,6 +1154,44 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 export const sessionAttendeesRelations = relations(sessionAttendees, ({ one }) => ({
   session: one(sessions, { fields: [sessionAttendees.sessionId], references: [sessions.id] }),
   studentProfile: one(studentProfiles, { fields: [sessionAttendees.studentProfileId], references: [studentProfiles.id] }),
+}));
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  org: one(organizations, { fields: [notifications.orgId], references: [organizations.id] }),
+  user: one(users, { fields: [notifications.userId], references: [users.id] }),
+  session: one(sessions, { fields: [notifications.sessionId], references: [sessions.id] }),
+}));
+
+/**
+ * CallInvite — a direct "ring" from a teacher to a specific student.
+ * 📚 Separate from `notifications`: a call needs a two-way state machine
+ * (ringing → accepted/declined/cancelled/expired) so the caller's UI can
+ * react the moment the callee answers, not just a one-way alert.
+ */
+export const callInvites = pgTable(
+  "call_invites",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    callerId: text("caller_id").notNull().references(() => users.id),
+    calleeId: text("callee_id").notNull().references(() => users.id),
+    status: callStatusEnum("status").notNull().default("RINGING"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    respondedAt: timestamp("responded_at"),
+  },
+  (t) => [
+    index("call_invites_callee_idx").on(t.calleeId),
+    index("call_invites_caller_idx").on(t.callerId),
+    index("call_invites_session_idx").on(t.sessionId),
+  ]
+);
+
+export const callInvitesRelations = relations(callInvites, ({ one }) => ({
+  org: one(organizations, { fields: [callInvites.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [callInvites.sessionId], references: [sessions.id] }),
+  caller: one(users, { fields: [callInvites.callerId], references: [users.id] }),
+  callee: one(users, { fields: [callInvites.calleeId], references: [users.id] }),
 }));
 
 export const lessonContentRelations = relations(lessonContent, ({ one, many }) => ({

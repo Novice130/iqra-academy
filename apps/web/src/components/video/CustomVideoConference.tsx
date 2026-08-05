@@ -17,6 +17,7 @@ import {
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
+import AddStudentToCallButton from './AddStudentToCallButton';
 
 /**
  * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
@@ -188,10 +189,36 @@ function TopBar({
       </div>
       <div className="flex items-center gap-2">
         {!isModerator && <ViewModeToggle viewMode={viewMode} onChange={onViewModeChange} />}
+        {isModerator && <AddStudentToCallButton sessionId={sessionId} />}
         <CopyLinkButton sessionId={sessionId} />
       </div>
     </div>
   );
+}
+
+/**
+ * Tracks whether the *viewport* is portrait or landscape — a phone held
+ * upright vs. a laptop/tablet/phone rotated sideways. Driving the self-view
+ * box's aspect ratio off this (rather than a fixed landscape box) means a
+ * phone's tall camera feed isn't squeezed into a wide box and center-cropped
+ * down to a sliver near the top.
+ */
+function useViewportOrientation(): 'portrait' | 'landscape' {
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(() =>
+    typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches
+      ? 'portrait'
+      : 'landscape'
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia('(orientation: portrait)');
+    const handler = () => setOrientation(mql.matches ? 'portrait' : 'landscape');
+    handler();
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
+
+  return orientation;
 }
 
 /**
@@ -204,6 +231,8 @@ function TopBar({
 function DraggableSelfView({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const elRef = useRef<HTMLDivElement>(null);
+  const orientation = useViewportOrientation();
+  const boxSize = orientation === 'portrait' ? { width: 100, height: 168 } : { width: 168, height: 100 };
   const dragState = useRef<{ dragging: boolean; startX: number; startY: number; startPosX: number; startPosY: number }>({
     dragging: false,
     startX: 0,
@@ -249,15 +278,15 @@ function DraggableSelfView({ trackRef }: { trackRef: TrackReferenceOrPlaceholder
       onPointerUp={onPointerUp}
       className="absolute z-40 rounded-lg overflow-hidden cursor-grab active:cursor-grabbing"
       style={{
-        width: 160,
-        height: 120,
+        width: boxSize.width,
+        height: boxSize.height,
         ...(pos ? { left: pos.x, top: pos.y } : { right: 16, bottom: 84 }),
         border: '2px solid rgba(255,255,255,0.35)',
         boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
         touchAction: 'none',
       }}
     >
-      <ParticipantTile trackRef={trackRef} />
+      <ParticipantTile trackRef={trackRef} className="w-full h-full" />
     </div>
   );
 }
