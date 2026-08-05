@@ -3,8 +3,9 @@
  *
  * RBAC: STUDENT/TEACHER (GET/POST), TEACHER/ORG_ADMIN (moderation)
  * GET  /api/chat/messages?sessionId=xxx — Get chat messages for a session
- * GET  /api/chat/messages — Get messages for the student's persistent support thread
- * POST /api/chat/messages — Send a chat message (sessionId optional — omit for support chat)
+ * GET  /api/chat/messages — Get messages for the caller's persistent support thread (STUDENT)
+ * GET  /api/chat/messages?studentId=xxx — Get messages for a student's support thread (TEACHER/ADMIN)
+ * POST /api/chat/messages — Send a chat message (sessionId or studentId optional depending on role)
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -17,15 +18,18 @@ import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 
 const sendMessageSchema = z.object({
   sessionId: z.string().min(1).optional(),
+  studentId: z.string().min(1).optional(),
   content: z.string().min(1).max(500),
 });
+
+const STAFF_ROLES = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"];
 
 /** Deterministic name for a student's persistent 1:1 support room. */
 function supportRoomName(studentUserId: string) {
   return `Support: ${studentUserId}`;
 }
 
-/** GET /api/chat/messages — fetch messages for a session, or the caller's support thread */
+/** GET /api/chat/messages — fetch messages for a session, a student's support thread, or the caller's own */
 export async function GET(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -33,7 +37,9 @@ export async function GET(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const sessionId = new URL(request.url).searchParams.get("sessionId");
+      const { searchParams } = new URL(request.url);
+      const sessionId = searchParams.get("sessionId");
+      const studentId = searchParams.get("studentId");
 
       return await withRLS(ctx, async (tx) => {
         let room;
@@ -42,6 +48,18 @@ export async function GET(request: NextRequest) {
             where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
           });
           if (!room) throw new NotFoundError("Chat room for this session");
+        } else if (studentId) {
+          if (!STAFF_ROLES.includes(ctx.role)) {
+            throw new ForbiddenError("Only staff can view a student's support thread.");
+          }
+          room = await tx.query.chatRooms.findFirst({
+            where: and(
+              eq(chatRooms.name, supportRoomName(studentId)),
+              eq(chatRooms.orgId, ctx.orgId),
+              isNull(chatRooms.sessionId)
+            ),
+          });
+          if (!room) return NextResponse.json({ messages: [] });
         } else if (ctx.role === "STUDENT") {
           // No sessionId — this is the student's persistent support thread with the school.
           room = await tx.query.chatRooms.findFirst({
@@ -53,18 +71,18 @@ export async function GET(request: NextRequest) {
           });
           if (!room) return NextResponse.json({ messages: [] });
         } else {
-          // Teachers/admins have no student selected yet — nothing to show.
+          // Staff with no student selected — nothing to show.
           return NextResponse.json({ messages: [] });
         }
 
-        const isTeacherOrAdmin = ctx.role === "TEACHER" || ctx.role === "ORG_ADMIN" || ctx.role === "SUPER_ADMIN";
+        const isStaff = STAFF_ROLES.includes(ctx.role);
 
         const conditions = [
           eq(chatMessages.roomId, room.id),
           eq(chatMessages.orgId, ctx.orgId),
         ];
         // Students don't see hidden or deleted messages
-        if (!isTeacherOrAdmin) {
+        if (!isStaff) {
           conditions.push(eq(chatMessages.isHidden, false));
           conditions.push(eq(chatMessages.isDeleted, false));
         }
@@ -83,7 +101,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-/** POST /api/chat/messages — send a message (free tier can't chat) */
+/** POST /api/chat/messages — send a message (free tier students can't chat) */
 export async function POST(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -92,7 +110,7 @@ export async function POST(request: NextRequest) {
       const ctx = authResult;
 
       const body = await request.json();
-      const { sessionId, content } = sendMessageSchema.parse(body);
+      const { sessionId, studentId, content } = sendMessageSchema.parse(body);
 
       return await withRLS(ctx, async (tx) => {
         // Free tier students can't send chat messages
@@ -106,41 +124,39 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Find or create the chat room: session-scoped if sessionId given,
-        // otherwise the student's persistent support thread.
-        let room;
+        // Resolve (find-or-create) the room: session-scoped, a specific
+        // student's support thread (staff replying), or the caller's own
+        // support thread (student messaging the school).
+        let roomName: string;
+        let roomSessionId: string | null = null;
+
         if (sessionId) {
-          room = await tx.query.chatRooms.findFirst({
-            where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
-          });
-          if (!room) {
-            const [newRoom] = await tx.insert(chatRooms).values({
-              orgId: ctx.orgId,
-              name: `Session ${sessionId}`,
-              sessionId,
-            }).returning();
-            room = newRoom;
+          roomName = `Session ${sessionId}`;
+          roomSessionId = sessionId;
+        } else if (studentId) {
+          if (!STAFF_ROLES.includes(ctx.role)) {
+            throw new ForbiddenError("Only staff can reply in a student's support thread.");
           }
+          roomName = supportRoomName(studentId);
         } else {
           if (ctx.role !== "STUDENT") {
-            throw new ForbiddenError("Select a class to message in.");
+            throw new ForbiddenError("Select a class or student to message.");
           }
-          const roomName = supportRoomName(ctx.userId);
-          room = await tx.query.chatRooms.findFirst({
-            where: and(
-              eq(chatRooms.name, roomName),
-              eq(chatRooms.orgId, ctx.orgId),
-              isNull(chatRooms.sessionId)
-            ),
-          });
-          if (!room) {
-            const [newRoom] = await tx.insert(chatRooms).values({
-              orgId: ctx.orgId,
-              name: roomName,
-              sessionId: null,
-            }).returning();
-            room = newRoom;
-          }
+          roomName = supportRoomName(ctx.userId);
+        }
+
+        const roomWhere = roomSessionId
+          ? and(eq(chatRooms.sessionId, roomSessionId), eq(chatRooms.orgId, ctx.orgId))
+          : and(eq(chatRooms.name, roomName), eq(chatRooms.orgId, ctx.orgId), isNull(chatRooms.sessionId));
+
+        let room = await tx.query.chatRooms.findFirst({ where: roomWhere });
+        if (!room) {
+          const [newRoom] = await tx.insert(chatRooms).values({
+            orgId: ctx.orgId,
+            name: roomName,
+            sessionId: roomSessionId,
+          }).returning();
+          room = newRoom;
         }
 
         const [message] = await tx.insert(chatMessages).values({

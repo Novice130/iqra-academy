@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { format } from "date-fns";
 
@@ -14,6 +15,10 @@ interface Message {
 
 export default function ChatPage() {
   const { data: session } = authClient.useSession();
+  const searchParams = useSearchParams();
+  const studentId = searchParams.get("studentId");
+  const studentName = searchParams.get("studentName");
+
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
@@ -25,8 +30,12 @@ export default function ChatPage() {
   // 1. Fetch messages
   useEffect(() => {
     async function fetchMessages() {
+      setLoading(true);
       try {
-        const res = await fetch("/api/chat/messages");
+        const url = studentId
+          ? `/api/chat/messages?studentId=${encodeURIComponent(studentId)}`
+          : "/api/chat/messages";
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           setMessages(data.messages || []);
@@ -38,7 +47,7 @@ export default function ChatPage() {
       }
     }
     fetchMessages();
-  }, []);
+  }, [studentId]);
 
   // 2. Auto-scroll to bottom
   useEffect(() => {
@@ -55,7 +64,7 @@ export default function ChatPage() {
       const res = await fetch("/api/chat/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: message }),
+        body: JSON.stringify({ content: message, ...(studentId ? { studentId } : {}) }),
       });
 
       if (res.ok) {
@@ -73,6 +82,9 @@ export default function ChatPage() {
     }
   };
 
+  const headerName = studentName || "Academy Support / Teacher";
+  const headerInitial = (studentName || "T")[0].toUpperCase();
+
   return (
     <div className="p-6 lg:p-10 max-w-3xl h-[calc(100vh-120px)] flex flex-col">
       <div className="mb-6">
@@ -80,7 +92,7 @@ export default function ChatPage() {
           Messages
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-          Chat with your teacher
+          {studentId ? "Support thread" : "Chat with your teacher"}
         </p>
       </div>
 
@@ -89,10 +101,10 @@ export default function ChatPage() {
         {/* Header */}
         <div className="flex items-center gap-3 p-4" style={{ borderBottom: "1px solid var(--border)" }}>
           <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white" style={{ background: "var(--accent)" }}>
-            T
+            {headerInitial}
           </div>
           <div>
-            <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>Academy Support / Teacher</div>
+            <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{headerName}</div>
             <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>Online</div>
           </div>
         </div>

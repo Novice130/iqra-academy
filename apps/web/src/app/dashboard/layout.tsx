@@ -71,7 +71,9 @@ export default async function DashboardLayout({
           <SidebarItem href="/dashboard" label="Home" />
           <SidebarItem href="/dashboard/booking" label="Book a Class" />
           <SidebarItem href="/dashboard/progress" label="Progress" />
-          <SidebarItem href="/dashboard/chat" label="Messages" />
+          {!["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "") && (
+            <SidebarItem href="/dashboard/chat" label="Messages" />
+          )}
           <SidebarItem href="/dashboard/schedule" label="Schedule" />
 
           <div className="pt-5 pb-1.5 px-3">
@@ -96,6 +98,7 @@ export default async function DashboardLayout({
                 </div>
               </div>
               <SidebarItem href="/dashboard/teacher" label="Teacher Home" />
+              <SidebarItem href="/dashboard/teacher/messages" label="Messages" />
               <SidebarItem
                 href="/dashboard/teacher/students"
                 label="My Students"
