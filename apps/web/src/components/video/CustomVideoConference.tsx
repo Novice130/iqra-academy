@@ -18,6 +18,8 @@ import {
   useCreateLayoutContext,
 } from '@livekit/components-react';
 import AddStudentToCallButton from './AddStudentToCallButton';
+import BackgroundBlurToggle from './BackgroundBlurToggle';
+import MuteControls from './MuteControls';
 
 /**
  * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
@@ -189,6 +191,8 @@ function TopBar({
       </div>
       <div className="flex items-center gap-2">
         {!isModerator && <ViewModeToggle viewMode={viewMode} onChange={onViewModeChange} />}
+        <BackgroundBlurToggle />
+        <MuteControls sessionId={sessionId} isModerator={isModerator} />
         {isModerator && <AddStudentToCallButton sessionId={sessionId} />}
         <CopyLinkButton sessionId={sessionId} />
       </div>
@@ -326,7 +330,18 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identity }),
-      }).catch(() => setPendingSpotlight(undefined));
+      })
+        .then((res) => {
+          // fetch() only rejects on network failure, not on 4xx/5xx — a
+          // silent server-side failure here (e.g. host check mismatch)
+          // would otherwise look like it worked (the host's own view never
+          // reflects spotlight state) while students never see the change.
+          if (!res.ok) {
+            console.error('Spotlight update failed', res.status);
+            setPendingSpotlight(undefined);
+          }
+        })
+        .catch(() => setPendingSpotlight(undefined));
     },
     [sessionId]
   );

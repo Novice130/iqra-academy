@@ -70,9 +70,33 @@ export async function GET(
 
       // Default the room's spotlight to the teacher so students land on a
       // stable "teacher is the main view" layout instead of LiveKit's
-      // default active-speaker auto-focus. createRoom is a no-op against an
-      // already-created room, so this never clobbers a spotlight the
-      // teacher later set manually (e.g. spotlighting a student reciting).
+      // default active-speaker auto-focus. createRoom alone isn't enough:
+      // if a student's connection reaches LiveKit first, it can implicitly
+      // auto-create the room with empty metadata, and createRoom then
+      // becomes a no-op — leaving spotlightIdentity unset for the whole
+      // session. So after createRoom, also check the room's actual current
+      // metadata and backfill spotlightIdentity if it's missing (but never
+      // overwrite a spotlight the teacher already set manually).
+      const ensureSpotlight = async () => {
+        const svc = getRoomServiceClient();
+        await svc
+          .createRoom({ name: roomName, metadata: JSON.stringify({ spotlightIdentity: user.email }) })
+          .catch(() => {});
+        try {
+          const rooms = await svc.listRooms([roomName]);
+          const existing = rooms[0]?.metadata ? JSON.parse(rooms[0].metadata) : {};
+          if (!existing.spotlightIdentity) {
+            await svc.updateRoomMetadata(
+              roomName,
+              JSON.stringify({ ...existing, spotlightIdentity: user.email })
+            );
+          }
+        } catch {
+          // Best-effort — worst case the room falls back to LiveKit's
+          // default active-speaker view instead of a stable teacher focus.
+        }
+      };
+
       const [token] = await Promise.all([
         generateLiveKitToken({
           roomName,
@@ -80,14 +104,7 @@ export async function GET(
           userEmail: user?.email || "",
           isModerator: isTeacher,
         }),
-        isTeacher
-          ? getRoomServiceClient()
-              .createRoom({
-                name: roomName,
-                metadata: JSON.stringify({ spotlightIdentity: user.email }),
-              })
-              .catch(() => {})
-          : Promise.resolve(),
+        isTeacher ? ensureSpotlight() : Promise.resolve(),
         !session.videoRoomName
           ? db
               .update(sessions)
