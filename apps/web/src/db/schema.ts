@@ -161,6 +161,7 @@ export const recordingAccessEnum = pgEnum("RecordingAccess", [
 /** Notification categories — extend as new in-app notification types are needed. */
 export const notificationTypeEnum = pgEnum("NotificationType", [
   "MEETING_STARTED",
+  "NEW_MESSAGE",
 ]);
 
 /** Direct call ring state machine. */

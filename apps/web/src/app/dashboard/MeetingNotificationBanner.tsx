@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * Meeting Notification Banner — polls for "meeting started" notifications.
+ * Notification Banner — polls for "meeting started" and "new message"
+ * notifications.
  *
  * No real-time transport (websocket/SSE/push) exists in this app yet, so
  * this polls a lightweight endpoint on an interval. Only mounted while the
@@ -36,7 +37,9 @@ export default function MeetingNotificationBanner() {
         if (cancelled) return;
 
         const next = (data.notifications as NotificationItem[] | undefined)?.find(
-          (n) => n.type === "MEETING_STARTED" && !dismissedIds.current.has(n.id)
+          (n) =>
+            (n.type === "MEETING_STARTED" || n.type === "NEW_MESSAGE") &&
+            !dismissedIds.current.has(n.id)
         );
         setNotification(next || null);
       } catch {
@@ -58,13 +61,17 @@ export default function MeetingNotificationBanner() {
     fetch(`/api/notifications/${id}/read`, { method: "POST" }).catch(() => {});
   };
 
-  const join = async () => {
+  const act = async () => {
     if (!notification) return;
-    const { id, sessionId } = notification;
+    const { id, sessionId, type } = notification;
     dismissedIds.current.add(id);
     setNotification(null);
     fetch(`/api/notifications/${id}/read`, { method: "POST" }).catch(() => {});
-    if (sessionId) router.push(`/dashboard/session/${sessionId}`);
+    if (type === "MEETING_STARTED" && sessionId) {
+      router.push(`/dashboard/session/${sessionId}`);
+    } else if (type === "NEW_MESSAGE") {
+      router.push("/dashboard/chat");
+    }
   };
 
   if (!notification) return null;
@@ -77,11 +84,11 @@ export default function MeetingNotificationBanner() {
       <span className="text-sm font-medium">{notification.message}</span>
       <div className="flex items-center gap-2 shrink-0">
         <button
-          onClick={join}
+          onClick={act}
           className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
           style={{ background: "rgba(255,255,255,0.2)" }}
         >
-          Join Now
+          {notification.type === "NEW_MESSAGE" ? "View Message" : "Join Now"}
         </button>
         <button
           onClick={() => dismiss(notification.id)}

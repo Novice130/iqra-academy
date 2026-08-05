@@ -13,9 +13,11 @@ export default function WhatsAppButton() {
     "Assalamu Alaikum! I'm interested in Quran classes for my child at Novice Tutor."
   );
 
-  // Fixed bottom-right at z-50 sits directly on top of the fullscreen call's
-  // control bar (mic/camera/leave buttons) and eats touches meant for it.
-  if (pathname?.startsWith("/dashboard/session/")) return null;
+  // Marketing widget only — the logged-in app has its own in-app messaging
+  // (student support chat), and this button's fixed bottom-right/z-50
+  // position sits on top of in-app UI on every other route (most visibly
+  // the fullscreen call's control bar).
+  if (pathname !== "/") return null;
 
   return (
     <a

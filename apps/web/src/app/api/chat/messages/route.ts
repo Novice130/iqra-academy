@@ -12,9 +12,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
 import { eq, and, asc, isNull } from "drizzle-orm";
-import { chatMessages, chatRooms, subscriptions } from "@/db/schema";
+import { chatMessages, chatRooms, notifications, subscriptions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
+import { createId } from "@paralleldrive/cuid2";
 
 const sendMessageSchema = z.object({
   sessionId: z.string().min(1).optional(),
@@ -171,6 +172,22 @@ export async function POST(request: NextRequest) {
           where: eq(chatMessages.id, message.id),
           with: { sender: { columns: { id: true, name: true, role: true } } },
         });
+
+        // Notify the student when staff replies in their support thread —
+        // the polling banner (no push infra exists here yet) surfaces it.
+        if (studentId && STAFF_ROLES.includes(ctx.role)) {
+          const sender = await tx.query.users.findFirst({
+            where: eq(users.id, ctx.userId),
+            columns: { name: true },
+          });
+          await tx.insert(notifications).values({
+            id: createId(),
+            orgId: ctx.orgId,
+            userId: studentId,
+            type: "NEW_MESSAGE",
+            message: `${sender?.name || "Your teacher"} sent you a message.`,
+          });
+        }
 
         return NextResponse.json({ message: messageWithSender }, { status: 201 });
       });
