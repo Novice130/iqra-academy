@@ -8,7 +8,7 @@ import { usePathname } from "next/navigation";
  */
 export default function WhatsAppButton() {
   const pathname = usePathname();
-  const phoneNumber = "1234567890"; // Replace with actual number
+  const phoneNumber = "14155197868"; // +1 (415) 519-7868
   const message = encodeURIComponent(
     "Assalamu Alaikum! I'm interested in Quran classes for my child at Novice Tutor."
   );
