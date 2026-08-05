@@ -18,8 +18,9 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { canAccessAdmin, adminResources, adminBranding, adminMeta } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
-import { users } from "@/db/schema";
-import { sql, eq } from "drizzle-orm";
+import { users, sessions } from "@/db/schema";
+import { sql, eq, inArray } from "drizzle-orm";
+import { getRoomServiceClient } from "@/lib/livekit";
 
 /**
  * Server-side admin panel page.
@@ -50,6 +51,7 @@ export default async function AdminPage() {
 
   // Fetch table counts for the dashboard
   const tableCounts = await getTableCounts();
+  const liveClasses = await getLiveClasses();
 
   return (
     <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e2e8f0" }}>
@@ -114,6 +116,62 @@ export default async function AdminPage() {
             </div>
           ))}
         </div>
+
+        {/* Live Classes — reads directly from LiveKit, not the DB session
+            status column, so a session stuck at SCHEDULED/COMPLETED in the
+            DB but still actually connected on LiveKit still shows up here. */}
+        <section style={{ marginBottom: "32px" }}>
+          <h2 style={{
+            fontSize: "18px",
+            fontWeight: 600,
+            color: "#ef4444",
+            borderBottom: "1px solid #334155",
+            paddingBottom: "8px",
+            marginBottom: "16px",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+          }}>
+            🔴 Live Now ({liveClasses.length})
+          </h2>
+          {liveClasses.length === 0 ? (
+            <div style={{ color: "#64748b", fontSize: "14px" }}>No classes currently live.</div>
+          ) : (
+            <div style={{ display: "grid", gap: "10px" }}>
+              {liveClasses.map((room) => (
+                <div key={room.name} style={{
+                  background: "#1e293b",
+                  borderRadius: "8px",
+                  padding: "14px 16px",
+                  border: "1px solid #334155",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}>
+                  <div>
+                    <div style={{ fontSize: "14px", fontWeight: 500 }}>
+                      {room.session ? (room.session.title || room.session.track || "Quran Class") : room.name}
+                    </div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                      {room.session ? `Teacher: ${room.session.teacherName}` : "No matching session record"}
+                      {room.creationTime && ` • started ${new Date(room.creationTime).toLocaleTimeString()}`}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                    <span style={{ fontSize: "13px", color: "#a7f3d0" }}>
+                      {room.numParticipants} participant{room.numParticipants === 1 ? "" : "s"}
+                    </span>
+                    {room.session && (
+                      <a href={`/dashboard/session/${room.session.id}`} style={{ fontSize: "12px", color: "#10b981", textDecoration: "none" }}>
+                        View →
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Table Navigation */}
         {Object.entries(adminResources).map(([key, group]) => (
@@ -236,6 +294,45 @@ export default async function AdminPage() {
     </div>
   );
   });
+}
+
+/**
+ * Fetch every room currently open on LiveKit — the actual billing/live
+ * source of truth — and match each back to its session row for display.
+ * A room can be live here even if its DB session status disagrees.
+ */
+async function getLiveClasses() {
+  try {
+    const rooms = await getRoomServiceClient().listRooms();
+    if (rooms.length === 0) return [];
+
+    const sessionIds = rooms.map((r) => r.name.replace(/^qlms-/, ""));
+    const matchedSessions = await db.query.sessions.findMany({
+      where: inArray(sessions.id, sessionIds),
+      with: { teacher: { columns: { name: true } } },
+    });
+    const byId = new Map(matchedSessions.map((s) => [s.id, s]));
+    // Fallback for rooms whose videoRoomName was set explicitly instead of
+    // following the default qlms-<sessionId> naming.
+    const byVideoRoomName = new Map(
+      matchedSessions.filter((s) => s.videoRoomName).map((s) => [s.videoRoomName, s])
+    );
+
+    return rooms.map((r) => {
+      const session = byId.get(r.name.replace(/^qlms-/, "")) || byVideoRoomName.get(r.name);
+      return {
+        name: r.name,
+        numParticipants: r.numParticipants,
+        creationTime: r.creationTime ? Number(r.creationTime) * 1000 : null,
+        session: session
+          ? { id: session.id, title: session.title, track: session.track, teacherName: session.teacher.name }
+          : null,
+      };
+    });
+  } catch {
+    // LiveKit unreachable or not configured — don't break the whole page.
+    return [];
+  }
 }
 
 /**
