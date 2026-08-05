@@ -52,11 +52,21 @@ try {
   console.error("❌ Failed to patch @noble/ciphers:", err.message);
 }
 
+// NEXT_PUBLIC_* vars get compiled into the bundle at build time and Next.js
+// prioritizes .env.local (meant for `next dev` overrides) over .env even
+// during production builds. Force the production URL here so a stray
+// .env.local (e.g. NEXT_PUBLIC_APP_URL=http://localhost:3000 for local dev)
+// can never leak into a deployed build again.
+const buildEnv = {
+  ...process.env,
+  NEXT_PUBLIC_APP_URL: "https://novicetutor.com",
+};
+
 console.log("🔨 Running @opennextjs/cloudflare build...");
 const buildResult = spawnSync(
   "npx",
   ["@opennextjs/cloudflare", "build"],
-  { stdio: "inherit", cwd: root, shell: true }
+  { stdio: "inherit", cwd: root, shell: true, env: buildEnv }
 );
 
 if (buildResult.status === 0) {
@@ -81,7 +91,7 @@ if (buildResult.status === 0) {
   const retryResult = spawnSync(
     "npx",
     ["@opennextjs/cloudflare", "build"],
-    { stdio: "inherit", cwd: root, shell: true }
+    { stdio: "inherit", cwd: root, shell: true, env: buildEnv }
   );
 
   if (retryResult.status !== 0) {

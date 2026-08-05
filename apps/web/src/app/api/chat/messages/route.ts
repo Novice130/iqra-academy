@@ -1,25 +1,31 @@
 /**
- * @fileoverview Chat Messages API (moderated in-session chat)
+ * @fileoverview Chat Messages API (moderated in-session chat + persistent support chat)
  *
  * RBAC: STUDENT/TEACHER (GET/POST), TEACHER/ORG_ADMIN (moderation)
  * GET  /api/chat/messages?sessionId=xxx — Get chat messages for a session
- * POST /api/chat/messages — Send a chat message
+ * GET  /api/chat/messages — Get messages for the student's persistent support thread
+ * POST /api/chat/messages — Send a chat message (sessionId optional — omit for support chat)
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
-import { eq, and, asc } from "drizzle-orm";
+import { eq, and, asc, isNull } from "drizzle-orm";
 import { chatMessages, chatRooms, subscriptions } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 
 const sendMessageSchema = z.object({
-  sessionId: z.string().min(1),
+  sessionId: z.string().min(1).optional(),
   content: z.string().min(1).max(500),
 });
 
-/** GET /api/chat/messages — fetch messages for a session */
+/** Deterministic name for a student's persistent 1:1 support room. */
+function supportRoomName(studentUserId: string) {
+  return `Support: ${studentUserId}`;
+}
+
+/** GET /api/chat/messages — fetch messages for a session, or the caller's support thread */
 export async function GET(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -28,16 +34,28 @@ export async function GET(request: NextRequest) {
       const ctx = authResult;
 
       const sessionId = new URL(request.url).searchParams.get("sessionId");
-      if (!sessionId) {
-        return NextResponse.json({ error: "sessionId is required" }, { status: 400 });
-      }
 
       return await withRLS(ctx, async (tx) => {
-        // Look up the chat room for this session
-        const room = await tx.query.chatRooms.findFirst({
-          where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
-        });
-        if (!room) throw new NotFoundError("Chat room for this session");
+        let room;
+        if (sessionId) {
+          room = await tx.query.chatRooms.findFirst({
+            where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+          });
+          if (!room) throw new NotFoundError("Chat room for this session");
+        } else if (ctx.role === "STUDENT") {
+          // No sessionId — this is the student's persistent support thread with the school.
+          room = await tx.query.chatRooms.findFirst({
+            where: and(
+              eq(chatRooms.name, supportRoomName(ctx.userId)),
+              eq(chatRooms.orgId, ctx.orgId),
+              isNull(chatRooms.sessionId)
+            ),
+          });
+          if (!room) return NextResponse.json({ messages: [] });
+        } else {
+          // Teachers/admins have no student selected yet — nothing to show.
+          return NextResponse.json({ messages: [] });
+        }
 
         const isTeacherOrAdmin = ctx.role === "TEACHER" || ctx.role === "ORG_ADMIN" || ctx.role === "SUPER_ADMIN";
 
@@ -88,18 +106,41 @@ export async function POST(request: NextRequest) {
           }
         }
 
-        // Find or create chat room for this session
-        let room = await tx.query.chatRooms.findFirst({
-          where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
-        });
-        if (!room) {
-          // Auto-create a chat room for the session
-          const [newRoom] = await tx.insert(chatRooms).values({
-            orgId: ctx.orgId,
-            name: `Session ${sessionId}`,
-            sessionId,
-          }).returning();
-          room = newRoom;
+        // Find or create the chat room: session-scoped if sessionId given,
+        // otherwise the student's persistent support thread.
+        let room;
+        if (sessionId) {
+          room = await tx.query.chatRooms.findFirst({
+            where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+          });
+          if (!room) {
+            const [newRoom] = await tx.insert(chatRooms).values({
+              orgId: ctx.orgId,
+              name: `Session ${sessionId}`,
+              sessionId,
+            }).returning();
+            room = newRoom;
+          }
+        } else {
+          if (ctx.role !== "STUDENT") {
+            throw new ForbiddenError("Select a class to message in.");
+          }
+          const roomName = supportRoomName(ctx.userId);
+          room = await tx.query.chatRooms.findFirst({
+            where: and(
+              eq(chatRooms.name, roomName),
+              eq(chatRooms.orgId, ctx.orgId),
+              isNull(chatRooms.sessionId)
+            ),
+          });
+          if (!room) {
+            const [newRoom] = await tx.insert(chatRooms).values({
+              orgId: ctx.orgId,
+              name: roomName,
+              sessionId: null,
+            }).returning();
+            room = newRoom;
+          }
         }
 
         const [message] = await tx.insert(chatMessages).values({

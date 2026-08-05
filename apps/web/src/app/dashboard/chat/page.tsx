@@ -7,7 +7,7 @@ import { format } from "date-fns";
 interface Message {
   id: string;
   senderId: string;
-  senderName: string;
+  sender: { id: string; name: string; role: string } | null;
   content: string;
   createdAt: string;
 }
@@ -29,7 +29,7 @@ export default function ChatPage() {
         const res = await fetch("/api/chat/messages");
         if (res.ok) {
           const data = await res.json();
-          setMessages(data);
+          setMessages(data.messages || []);
         }
       } catch (err) {
         console.error("Failed to fetch messages:", err);
@@ -59,9 +59,12 @@ export default function ChatPage() {
       });
 
       if (res.ok) {
-        const newMessage = await res.json();
-        setMessages((prev) => [...prev, newMessage]);
+        const data = await res.json();
+        setMessages((prev) => [...prev, data.message]);
         setMessage("");
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        alert(errData.error || "Failed to send message.");
       }
     } catch (err) {
       console.error("Failed to send message:", err);
@@ -116,7 +119,7 @@ export default function ChatPage() {
                   >
                     {!isMine && (
                       <div className="text-[10px] font-bold mb-1 opacity-70 uppercase tracking-tighter">
-                        {msg.senderName}
+                        {msg.sender?.name || "Unknown"}
                       </div>
                     )}
                     <p className="text-sm leading-relaxed">{msg.content}</p>
