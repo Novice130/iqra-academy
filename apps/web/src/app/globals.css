@@ -151,3 +151,26 @@ body {
   opacity: 1;
   transform: translateY(0);
 }
+
+/* ── Call control bar: never let buttons go off-screen on narrow phones ──
+   LiveKit's default .lk-control-bar is a centered flex row with no wrap
+   and no overflow handling — on a narrow viewport with 5 button groups
+   (mic, camera, screen share, chat, leave) it can silently push a button
+   past the screen edge with no way to reach it. Scope this to just the
+   bar itself so it degrades to a horizontal scroll instead. */
+.lk-control-bar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.lk-control-bar::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 480px) {
+  .lk-control-bar {
+    gap: 0.25rem;
+    padding: 0.5rem 0.375rem;
+    justify-content: flex-start;
+  }
+}
