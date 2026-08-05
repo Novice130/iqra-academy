@@ -14,6 +14,7 @@ import { studentProfiles, bookings, subscriptions, sessions, users } from "@/db/
 import { getQuotaStatus } from "@/lib/quota";
 import { format } from "date-fns";
 import { redirect } from "next/navigation";
+import { shouldHidePricing } from "@/lib/pricing-visibility";
 
 export default async function DashboardPage() {
   return withDb(async () => {
@@ -93,6 +94,8 @@ export default async function DashboardPage() {
 
     const totalCompleted = sessionCount?.count ?? 0;
 
+    const hidePricing = shouldHidePricing(session.user.email);
+
     return (
       <div className="p-6 lg:p-10 max-w-5xl">
         {/* Greeting */}
@@ -140,7 +143,7 @@ export default async function DashboardPage() {
           <StatCard label="This week" value={`${quota.used} of ${quota.totalAllowed}`} sub="classes used" />
           <StatCard label="Completed" value={String(totalCompleted)} sub="total sessions" />
           <StatCard label="Streak" value="--" sub="coming soon" />
-          <StatCard label="Next bill" value={subscription ? `$${subscription.plan.priceInCents / 100}` : "--"} sub={subscription ? format(subscription.currentPeriodEnd, "MMM d") : "No plan"} />
+          <StatCard label="Next bill" value={subscription && !hidePricing ? `$${subscription.plan.priceInCents / 100}` : "--"} sub={subscription ? format(subscription.currentPeriodEnd, "MMM d") : "No plan"} />
         </div>
 
         {/* Quick actions */}

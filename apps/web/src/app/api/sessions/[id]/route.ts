@@ -22,6 +22,7 @@ import {
 } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 
 export async function DELETE(
   request: NextRequest,
@@ -48,6 +49,12 @@ export async function DELETE(
       if (!isOwner) {
         throw new ForbiddenError("Only the host or an admin can delete this session.");
       }
+
+      // Deleting a session doesn't imply the LiveKit room is gone — force-close
+      // it too, otherwise a still-open call keeps running (and billing) with no
+      // DB row left to end it later. Not fatal if the room's already gone.
+      const roomName = session.videoRoomName || generateRoomName(sessionId);
+      await getRoomServiceClient().deleteRoom(roomName).catch(() => {});
 
       await db.transaction(async (tx) => {
         const rooms = await tx.query.chatRooms.findMany({

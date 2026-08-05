@@ -8,6 +8,7 @@ import { db, withDb } from "@/lib/db";
 import { eq, and, desc, asc } from "drizzle-orm";
 import { subscriptions, plans, invoices } from "@/db/schema";
 import { format } from "date-fns";
+import { shouldHidePricing } from "@/lib/pricing-visibility";
 
 export default async function BillingPage() {
   return withDb(async () => {
@@ -16,7 +17,8 @@ export default async function BillingPage() {
 
   if (!session) return null;
 
-  const user = session.user as unknown as { id: string; orgId: string };
+  const user = session.user as unknown as { id: string; orgId: string; email: string };
+  const hidePricing = shouldHidePricing(user.email);
 
   // 1. Fetch All Available Plans
   const availablePlans = await db.query.plans.findMany({
@@ -81,9 +83,11 @@ export default async function BillingPage() {
         </div>
         {activeSub && (
           <div className="p-5 flex items-center gap-4">
-            <div className="text-3xl font-bold" style={{ color: "var(--accent)" }}>
-              ${activeSub.plan.priceInCents / 100}
-            </div>
+            {!hidePricing && (
+              <div className="text-3xl font-bold" style={{ color: "var(--accent)" }}>
+                ${activeSub.plan.priceInCents / 100}
+              </div>
+            )}
             <div>
               <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
                 {activeSub.plan.name}
@@ -119,10 +123,12 @@ export default async function BillingPage() {
                   </div>
                 )}
                 <div className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{plan.name}</div>
-                <div className="mb-3">
-                  <span className="text-2xl font-bold" style={{ color: "var(--accent)" }}>${plan.priceInCents / 100}</span>
-                  <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>/mo</span>
-                </div>
+                {!hidePricing && (
+                  <div className="mb-3">
+                    <span className="text-2xl font-bold" style={{ color: "var(--accent)" }}>${plan.priceInCents / 100}</span>
+                    <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>/mo</span>
+                  </div>
+                )}
                 <ul className="space-y-1.5 mb-4">
                   {features.map((f) => (
                     <li key={f} className="text-xs flex items-start gap-1.5" style={{ color: "var(--text-secondary)" }}>
@@ -171,7 +177,7 @@ export default async function BillingPage() {
                       {format(invoice.createdAt, "MMM d, yyyy")}
                     </td>
                     <td className="px-5 py-3.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                      ${invoice.amountPaidCents / 100}
+                      {hidePricing ? "—" : `$${invoice.amountPaidCents / 100}`}
                     </td>
                     <td className="px-5 py-3.5">
                       <span
