@@ -115,7 +115,7 @@ export default function StartInstantMeetingButton() {
           Add students to this meeting
         </div>
         <div className="text-xs mb-3" style={{ color: "var(--text-tertiary)" }}>
-          Optional — they'll be notified in-app when you start.
+          Optional — they&apos;ll be notified in-app when you start.
         </div>
 
         <div className="max-h-48 overflow-auto space-y-1 mb-3">
