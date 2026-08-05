@@ -226,13 +226,22 @@ function useViewportOrientation(): 'portrait' | 'landscape' {
 }
 
 /**
- * Small floating self-view, draggable by pointer — the teacher's own camera
- * stays out of the way of the student grid instead of taking an equal tile.
- * Kept as a standalone absolutely-positioned tile outside GridLayout/
- * FocusLayout entirely, so it can't trigger the same sizing interference
- * that broke tile rendering when a tile was wrapped or given children.
+ * Small floating tile, draggable by pointer. Used for the teacher's own
+ * self-view, and for other participants when a student has someone
+ * spotlighted (they float instead of sitting in a fixed, non-movable
+ * carousel strip). Kept as a standalone absolutely-positioned tile outside
+ * GridLayout/FocusLayout entirely, so it can't trigger the same sizing
+ * interference that broke tile rendering when a tile was wrapped or given
+ * children (see the FocusLayoutContainer/CarouselLayout usage below, which
+ * is deliberately left untouched rather than fought with directly).
  */
-function DraggableSelfView({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
+function DraggableTile({
+  trackRef,
+  defaultPosition,
+}: {
+  trackRef: TrackReferenceOrPlaceholder;
+  defaultPosition: { right: number; bottom: number };
+}) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const elRef = useRef<HTMLDivElement>(null);
   const orientation = useViewportOrientation();
@@ -284,7 +293,7 @@ function DraggableSelfView({ trackRef }: { trackRef: TrackReferenceOrPlaceholder
       style={{
         width: boxSize.width,
         height: boxSize.height,
-        ...(pos ? { left: pos.x, top: pos.y } : { right: 16, bottom: 84 }),
+        ...(pos ? { left: pos.x, top: pos.y } : defaultPosition),
         border: '2px solid rgba(255,255,255,0.35)',
         boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
         touchAction: 'none',
@@ -389,7 +398,7 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
             </GridLayout>
           </div>
         ) : (
-          <div className="lk-focus-layout-wrapper">
+          <div className="lk-focus-layout-wrapper lk-carousel-hidden">
             <FocusLayoutContainer>
               <CarouselLayout tracks={carouselTracks}>
                 <ParticipantTile />
@@ -398,7 +407,21 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
             </FocusLayoutContainer>
           </div>
         )}
-        {selfViewTrack && <DraggableSelfView trackRef={selfViewTrack} />}
+        {/* Peers float as small draggable tiles instead of sitting in the
+            fixed, non-movable carousel strip above (kept rendered but
+            hidden via .lk-carousel-hidden — swapping it out entirely
+            risks the same FocusLayoutContainer sizing issues documented
+            on DraggableTile). Cascaded downward from the corner so they
+            don't stack exactly on top of each other by default. */}
+        {focusTrack &&
+          carouselTracks.map((t, i) => (
+            <DraggableTile
+              key={`${t.participant.identity}-${t.source}`}
+              trackRef={t}
+              defaultPosition={{ right: 16, bottom: 84 + i * 116 }}
+            />
+          ))}
+        {selfViewTrack && <DraggableTile trackRef={selfViewTrack} defaultPosition={{ right: 16, bottom: 84 }} />}
         <ControlBar controls={{ chat: true, screenShare: true }} />
       </div>
       <RoomAudioRenderer />
