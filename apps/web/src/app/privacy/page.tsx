@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | Iqra Academy",
+  title: "Privacy Policy | Novice Tutor",
   description:
-    "Privacy Policy for Iqra Academy — how we collect, use, and protect your personal data and your children's information.",
+    "Privacy Policy for Novice Tutor — how we collect, use, and protect your personal data and your children's information.",
 };
 
 export default function PrivacyPage() {

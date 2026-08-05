@@ -7,7 +7,7 @@
 export default function WhatsAppButton() {
   const phoneNumber = "1234567890"; // Replace with actual number
   const message = encodeURIComponent(
-    "Assalamu Alaikum! I'm interested in Quran classes for my child at Iqra Academy."
+    "Assalamu Alaikum! I'm interested in Quran classes for my child at Novice Tutor."
   );
 
   return (

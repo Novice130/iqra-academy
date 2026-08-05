@@ -82,7 +82,7 @@ export const adminResources = {
  * Admin panel branding configuration.
  */
 export const adminBranding = {
-  companyName: "Iqra Academy Admin",
+  companyName: "Novice Tutor Admin",
   logo: "/logo.png",
   softwareBrothers: false, // Hide AdminJS branding
   theme: {
@@ -113,7 +113,7 @@ export function canAccessAdmin(role: string): boolean {
  * Admin panel metadata — used by the /admin page to display info.
  */
 export const adminMeta = {
-  title: "Iqra Academy — Admin Panel",
+  title: "Novice Tutor — Admin Panel",
   description: "Manage your Quran learning platform",
   version: "1.0.0",
   totalTables: 25,

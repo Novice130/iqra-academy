@@ -48,14 +48,14 @@ export default function RegisterPage() {
           <Link href="/" className="inline-flex items-center gap-2.5 mb-8">
             <img
               src="/logo.png"
-              alt="Iqra Academy"
+              alt="Novice Tutor"
               className="w-12 h-12 object-contain"
             />
             <span
               className="text-lg font-semibold"
               style={{ color: "var(--text-primary)" }}
             >
-              Iqra Academy
+              Novice Tutor
             </span>
           </Link>
           <h1

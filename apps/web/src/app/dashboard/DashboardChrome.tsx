@@ -68,14 +68,14 @@ export default function DashboardChrome({
         >
           <img
             src="/logo.png"
-            alt="Iqra Academy"
+            alt="Novice Tutor"
             className="w-10 h-10 object-contain"
           />
           <span
             className="text-sm font-semibold"
             style={{ color: "var(--text-primary)" }}
           >
-            Iqra Academy
+            Novice Tutor
           </span>
         </div>
 
@@ -189,14 +189,14 @@ export default function DashboardChrome({
           <div className="flex items-center gap-2">
             <img
               src="/logo.png"
-              alt="Iqra Academy"
+              alt="Novice Tutor"
               className="w-10 h-10 object-contain"
             />
             <span
               className="text-sm font-semibold"
               style={{ color: "var(--text-primary)" }}
             >
-              Iqra Academy
+              Novice Tutor
             </span>
           </div>
           <button

@@ -107,36 +107,36 @@ export default function AddStudentToCallButton({ sessionId }: { sessionId: strin
           {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div
-            className="absolute right-0 top-full mt-2 z-50 w-64 rounded-lg overflow-hidden shadow-2xl"
+            className="fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50 w-[85vw] max-w-xs sm:absolute sm:left-auto sm:right-0 sm:top-full sm:translate-x-0 sm:translate-y-0 sm:mt-2 sm:w-64 sm:max-w-none rounded-lg overflow-hidden shadow-2xl"
             style={{ background: '#1a1d24', border: '1px solid rgba(255,255,255,0.15)' }}
           >
-            <div className="px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-white/50" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
+            <div className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-white/50" style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
               Ring a student into this call
             </div>
-            <div className="max-h-64 overflow-auto">
+            <div className="max-h-72 overflow-auto">
               {students.length === 0 ? (
-                <div className="px-3 py-3 text-xs text-white/50">No students on your roster.</div>
+                <div className="px-3 py-3 text-sm text-white/50">No students on your roster.</div>
               ) : (
                 students.map((s) => {
                   const row = rows[s.studentProfileId] || { status: 'idle' as const };
                   return (
-                    <div key={s.studentProfileId} className="flex items-center justify-between px-3 py-2 text-xs text-white">
+                    <div key={s.studentProfileId} className="flex items-center justify-between gap-3 px-3 py-3 text-sm text-white">
                       <span className="truncate">{s.name}</span>
                       {row.status === 'idle' && (
                         <button
                           onClick={() => ring(s)}
-                          className="px-2 py-1 rounded text-[11px] font-semibold cursor-pointer"
+                          className="shrink-0 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer"
                           style={{ background: '#10b981', color: '#fff' }}
                         >
                           Ring
                         </button>
                       )}
                       {row.status === 'ringing' && (
-                        <span className="text-[11px] text-emerald-400 animate-pulse">Ringing…</span>
+                        <span className="shrink-0 text-xs text-emerald-400 animate-pulse">Ringing…</span>
                       )}
-                      {row.status === 'joined' && <span className="text-[11px] text-emerald-400">Joined</span>}
-                      {row.status === 'declined' && <span className="text-[11px] text-red-400">Declined</span>}
-                      {row.status === 'no-answer' && <span className="text-[11px] text-white/40">No answer</span>}
+                      {row.status === 'joined' && <span className="shrink-0 text-xs text-emerald-400">Joined</span>}
+                      {row.status === 'declined' && <span className="shrink-0 text-xs text-red-400">Declined</span>}
+                      {row.status === 'no-answer' && <span className="shrink-0 text-xs text-white/40">No answer</span>}
                     </div>
                   );
                 })

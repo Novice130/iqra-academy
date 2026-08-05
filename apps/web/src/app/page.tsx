@@ -6,13 +6,13 @@ import AnimatedSections from "@/components/AnimatedSections";
 /* ── SEO Metadata ────────────────────────────────────────────────────────── */
 
 export const metadata: Metadata = {
-  title: "Online Quran Classes for Kids | Live 1-on-1 | Iqra Academy",
+  title: "Online Quran Classes for Kids | Live 1-on-1 | Novice Tutor",
   description:
     "Enroll your child in live online Quran classes. Noorani Qaida, Tajweed & Hifz with certified teachers. Flexible US schedules. Start your free trial today.",
   keywords:
     "online quran classes for kids, learn quran online, noorani qaida online, tajweed classes, hifz program, quran tutor",
   openGraph: {
-    title: "Online Quran Classes for Kids | Iqra Academy",
+    title: "Online Quran Classes for Kids | Novice Tutor",
     description:
       "Live 1-on-1 Quran classes. Certified teachers. Flexible schedules. Free trial.",
     type: "website",
@@ -249,7 +249,7 @@ function WhyChooseUs() {
       <div className="max-w-6xl mx-auto px-6">
         <div className="text-center mb-14">
           <h2 className="text-3xl lg:text-4xl font-bold text-[var(--color-sage-dark)]">
-            Why Parents Choose Iqra Academy
+            Why Parents Choose Novice Tutor
           </h2>
           <p className="mt-4 text-[var(--color-gray)] text-lg max-w-xl mx-auto">
             We make Quran education simple, safe, and effective.
@@ -749,7 +749,7 @@ function Footer() {
           Iqra <span className="text-[var(--color-gold)]">Academy</span>
         </div>
         <p className="text-sm text-white/60">
-          © 2026 Iqra Academy. All rights reserved.
+          © 2026 Novice Tutor. All rights reserved.
         </p>
         <div className="flex gap-6 text-sm">
           <Link

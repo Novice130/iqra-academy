@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Terms of Service | Iqra Academy",
+  title: "Terms of Service | Novice Tutor",
   description:
-    "Terms of Service for Iqra Academy — rules, policies, cancellation, and refund conditions for online Quran classes.",
+    "Terms of Service for Novice Tutor — rules, policies, cancellation, and refund conditions for online Quran classes.",
 };
 
 export default function TermsPage() {
@@ -35,7 +35,7 @@ export default function TermsPage() {
         <div className="space-y-8">
           <Section title="1. Acceptance of Terms">
             <p>
-              By accessing or using Iqra Academy&apos;s services, you agree to
+              By accessing or using Novice Tutor&apos;s services, you agree to
               be bound by these Terms of Service. If you do not agree with any
               part of these terms, you may not use our services.
             </p>
@@ -43,7 +43,7 @@ export default function TermsPage() {
 
           <Section title="2. Services">
             <p>
-              Iqra Academy provides live online Quran tutoring services including
+              Novice Tutor provides live online Quran tutoring services including
               Noorani Qaida, Quran reading with Tajweed, and Hifz (Quran
               memorization) programs. Classes are conducted one-on-one via our
               video platform.
@@ -157,14 +157,14 @@ export default function TermsPage() {
           <Section title="8. Intellectual Property">
             <p>
               All course materials, curriculum content, and platform features are
-              the intellectual property of Iqra Academy. You may not reproduce,
+              the intellectual property of Novice Tutor. You may not reproduce,
               distribute, or create derivative works without written permission.
             </p>
           </Section>
 
           <Section title="9. Limitation of Liability">
             <p>
-              Iqra Academy provides educational services on an &quot;as
+              Novice Tutor provides educational services on an &quot;as
               is&quot; basis. We are not liable for any indirect, incidental, or
               consequential damages arising from use of our services. Our total
               liability shall not exceed the amount paid by you in the preceding

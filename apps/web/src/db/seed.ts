@@ -10,7 +10,7 @@
  *   npx tsx src/db/seed.ts
  *
  * WHAT THIS CREATES:
- * 1. One organization ("Iqra Academy")
+ * 1. One organization ("Novice Tutor")
  * 2. Four plans (Free, Individual, Group, Siblings)
  * 3. Users for each role (student, teacher, admin, super admin)
  * 4. Sample student profiles (children)
@@ -76,13 +76,13 @@ async function seed() {
     .insert(organizations)
     .values({
       id: ORG_ID,
-      name: "Iqra Academy",
+      name: "Novice Tutor",
       slug: "iqra-academy",
       domain: "iqra-academy.com",
       timezone: "America/New_York",
       settings: {
         brandColor: "#10b981",
-        welcomeMessage: "Welcome to Iqra Academy — Learn the Quran with expert teachers.",
+        welcomeMessage: "Welcome to Novice Tutor — Learn the Quran with expert teachers.",
       },
     })
     .onConflictDoNothing();
@@ -397,7 +397,7 @@ async function seed() {
     .onConflictDoNothing();
 
   console.log("\n✅ Seed complete! Created:");
-  console.log("   • 1 organization (Iqra Academy)");
+  console.log("   • 1 organization (Novice Tutor)");
   console.log("   • 6 users (super, admin, 2 teachers, 2 students)");
   console.log("   • 4 student profiles (3 siblings + 1 individual)");
   console.log("   • 4 plans (Free, Individual, Group, Siblings)");
