@@ -22,7 +22,7 @@ export default function PrivacyPage() {
               />
             </div>
             <span className="font-bold text-[var(--color-charcoal)]">
-              Iqra <span className="text-[var(--color-gold)]">Academy</span>
+              Novice <span className="text-[var(--color-gold)]">Tutor</span>
             </span>
           </Link>
         </div>

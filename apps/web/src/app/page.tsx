@@ -16,7 +16,7 @@ export const metadata: Metadata = {
     description:
       "Live 1-on-1 Quran classes. Certified teachers. Flexible schedules. Free trial.",
     type: "website",
-    url: "https://iqra-academy.com",
+    url: "https://novicetutor.com",
   },
 };
 
@@ -61,7 +61,7 @@ function Navbar() {
             />
           </div>
           <span className="text-lg font-bold text-[var(--color-charcoal)]">
-            Iqra <span className="text-[var(--color-gold)]">Academy</span>
+            Novice <span className="text-[var(--color-gold)]">Tutor</span>
           </span>
         </Link>
 
@@ -746,7 +746,7 @@ function Footer() {
               alt="Logo"
             />
           </div>
-          Iqra <span className="text-[var(--color-gold)]">Academy</span>
+          Novice <span className="text-[var(--color-gold)]">Tutor</span>
         </div>
         <p className="text-sm text-white/60">
           © 2026 Novice Tutor. All rights reserved.
