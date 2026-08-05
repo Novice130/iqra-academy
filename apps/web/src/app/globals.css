@@ -152,17 +152,6 @@ body {
   transform: translateY(0);
 }
 
-/* ── Call fullscreen container: 100vh doesn't account for a mobile
-   browser's collapsing address bar, so the bottom control bar starts
-   partly below the visible fold until the page is scrolled/swiped once.
-   100dvh (dynamic viewport height) tracks the address-bar state live.
-   The 100vh line is a fallback for browsers that don't support dvh —
-   CSS ignores the invalid second declaration there, valid ones win. ── */
-.lk-room-fullscreen {
-  height: 100vh;
-  height: 100dvh;
-}
-
 /* ── Call control bar: never let buttons go off-screen on narrow phones ──
    LiveKit's default .lk-control-bar is a centered flex row with no wrap
    and no overflow handling — on a narrow viewport with 5 button groups

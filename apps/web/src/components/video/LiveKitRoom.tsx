@@ -74,7 +74,7 @@ export default function LiveKitRoom({ token, url, sessionId, isModerator }: Live
       video={true}
       audio={true}
       data-lk-theme="default"
-      className="lk-room-fullscreen"
+      style={{ height: '100dvh' }}
       onDisconnected={handleDisconnected}
     >
       <CustomVideoConference isModerator={isModerator} sessionId={sessionId} />
