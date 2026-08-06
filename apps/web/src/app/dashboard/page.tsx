@@ -15,6 +15,7 @@ import { getQuotaStatus } from "@/lib/quota";
 import { format } from "date-fns";
 import { redirect } from "next/navigation";
 import { shouldHidePricing } from "@/lib/pricing-visibility";
+import LocalTime from "@/components/LocalTime";
 
 export default async function DashboardPage() {
   return withDb(async () => {
@@ -121,7 +122,7 @@ export default async function DashboardPage() {
                   Ustadh {upcoming.users?.name || "Teacher"} • 30 min
                 </p>
                 <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>
-                  {format(upcoming.sessions.scheduledStart, "EEEE 'at' h:mm a")}
+                  <LocalTime iso={upcoming.sessions.scheduledStart.toISOString()} mode="weekday-time" withZone />
                 </p>
               </div>
               <Link href={`/dashboard/session/${upcoming.sessions.id}`} className="btn-primary" style={{ fontSize: "13px", padding: "10px 20px" }}>

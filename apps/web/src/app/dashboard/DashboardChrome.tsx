@@ -12,6 +12,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 import MeetingNotificationBanner from "./MeetingNotificationBanner";
+import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
 import { authClient } from "@/lib/auth-client";
 
@@ -282,6 +283,7 @@ export default function DashboardChrome({
           )}
         </header>
 
+        {!isTeachingRole && <LiveClassRibbon />}
         <MeetingNotificationBanner />
         <div className="flex-1 overflow-auto">{children}</div>
       </main>

@@ -3,11 +3,9 @@ import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, sql } from "drizzle-orm";
 import { bookings, sessions, users as usersTable } from "@/db/schema";
-import { startOfWeek, addDays, format, isValid, parseISO } from "date-fns";
+import { startOfWeek, addDays } from "date-fns";
 import Link from "next/link";
-
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const HOURS = Array.from({ length: 14 }, (_, i) => i + 7); // 7 AM to 8 PM
+import WeekGrid, { type WeekBooking } from "./WeekGrid";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
@@ -25,11 +23,14 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   const user = session.user as unknown as { id: string; orgId: string };
 
-  // Calculate week range
+  // Week range, padded by two days on each side. The exact week boundary is
+  // resolved in the browser (WeekGrid) because the server runs in UTC and a
+  // class at the edge of the week belongs to a different day depending on
+  // where the viewer is.
   const today = new Date();
   const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 });
-  const weekStart = addDays(currentWeekStart, weekOffset * 7);
-  const weekEnd = addDays(weekStart, 6);
+  const weekStart = addDays(currentWeekStart, weekOffset * 7 - 2);
+  const weekEnd = addDays(weekStart, 10);
   weekEnd.setHours(23, 59, 59, 999);
 
   // 1. Fetch real bookings for this week
@@ -57,18 +58,15 @@ export default async function SchedulePage({ searchParams }: Props) {
     )
     .orderBy(asc(sessions.scheduledStart));
 
-  const weekDates = DAYS.map((_, i) => addDays(weekStart, i));
-
-  const isToday = (date: Date) =>
-    date.toDateString() === today.toDateString();
-
-  // Color mapping based on student ID to keep colors consistent
-  const getStudentColor = (id: string | null) => {
-    if (!id) return "var(--accent)";
-    const colors = ["#5C7C6F", "#C9A962", "#7C5C64", "#5C647C", "#7C745C"];
-    const index = Math.abs(id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0)) % colors.length;
-    return colors[index];
-  };
+  const gridBookings: WeekBooking[] = weekBookings.map((b) => ({
+    id: b.id,
+    sessionId: b.id_session,
+    studentName: b.studentName,
+    studentId: b.studentId,
+    track: b.track,
+    title: b.title,
+    start: b.start.toISOString(),
+  }));
 
   return (
     <div className="p-6 lg:p-10 max-w-6xl">
@@ -106,64 +104,7 @@ export default async function SchedulePage({ searchParams }: Props) {
         </div>
       </div>
 
-      {/* Calendar grid */}
-      <div className="card overflow-hidden">
-        {/* Header row */}
-        <div className="grid grid-cols-8" style={{ borderBottom: "1px solid var(--border)" }}>
-          <div className="p-3" style={{ borderRight: "1px solid var(--border)" }} />
-          {weekDates.map((date, i) => (
-            <div
-              key={i}
-              className="p-3 text-center"
-              style={{
-                borderRight: i < 6 ? "1px solid var(--border)" : undefined,
-                background: isToday(date) ? "var(--accent)" : undefined,
-                color: isToday(date) ? "#fff" : "var(--text-primary)",
-              }}
-            >
-              <div className="text-[11px] font-semibold uppercase tracking-wide" style={{ opacity: isToday(date) ? 1 : 0.5 }}>
-                {DAYS[i]}
-              </div>
-              <div className="text-lg font-bold mt-0.5">{date.getDate()}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* Time slots */}
-        {HOURS.map((hour) => (
-          <div key={hour} className="grid grid-cols-8" style={{ borderBottom: "1px solid var(--border)", minHeight: 64 }}>
-            <div className="p-2 text-xs font-medium text-right pr-3 pt-3" style={{ color: "var(--text-tertiary)", borderRight: "1px solid var(--border)" }}>
-              {hour > 12 ? `${hour - 12} PM` : hour === 12 ? "12 PM" : `${hour} AM`}
-            </div>
-            {DAYS.map((_, dayIndex) => {
-              // Find bookings at this hour/day
-              const bookingsAtSlot = weekBookings.filter(b => {
-                const date = b.start;
-                return date.getDay() === dayIndex && date.getHours() === hour;
-              });
-
-              return (
-                <div
-                  key={dayIndex}
-                  className="p-1 relative min-h-[64px]"
-                  style={{ borderRight: dayIndex < 6 ? "1px solid var(--border)" : undefined }}
-                >
-                  {bookingsAtSlot.map(booking => (
-                    <div
-                      key={booking.id}
-                      className="rounded-lg p-2 text-white text-[10px] cursor-pointer transition-transform hover:scale-[1.02] mb-1 leading-tight shadow-sm"
-                      style={{ background: getStudentColor(booking.studentId) }}
-                    >
-                      <div className="font-bold truncate">{booking.studentName}</div>
-                      <div className="truncate opacity-90">{booking.track ? booking.track.toLowerCase() : "lesson"}</div>
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        ))}
-      </div>
+      <WeekGrid bookings={gridBookings} weekOffset={weekOffset} />
     </div>
   );
   });

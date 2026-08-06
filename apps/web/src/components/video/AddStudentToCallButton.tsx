@@ -91,6 +91,14 @@ export default function AddStudentToCallButton({ sessionId }: { sessionId: strin
     }
   };
 
+  const cancel = (student: Student) => {
+    const row = rowsRef.current[student.studentProfileId];
+    if (row?.status === 'ringing' && row.callId) {
+      fetch(`/api/calls/${row.callId}/cancel`, { method: 'POST' }).catch(() => {});
+    }
+    setRows((prev) => ({ ...prev, [student.studentProfileId]: { status: 'idle' } }));
+  };
+
   return (
     <div className="relative">
       <button
@@ -119,24 +127,38 @@ export default function AddStudentToCallButton({ sessionId }: { sessionId: strin
               ) : (
                 students.map((s) => {
                   const row = rows[s.studentProfileId] || { status: 'idle' as const };
+                  // The Ring button stays available in every state except
+                  // while a ring is actually in flight — a teacher must be
+                  // able to call a student who missed the first ring again,
+                  // and again, without reloading the call.
                   return (
                     <div key={s.studentProfileId} className="flex items-center justify-between gap-3 px-3 py-3 text-sm text-white">
                       <span className="truncate">{s.name}</span>
-                      {row.status === 'idle' && (
-                        <button
-                          onClick={() => ring(s)}
-                          className="shrink-0 px-3 py-1.5 rounded text-xs font-semibold cursor-pointer"
-                          style={{ background: '#10b981', color: '#fff' }}
-                        >
-                          Ring
-                        </button>
-                      )}
-                      {row.status === 'ringing' && (
-                        <span className="shrink-0 text-xs text-emerald-400 animate-pulse">Ringing…</span>
-                      )}
-                      {row.status === 'joined' && <span className="shrink-0 text-xs text-emerald-400">Joined</span>}
-                      {row.status === 'declined' && <span className="shrink-0 text-xs text-red-400">Declined</span>}
-                      {row.status === 'no-answer' && <span className="shrink-0 text-xs text-white/40">No answer</span>}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {row.status === 'ringing' && (
+                          <span className="text-xs text-emerald-400 animate-pulse">Ringing…</span>
+                        )}
+                        {row.status === 'joined' && <span className="text-xs text-emerald-400">Joined</span>}
+                        {row.status === 'declined' && <span className="text-xs text-red-400">Declined</span>}
+                        {row.status === 'no-answer' && <span className="text-xs text-white/40">No answer</span>}
+                        {row.status === 'ringing' ? (
+                          <button
+                            onClick={() => cancel(s)}
+                            className="px-3 py-1.5 rounded text-xs font-semibold cursor-pointer"
+                            style={{ background: 'rgba(255,255,255,0.12)', color: '#fff' }}
+                          >
+                            Stop
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => ring(s)}
+                            className="px-3 py-1.5 rounded text-xs font-semibold cursor-pointer"
+                            style={{ background: '#10b981', color: '#fff' }}
+                          >
+                            {row.status === 'idle' ? 'Ring' : 'Ring again'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })

@@ -66,6 +66,10 @@ export default function CallStudentButton({
   }, [state, router]);
 
   const startCall = async () => {
+    // Drop the previous invite id before re-ringing — otherwise the poll can
+    // read the *old* call's terminal status and instantly mark the new ring
+    // as declined.
+    callIdRef.current = null;
     setState('calling');
     try {
       const res = await fetch('/api/calls', {
@@ -115,13 +119,19 @@ export default function CallStudentButton({
     );
   }
 
+  // Declined / no-answer is a label, not a dead end — one tap rings again.
   return (
-    <button
-      onClick={() => setState('idle')}
-      className="text-xs font-semibold px-3 py-1.5 rounded-lg border cursor-pointer"
-      style={{ borderColor: 'var(--border)', color: 'var(--text-tertiary)' }}
-    >
-      {state === 'declined' ? 'Declined' : 'No answer'}
-    </button>
+    <div className="flex items-center gap-2">
+      <span className="text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
+        {state === 'declined' ? 'Declined' : 'No answer'}
+      </span>
+      <button
+        onClick={startCall}
+        className="text-xs font-semibold px-3 py-1.5 rounded-lg text-white cursor-pointer"
+        style={{ background: 'var(--accent)' }}
+      >
+        📞 Call again
+      </button>
+    </div>
   );
 }

@@ -8,11 +8,14 @@ import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, desc, sql, count, isNull, or } from "drizzle-orm";
 import { sessions, bookings, studentProfiles, users as usersTable } from "@/db/schema";
-import { startOfDay, endOfDay, startOfWeek, endOfWeek, format, formatDistanceToNow } from "date-fns";
+import { startOfDay, endOfDay, startOfWeek, endOfWeek, formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import StartInstantMeetingButton from "./StartInstantMeetingButton";
 import CleanupInstantMeetingsButton from "./CleanupInstantMeetingsButton";
 import SessionRowActions from "./SessionRowActions";
+import TodaySchedule, { type ScheduleRow } from "./TodaySchedule";
+import LocalTime from "@/components/LocalTime";
+import CopyLinkButton from "@/components/CopyLinkButton";
 
 export default async function TeacherDashboard() {
   return withDb(async () => {
@@ -21,12 +24,23 @@ export default async function TeacherDashboard() {
 
   if (!session) return null;
 
-  const user = session.user as unknown as { id: string; name?: string; role: string };
+  const user = session.user as unknown as { id: string; name?: string };
   const firstName = user.name?.split(" ")[0] || "Ustadh";
-  const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role);
 
-  const todayStart = startOfDay(new Date());
-  const todayEnd = endOfDay(new Date());
+  // Role must come from our own users table. Better Auth's session user only
+  // carries its built-in columns (no `additionalFields` configured), so
+  // `session.user.role` is undefined — which silently hid the school-wide
+  // active-classes panel from both admin accounts.
+  const dbUser = await db.query.users.findFirst({
+    where: eq(usersTable.id, user.id),
+    columns: { role: true },
+  });
+  const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(dbUser?.role || "");
+
+  // The server runs in UTC, so "today" here is a ±1 day window on purpose —
+  // TodaySchedule narrows it to the viewer's own calendar day in the browser.
+  const todayStart = startOfDay(new Date(Date.now() - 24 * 60 * 60 * 1000));
+  const todayEnd = endOfDay(new Date(Date.now() + 24 * 60 * 60 * 1000));
   const weekStart = startOfWeek(new Date());
   const weekEnd = endOfWeek(new Date());
 
@@ -94,6 +108,18 @@ export default async function TeacherDashboard() {
     }
   }
 
+  const scheduleRows: ScheduleRow[] = todaySessions.map((s) => ({
+    id: s.id,
+    scheduledStart: s.scheduledStart.toISOString(),
+    status: s.status,
+    title: s.title,
+    track: s.track,
+    studentNames:
+      s.bookings.map((b) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student",
+  }));
+
+  const upcomingCount = todaySessions.filter((s) => s.status === "SCHEDULED").length;
+
   return (
     <div className="p-6 lg:p-10 max-w-5xl">
       {/* Greeting */}
@@ -102,17 +128,73 @@ export default async function TeacherDashboard() {
           Assalamu Alaikum, {firstName}
         </h1>
         <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-          You have {todaySessions.filter((s) => s.status === "SCHEDULED").length} classes remaining today
+          You have {upcomingCount} classes coming up
         </p>
       </div>
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Today" value={String(todaySessions.length)} sub="classes" />
+        <StatCard label="Next 48h" value={String(todaySessions.length)} sub="classes" />
         <StatCard label="This week" value={String(weekCountResult[0].count)} sub="sessions" />
         <StatCard label="Students" value={String(activeStudentsResult.length)} sub="active" />
         <StatCard label="Attendance" value="--" sub="coming soon" />
       </div>
+
+      {/* Admin oversight — every class running anywhere in the school, with
+          its join link. Full width and above the fold: an admin's own
+          "today's schedule" is usually empty, so burying this in the right
+          rail made live classes effectively invisible. */}
+      {isAdmin && (
+        <div className="mb-8">
+          <h2 className="text-sm font-semibold uppercase tracking-widest mb-4 flex items-center gap-2" style={{ color: "var(--text-tertiary)" }}>
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: activeClasses.length > 0 ? "#dc2626" : "var(--border)" }} />
+            Live Classes — School-wide ({activeClasses.length})
+          </h2>
+          <div className="card">
+            {activeClasses.length > 0 ? (
+              activeClasses.map((s, i) => {
+                const studentNames = s.bookings.map((b: any) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student joined yet";
+                return (
+                  <div
+                    key={s.id}
+                    className="flex items-center justify-between gap-4 flex-wrap p-4"
+                    style={{ borderBottom: i < activeClasses.length - 1 ? "1px solid var(--border)" : undefined }}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                        {s.teacher?.name || "Unknown Teacher"} — {s.title || "Class"}
+                      </div>
+                      <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
+                        {studentNames}
+                      </div>
+                      <div className="text-xs mt-1" style={{ color: "var(--text-tertiary)" }}>
+                        Started {s.actualStart ? formatDistanceToNow(s.actualStart) + " ago" : "recently"}
+                        {s.actualStart ? <> · <LocalTime iso={s.actualStart.toISOString()} withZone /></> : null}
+                        {s.videoRoomName ? ` · room ${s.videoRoomName}` : ""}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Link
+                        href={`/dashboard/session/${s.id}`}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+                        style={{ background: "var(--accent)" }}
+                      >
+                        Join / Observe
+                      </Link>
+                      <CopyLinkButton path={`/dashboard/session/${s.id}`} />
+                      <SessionRowActions sessionId={s.id} showEnd={true} />
+                    </div>
+                  </div>
+                );
+              })
+            ) : (
+              <div className="p-6 text-center">
+                <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>No classes in progress right now.</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="grid lg:grid-cols-5 gap-6">
         {/* Today's schedule */}
@@ -121,49 +203,7 @@ export default async function TeacherDashboard() {
             Today&apos;s Schedule
           </h2>
           <div className="card">
-            {todaySessions.length > 0 ? (
-              todaySessions.map((s, i) => {
-                const studentNames = s.bookings.map(b => b.studentProfile?.name).filter(Boolean).join(", ") || "No student";
-                const isUpcoming = s.status === "SCHEDULED";
-                return (
-                  <div
-                    key={s.id}
-                    className="flex items-center justify-between p-4"
-                    style={{ borderBottom: i < todaySessions.length - 1 ? "1px solid var(--border)" : undefined }}
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="text-xs font-mono font-bold w-16" style={{ color: "var(--text-tertiary)" }}>
-                        {format(s.scheduledStart, "h:mm a")}
-                      </div>
-                      <div>
-                        <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{studentNames}</div>
-                        <div className="text-xs" style={{ color: "var(--text-secondary)" }}>{s.track} — {s.title}</div>
-                      </div>
-                    </div>
-                    {isUpcoming ? (
-                      <Link
-                        href={`/dashboard/session/${s.id}`}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                        style={{ background: "var(--accent)" }}
-                      >
-                        Start Class
-                      </Link>
-                    ) : (
-                      <div className="flex items-center gap-2">
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase" style={{ background: "#dcfce7", color: "#166534" }}>
-                          {s.status.toLowerCase()}
-                        </span>
-                        <SessionRowActions sessionId={s.id} showEnd={s.status === "IN_PROGRESS"} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            ) : (
-              <div className="p-10 text-center">
-                <p className="text-sm italic" style={{ color: "var(--text-tertiary)" }}>No classes scheduled for today.</p>
-              </div>
-            )}
+            <TodaySchedule rows={scheduleRows} />
           </div>
         </div>
 
@@ -188,50 +228,6 @@ export default async function TeacherDashboard() {
               <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Chat with parents</div>
             </Link>
           </div>
-          
-          {/* Admin Oversight */}
-          {isAdmin && (
-            <div className="mt-8">
-              <h2 className="text-sm font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-tertiary)" }}>
-                School-wide Active Classes
-              </h2>
-              <div className="card">
-                {activeClasses.length > 0 ? (
-                  activeClasses.map((s, i) => {
-                    const studentNames = s.bookings.map((b: any) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student";
-                    return (
-                      <div
-                        key={s.id}
-                        className="flex items-center justify-between p-4"
-                        style={{ borderBottom: i < activeClasses.length - 1 ? "1px solid var(--border)" : undefined }}
-                      >
-                        <div>
-                          <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{studentNames}</div>
-                          <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                            with {s.teacher?.name || "Unknown Teacher"} • Started {s.actualStart ? formatDistanceToNow(s.actualStart) + " ago" : "recently"}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Link
-                            href={`/dashboard/session/${s.id}`}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold"
-                            style={{ background: "var(--bg-secondary)", color: "var(--text-primary)", border: "1px solid var(--border)" }}
-                          >
-                            Observe
-                          </Link>
-                          <SessionRowActions sessionId={s.id} showEnd={true} />
-                        </div>
-                      </div>
-                    );
-                  })
-                ) : (
-                  <div className="p-6 text-center">
-                    <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>No classes in progress right now.</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>

@@ -27,6 +27,13 @@ export default function SessionRoomPage() {
           throw new Error(errData.error || 'Failed to join session');
         }
         const data = await res.json();
+        // The server can point a student at the room their teacher is
+        // actually in (see the join route) — follow it instead of opening a
+        // room of our own.
+        if (data.redirectSessionId) {
+          router.replace(`/dashboard/session/${data.redirectSessionId}`);
+          return;
+        }
         setToken(data.jwt || data.token); // accept either jwt or token
         setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
         setIsModerator(!!data.isModerator);
@@ -43,7 +50,7 @@ export default function SessionRoomPage() {
     if (sessionId) {
       fetchToken();
     }
-  }, [sessionId]);
+  }, [sessionId, router]);
 
   const handleJoin = () => {
     setShowRoom(true);

@@ -7,7 +7,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, gt } from "drizzle-orm";
 import { sessions, users, bookings, studentProfiles } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
@@ -43,13 +43,26 @@ export async function GET(
       let isStudent = session.bookings.some((b: any) => b.userId === ctx.userId);
       const isInstantMeeting = session.consumesQuota === false && session.title?.startsWith("Instant Meeting");
 
-      // Auto-book students if it's an instant meeting
-      if (isInstantMeeting && !isStudent && !isTeacher) {
-        const profiles = await db.query.studentProfiles.findMany({
-          where: eq(studentProfiles.userId, ctx.userId)
-        });
+      // Auto-book on the way in for an instant meeting, or for any class this
+      // teacher currently has running. Without the second case a student who
+      // follows the "your teacher has started the class" ribbon into a session
+      // they were never explicitly booked for gets a 403 and ends up back on
+      // their own scheduled (empty) room — the exact split-room bug.
+      if (!isStudent && !isTeacher && (isInstantMeeting || session.status === "IN_PROGRESS")) {
+        const [profiles, taughtBefore] = await Promise.all([
+          db.query.studentProfiles.findMany({
+            where: eq(studentProfiles.userId, ctx.userId),
+          }),
+          // Roster check: has this teacher ever taught this user before?
+          db
+            .select({ id: bookings.id })
+            .from(bookings)
+            .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+            .where(and(eq(bookings.userId, ctx.userId), eq(sessions.teacherId, session.teacherId)))
+            .limit(1),
+        ]);
 
-        if (profiles.length > 0) {
+        if (profiles.length > 0 && (isInstantMeeting || taughtBefore.length > 0)) {
            await db.insert(bookings).values({
              id: createId(),
              orgId: session.orgId,
@@ -64,6 +77,28 @@ export async function GET(
 
       if (!isTeacher && !isStudent) {
         throw new ForbiddenError("You are not part of this session.");
+      }
+
+      // A student opening a session their teacher isn't in gets sent to the
+      // room the teacher *is* in. Their dashboard links at their own
+      // scheduled session, but a teacher who hits "Start Instant Meeting"
+      // creates a different session row — following the stale link put the
+      // student alone in a room while the teacher waited in another.
+      if (!isTeacher && session.status !== "IN_PROGRESS") {
+        const liveCutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
+        const liveSession = await db.query.sessions.findFirst({
+          where: and(
+            eq(sessions.teacherId, session.teacherId),
+            eq(sessions.status, "IN_PROGRESS"),
+            gt(sessions.actualStart, liveCutoff)
+          ),
+          orderBy: [desc(sessions.actualStart)],
+          columns: { id: true },
+        });
+
+        if (liveSession && liveSession.id !== sessionId) {
+          return NextResponse.json({ redirectSessionId: liveSession.id });
+        }
       }
 
       const roomName = generateRoomName(sessionId);
@@ -97,6 +132,16 @@ export async function GET(
         }
       };
 
+      // The teacher walking into the room IS the class starting. Nothing else
+      // in the app ever flipped a SCHEDULED session to IN_PROGRESS, so a
+      // regular (non-instant) class stayed "SCHEDULED" for its whole
+      // duration — invisible to the admins' live-classes panel and to the
+      // students' "your teacher has started" ribbon, both of which key off
+      // IN_PROGRESS. Only the session's own teacher starts it; an admin
+      // dropping in to observe must not.
+      const isOwningTeacher = session.teacherId === ctx.userId;
+      const shouldMarkStarted = isOwningTeacher && session.status === "SCHEDULED";
+
       const [token] = await Promise.all([
         generateLiveKitToken({
           roomName,
@@ -105,6 +150,12 @@ export async function GET(
           isModerator: isTeacher,
         }),
         isTeacher ? ensureSpotlight() : Promise.resolve(),
+        shouldMarkStarted
+          ? db
+              .update(sessions)
+              .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
+              .where(eq(sessions.id, sessionId))
+          : Promise.resolve(),
         !session.videoRoomName
           ? db
               .update(sessions)
