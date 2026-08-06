@@ -212,6 +212,58 @@ Deleting a session goes through `deleteSessionCascade()`
 (`src/lib/session-cleanup.ts`), which covers all eight tables carrying an FK to
 `sessions`, guest knocks included.
 
+## Moving off LiveKit Cloud
+
+**The code ports without changes. The operations are the whole job.**
+
+Everything this app asks of LiveKit is in the open-source server's own API:
+`AccessToken` for JWTs, `RoomServiceClient` for `createRoom`,
+`updateRoomMetadata`, `mutePublishedTrack`, `updateParticipant`,
+`removeParticipant`, `listRooms`, `listParticipants`, `deleteRoom`. On the
+client it's `livekit-client` and `@livekit/components-react`, which neither
+know nor care who runs the SFU. Background effects are `@livekit/track-processors`
+running MediaPipe **in the browser** — no server involvement at all.
+
+There is no Cloud-only surface in use: no Egress (the "recording" route only
+stores a URL and an access level — nothing actually records), no Ingress, no
+SIP, no Cloud Agents, no analytics API. All of it is behind three environment
+variables:
+
+```
+LIVEKIT_URL=wss://your-host
+LIVEKIT_API_KEY=...
+LIVEKIT_API_SECRET=...
+```
+
+Point those at your own server and the app is moved. `getRoomServiceClient()`
+already derives the HTTP host from `LIVEKIT_URL` by swapping the scheme, so
+nothing else needs editing.
+
+What you take on instead:
+
+- **TURN.** Cloud gives you global TURN for free. Self-hosted, students behind
+  strict NATs or mobile carriers simply fail to connect without a working TURN
+  server on 443/TLS. This is the most common self-host failure and it looks
+  like "video works for some people".
+- **Placement and latency.** The teacher is in India and the students are in
+  the US. Cloud routes each participant to a nearby edge; a single box does
+  not. Wherever you put it, someone gets the long path — pick the box's region
+  deliberately rather than by where the server was easiest to buy.
+- **TLS, Redis, scaling.** A single instance needs a real certificate (LiveKit
+  clients refuse self-signed) and, past one node, Redis for room distribution.
+- **Capacity and upgrades.** Bandwidth is yours now, and so is keeping the SFU
+  version in step with the client SDK — they're released together and drift
+  causes subtle media bugs.
+
+Note the repo already contains a stale `livekit.yaml` and Jitsi environment
+variables (`JITSI_*`, `JVB_AUTH_PASSWORD`) from earlier experiments. Nothing
+reads them; don't take either as a starting point without checking against the
+current LiveKit docs.
+
+A sensible move is to run both for a while: point a staging deployment at the
+self-hosted server, run real classes on it, and keep Cloud until TURN and
+routing are proven with the actual students on the actual networks.
+
 ## Testing it
 
 There is no automated test for the call screen; a green build proves nothing
