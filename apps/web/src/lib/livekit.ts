@@ -31,8 +31,15 @@ export async function generateLiveKitToken(
     throw new Error("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be configured");
   }
 
-  // Identity must be unique in the room. email or a fallback is used.
-  const identity = userEmail || `${userName}-${Math.random().toString(36).slice(2, 6)}`;
+  // Identity must be unique *per connection*, not per person. LiveKit closes
+  // an existing participant when a new one joins with the same identity, so
+  // using the bare email meant a teacher opening the room on their phone
+  // silently kicked their own laptop out of the class. The email stays as the
+  // prefix — everything that reasons about "who is this" (spotlight, the
+  // default-focus backfill) matches on the part before the '#', which an
+  // email address can never contain.
+  const base = userEmail || userName;
+  const identity = `${base}#${Math.random().toString(36).slice(2, 8)}`;
 
   const token = new AccessToken(LIVEKIT_CONFIG.apiKey, LIVEKIT_CONFIG.apiSecret, {
     identity,

@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
-import type { TrackReferenceOrPlaceholder } from '@livekit/components-core';
+import type { TrackReferenceOrPlaceholder, WidgetState } from '@livekit/components-core';
 import {
   GridLayout,
   CarouselLayout,
@@ -10,6 +10,7 @@ import {
   FocusLayoutContainer,
   ParticipantTile,
   ControlBar,
+  Chat,
   RoomAudioRenderer,
   ConnectionStateToast,
   useTracks,
@@ -50,6 +51,17 @@ function useLiveRoomMetadata(): string | undefined {
 interface CustomVideoConferenceProps {
   isModerator: boolean;
   sessionId: string;
+}
+
+/**
+ * Strips the per-connection suffix from a LiveKit identity (`me@x.com#a1b2`).
+ * The same person on a phone and a laptop is two participants with two
+ * identities but one base — spotlight is about the person, so it matches on
+ * the base. Muting stays per-connection and uses the full identity.
+ */
+function baseIdentity(identity: string | null | undefined): string | null {
+  if (!identity) return null;
+  return identity.split('#')[0];
 }
 
 function parseSpotlightIdentity(metadata: string | undefined): string | null {
@@ -145,10 +157,13 @@ function TopBar({
   viewMode: 'speaker' | 'gallery';
   onViewModeChange: (mode: 'speaker' | 'gallery') => void;
 }) {
+  // Deduped by base identity so one person joined from two devices is a
+  // single spotlight entry, not two.
   const seen = new Set<string>();
   const people = tracks.filter((t) => {
-    if (seen.has(t.participant.identity)) return false;
-    seen.add(t.participant.identity);
+    const base = baseIdentity(t.participant.identity)!;
+    if (seen.has(base)) return false;
+    seen.add(base);
     return true;
   });
 
@@ -168,8 +183,8 @@ function TopBar({
               Spotlight:
             </span>
             {people.map((t) => {
-              const identity = t.participant.identity;
-              const isSpotlighted = identity === spotlightIdentity;
+              const identity = baseIdentity(t.participant.identity)!;
+              const isSpotlighted = identity === baseIdentity(spotlightIdentity);
               return (
                 <button
                   key={identity}
@@ -356,6 +371,14 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
   // local only, never synced, so each participant can pick independently.
   const [viewMode, setViewMode] = useState<'speaker' | 'gallery'>('speaker');
 
+  // Mirrors the layout context's widget state (chat open/closed, unread
+  // count) so the chat panel can be shown and hidden.
+  const [widgetState, setWidgetState] = useState<WidgetState>({
+    showChat: false,
+    unreadMessages: 0,
+    showSettings: false,
+  });
+
   // Tapping your own picture-in-picture flips front/back camera, the way
   // every phone call app works. Only offered when there's a second camera.
   const cycleCamera = useCycleCamera();
@@ -365,7 +388,7 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
     (t) => t.source === Track.Source.ScreenShare && t.publication?.isSubscribed
   );
   const spotlightTrack = tracks.find(
-    (t) => t.source === Track.Source.Camera && t.participant.identity === spotlightIdentity
+    (t) => t.source === Track.Source.Camera && baseIdentity(t.participant.identity) === baseIdentity(spotlightIdentity)
   );
   const localCameraTrack = tracks.find((t) => t.participant.isLocal && t.source === Track.Source.Camera);
 
@@ -417,60 +440,68 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
     : mainTracks;
 
   return (
-    <LayoutContextProvider value={layoutContext}>
-      <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
-        <TopBar
-          sessionId={sessionId}
-          isModerator={isModerator}
-          tracks={tracks}
-          spotlightIdentity={spotlightIdentity}
-          onSpotlight={handleSpotlight}
-          viewMode={viewMode}
-          onViewModeChange={setViewMode}
-        />
-        {!focusTrack ? (
-          <div className="lk-grid-layout-wrapper">
-            <GridLayout tracks={mainTracks}>
-              <ParticipantTile />
-            </GridLayout>
-          </div>
-        ) : (
-          <div className="lk-focus-layout-wrapper lk-carousel-hidden">
-            <FocusLayoutContainer>
-              <CarouselLayout tracks={carouselTracks}>
-                <ParticipantTile />
-              </CarouselLayout>
-              <FocusLayout trackRef={focusTrack} />
-            </FocusLayoutContainer>
-          </div>
-        )}
-        {/* Peers float as small draggable tiles instead of sitting in the
-            fixed, non-movable carousel strip above (kept rendered but
-            hidden via .lk-carousel-hidden — swapping it out entirely
-            risks the same FocusLayoutContainer sizing issues documented
-            on DraggableTile). Cascaded downward from the corner so they
-            don't stack exactly on top of each other by default. */}
-        {focusTrack &&
-          carouselTracks.map((t, i) => (
-            <DraggableTile
-              key={`${t.participant.identity}-${t.source}`}
-              trackRef={t}
-              defaultPosition={{ right: 16, bottom: 84 + i * 116 }}
-              onTap={
-                hasMultipleCameras && t.participant.isLocal && t.source === Track.Source.Camera
-                  ? cycleCamera
-                  : undefined
-              }
-            />
-          ))}
-        {selfViewTrack && (
-          <DraggableTile
-            trackRef={selfViewTrack}
-            defaultPosition={{ right: 16, bottom: 84 }}
-            onTap={hasMultipleCameras ? cycleCamera : undefined}
+    // The chat panel is a *sibling* of the video area inside
+    // .lk-video-conference (a flex row), which is how LiveKit's own
+    // VideoConference lays it out — the toggle in the control bar only
+    // flips widget state, it doesn't render anything. Without this wrapper
+    // and the <Chat> below, pressing Chat visibly did nothing at all.
+    <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
+      <div className="lk-video-conference" style={{ height: '100%' }}>
+        <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
+          <TopBar
+            sessionId={sessionId}
+            isModerator={isModerator}
+            tracks={tracks}
+            spotlightIdentity={spotlightIdentity}
+            onSpotlight={handleSpotlight}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
           />
-        )}
-        <ControlBar controls={{ chat: true, screenShare: true }} />
+          {!focusTrack ? (
+            <div className="lk-grid-layout-wrapper">
+              <GridLayout tracks={mainTracks}>
+                <ParticipantTile />
+              </GridLayout>
+            </div>
+          ) : (
+            <div className="lk-focus-layout-wrapper lk-carousel-hidden">
+              <FocusLayoutContainer>
+                <CarouselLayout tracks={carouselTracks}>
+                  <ParticipantTile />
+                </CarouselLayout>
+                <FocusLayout trackRef={focusTrack} />
+              </FocusLayoutContainer>
+            </div>
+          )}
+          {/* Peers float as small draggable tiles instead of sitting in the
+              fixed, non-movable carousel strip above (kept rendered but
+              hidden via .lk-carousel-hidden — swapping it out entirely
+              risks the same FocusLayoutContainer sizing issues documented
+              on DraggableTile). Cascaded downward from the corner so they
+              don't stack exactly on top of each other by default. */}
+          {focusTrack &&
+            carouselTracks.map((t, i) => (
+              <DraggableTile
+                key={`${t.participant.identity}-${t.source}`}
+                trackRef={t}
+                defaultPosition={{ right: 16, bottom: 84 + i * 116 }}
+                onTap={
+                  hasMultipleCameras && t.participant.isLocal && t.source === Track.Source.Camera
+                    ? cycleCamera
+                    : undefined
+                }
+              />
+            ))}
+          {selfViewTrack && (
+            <DraggableTile
+              trackRef={selfViewTrack}
+              defaultPosition={{ right: 16, bottom: 84 }}
+              onTap={hasMultipleCameras ? cycleCamera : undefined}
+            />
+          )}
+          <ControlBar controls={{ chat: true, screenShare: true }} />
+        </div>
+        <Chat style={{ display: widgetState.showChat ? 'grid' : 'none' }} />
       </div>
       <RoomAudioRenderer />
       <ConnectionStateToast />
