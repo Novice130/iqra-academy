@@ -20,6 +20,7 @@ import {
 import AddStudentToCallButton from './AddStudentToCallButton';
 import BackgroundBlurToggle from './BackgroundBlurToggle';
 import MuteControls from './MuteControls';
+import DeviceSwitcher, { useCycleCamera, useHasMultipleCameras } from './DeviceSwitcher';
 
 /**
  * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
@@ -191,6 +192,7 @@ function TopBar({
       </div>
       <div className="flex items-center gap-2">
         {!isModerator && <ViewModeToggle viewMode={viewMode} onChange={onViewModeChange} />}
+        <DeviceSwitcher />
         <BackgroundBlurToggle />
         <MuteControls sessionId={sessionId} isModerator={isModerator} />
         {isModerator && <AddStudentToCallButton sessionId={sessionId} />}
@@ -238,20 +240,33 @@ function useViewportOrientation(): 'portrait' | 'landscape' {
 function DraggableTile({
   trackRef,
   defaultPosition,
+  onTap,
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   defaultPosition: { right: number; bottom: number };
+  /** Fired on a tap that wasn't a drag — used to flip the camera. */
+  onTap?: () => void;
 }) {
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const elRef = useRef<HTMLDivElement>(null);
   const orientation = useViewportOrientation();
   const boxSize = orientation === 'portrait' ? { width: 100, height: 168 } : { width: 168, height: 100 };
-  const dragState = useRef<{ dragging: boolean; startX: number; startY: number; startPosX: number; startPosY: number }>({
+  const dragState = useRef<{
+    dragging: boolean;
+    startX: number;
+    startY: number;
+    startPosX: number;
+    startPosY: number;
+    startedAt: number;
+    moved: number;
+  }>({
     dragging: false,
     startX: 0,
     startY: 0,
     startPosX: 0,
     startPosY: 0,
+    startedAt: 0,
+    moved: 0,
   });
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -267,6 +282,8 @@ function DraggableTile({
       startY: e.clientY,
       startPosX: currentPos.x,
       startPosY: currentPos.y,
+      startedAt: Date.now(),
+      moved: 0,
     };
     if (!pos) setPos(currentPos);
     el.setPointerCapture(e.pointerId);
@@ -276,11 +293,18 @@ function DraggableTile({
     if (!dragState.current.dragging) return;
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
+    dragState.current.moved = Math.max(dragState.current.moved, Math.abs(dx) + Math.abs(dy));
     setPos({ x: dragState.current.startPosX + dx, y: dragState.current.startPosY + dy });
   };
 
   const onPointerUp = () => {
+    const { dragging, moved, startedAt } = dragState.current;
     dragState.current.dragging = false;
+    // A tap and the start of a drag are the same gesture until the finger
+    // moves, so only treat it as a tap if it barely moved and was quick.
+    if (dragging && onTap && moved < 8 && Date.now() - startedAt < 500) {
+      onTap();
+    }
   };
 
   return (
@@ -300,6 +324,14 @@ function DraggableTile({
       }}
     >
       <ParticipantTile trackRef={trackRef} className="w-full h-full" />
+      {onTap && (
+        <span
+          className="absolute top-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-semibold pointer-events-none"
+          style={{ background: 'rgba(0,0,0,0.55)', color: '#fff' }}
+        >
+          🔄 Tap to flip
+        </span>
+      )}
     </div>
   );
 }
@@ -323,6 +355,11 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
   // Per-viewer layout choice, like Zoom/Meet's gallery vs speaker toggle —
   // local only, never synced, so each participant can pick independently.
   const [viewMode, setViewMode] = useState<'speaker' | 'gallery'>('speaker');
+
+  // Tapping your own picture-in-picture flips front/back camera, the way
+  // every phone call app works. Only offered when there's a second camera.
+  const cycleCamera = useCycleCamera();
+  const hasMultipleCameras = useHasMultipleCameras();
 
   const screenShareTrack = tracks.find(
     (t) => t.source === Track.Source.ScreenShare && t.publication?.isSubscribed
@@ -419,9 +456,20 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
               key={`${t.participant.identity}-${t.source}`}
               trackRef={t}
               defaultPosition={{ right: 16, bottom: 84 + i * 116 }}
+              onTap={
+                hasMultipleCameras && t.participant.isLocal && t.source === Track.Source.Camera
+                  ? cycleCamera
+                  : undefined
+              }
             />
           ))}
-        {selfViewTrack && <DraggableTile trackRef={selfViewTrack} defaultPosition={{ right: 16, bottom: 84 }} />}
+        {selfViewTrack && (
+          <DraggableTile
+            trackRef={selfViewTrack}
+            defaultPosition={{ right: 16, bottom: 84 }}
+            onTap={hasMultipleCameras ? cycleCamera : undefined}
+          />
+        )}
         <ControlBar controls={{ chat: true, screenShare: true }} />
       </div>
       <RoomAudioRenderer />

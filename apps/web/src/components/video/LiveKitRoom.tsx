@@ -51,20 +51,25 @@ interface LiveKitRoomProps {
   url: string;
   sessionId: string;
   isModerator: boolean;
+  /** True only for the session's own teacher — see handleDisconnected. */
+  isHost: boolean;
 }
 
-export default function LiveKitRoom({ token, url, sessionId, isModerator }: LiveKitRoomProps) {
+export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost }: LiveKitRoomProps) {
   const router = useRouter();
   useWakeLock();
 
   const handleDisconnected = useCallback(() => {
-    // Only the host ending the call marks the session done — a student
-    // disconnecting shouldn't close the room for everyone else.
-    if (isModerator) {
+    // Only the session's own teacher ending the call marks it done. This
+    // used to key off isModerator, which is also true for an ORG_ADMIN /
+    // SUPER_ADMIN observing someone else's class — so an admin dropping out
+    // of a room closed the LiveKit room and ended the lesson for the teacher
+    // and students still in it. Students disconnecting never ended it.
+    if (isHost) {
       fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
     }
     router.push('/dashboard');
-  }, [isModerator, sessionId, router]);
+  }, [isHost, sessionId, router]);
 
   return (
     <LKRoom

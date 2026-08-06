@@ -171,6 +171,10 @@ export async function GET(
         userName: user?.name || "Participant",
         joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
         isModerator: isTeacher,
+        // Distinct from isModerator on purpose: an admin observing another
+        // teacher's class gets moderator *controls*, but is not the host.
+        // Leaving must not end the class for the teacher still teaching it.
+        isHost: isOwningTeacher,
       });
     } catch (error) {
       return handleApiError(error);

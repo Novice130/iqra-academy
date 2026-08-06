@@ -16,6 +16,7 @@ export default function SessionRoomPage() {
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('Student');
   const [isModerator, setIsModerator] = useState(false);
+  const [isHost, setIsHost] = useState(false);
   const [showRoom, setShowRoom] = useState(false);
 
   useEffect(() => {
@@ -37,6 +38,7 @@ export default function SessionRoomPage() {
         setToken(data.jwt || data.token); // accept either jwt or token
         setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
         setIsModerator(!!data.isModerator);
+        setIsHost(!!data.isHost);
         if (data.userName) {
           setUserName(data.userName);
         }
@@ -88,7 +90,7 @@ export default function SessionRoomPage() {
   if (!token || !serverUrl) return null;
 
   if (showRoom) {
-    return <LiveKitRoom token={token} url={serverUrl} sessionId={sessionId} isModerator={isModerator} />;
+    return <LiveKitRoom token={token} url={serverUrl} sessionId={sessionId} isModerator={isModerator} isHost={isHost} />;
   }
 
   return <PreJoinScreen userName={userName} onJoin={handleJoin} />;
