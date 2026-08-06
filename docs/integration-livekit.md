@@ -1,20 +1,194 @@
-# LiveKit Integration Guide
+# Video Calls (LiveKit)
 
-This guide explains how LiveKit is integrated into the Quran LMS project for secure, low-latency video conferencing.
+How live classes actually work: where the room comes from, who is allowed
+into it, and why the call screen is shaped the way it is.
 
-## Architecture
+## Where it runs
 
-- **LiveKit Server:** A single-instance Go-based Selective Forwarding Unit (SFU) running on your home server in a Docker container. It coordinates and routes video/audio streams.
-- **Redis:** Used by LiveKit for internal coordination and room state management.
-- **Client (Web):** Integrates `@livekit/components-react` and `livekit-client` in Next.js to provide native, fully featured call UIs.
-- **Client (Mobile):** Loads the Next.js call page `/dashboard/session/[id]` in an `InAppWebView` to leverage the web implementation directly.
+**LiveKit Cloud**, not the `livekit.yaml` sitting in this repo — that file is
+left over from a self-hosted experiment and nothing reads it. Configuration is
+three environment variables (`LIVEKIT_URL`, `LIVEKIT_API_KEY`,
+`LIVEKIT_API_SECRET`) consumed by `src/lib/livekit.ts`.
 
-## Token Generation
+Rooms are named `qlms-<sessionId>` (`generateRoomName`). LiveKit **auto-creates
+a room on join**, which matters more than it sounds: any code path that mints a
+token with `roomJoin` can bring a room into existence, whether or not the class
+is running. Every token-issuing path therefore has to check the session state
+itself — see the guest flow below.
 
-Security is enforced using token-based access. When a user requests to join a class, `/api/sessions/[id]/join` dynamically issues a JWT signed with the LiveKit API Secret containing:
-- Participant identity (email or unique username)
-- Participant display name
-- Room join grant
-- Permissions (e.g. `isModerator` is true for teachers)
+The web app is the only real client. `apps/mobile` (Flutter) loads
+`/dashboard/session/[id]` in an `InAppWebView` rather than embedding the
+LiveKit SDK, so everything here applies there too.
 
-Tokens expire automatically after 2 hours.
+## Joining, and the two kinds of "host"
+
+`POST /api/sessions/[id]/join` issues the token and returns two separate flags:
+
+| Flag | True for | Used for |
+| --- | --- | --- |
+| `isModerator` | the session's teacher **and** any org/super admin | moderator controls: spotlight, mute, remove, invite link |
+| `isHost` | the session's own teacher only | ending the class on disconnect |
+
+They are deliberately not the same check. Ending the session keys off `isHost`,
+because an admin who dropped into someone else's class to observe used to end
+the lesson for everyone when they left.
+
+Joining also flips a `SCHEDULED` session to `IN_PROGRESS`. Nothing else did
+that, so live classes were invisible to every dashboard that filters on it.
+
+### Identity is per connection
+
+Identities are `email#<random>`, not the bare email. LiveKit disconnects an
+existing participant when a new one joins with the same identity, so a teacher
+opening the room on their phone used to kick their own laptop.
+
+Anything reasoning about *who* someone is (spotlight matching, default focus)
+compares `baseIdentity()` — the part before the `#`. Anything acting on a
+connection (mute, rename, remove) uses the full identity, so removing the phone
+somebody joined on twice leaves their laptop alone.
+
+## Guest links (knock-to-join)
+
+`/join/[id]` is a public page deliberately outside `/dashboard`, so it misses
+the auth guard. The security model is that **the link alone grants nothing**:
+
+1. Guest types a name → `POST /api/guest/join` creates a `guest_join_requests`
+   row as `PENDING` and returns **no token**.
+2. Host sees `GuestKnockPrompt` (top-centre, polls
+   `GET /api/sessions/[id]/guests` every 4s) and admits or denies.
+3. The guest's own poll on `GET /api/guest/join?requestId=…` mints the token,
+   and only once the row says `ADMITTED`.
+
+Constraints, all of which exist because the endpoint is unauthenticated and the
+`requestId` travels in a URL a guest can forward:
+
+- **The class must be joinable.** One `isJoinable()` predicate — `IN_PROGRESS`
+  and started within 6h — shared by the knock and the token paths. The token
+  path used to check only `actualStart`, so a guest kept being handed fresh
+  tokens after the class ended and sat alone in an auto-created room.
+- **An admission expires 2 minutes after `respondedAt`.** Long enough to
+  survive a page reload; short enough that a forwarded link is dead on arrival
+  and a removed guest can't re-poll their way back in.
+- **Knocks expire after 10 minutes**, written `EXPIRED` server-side by either
+  the host's list sweep or the guest's own poll. Filtering stale rows out of
+  the host's list without writing the status left guests spinning forever.
+- **Repeat knocks are one knock.** Same (session, name) reuses the pending row;
+  a session accepts at most 12 pending knocks, so a script can't bury the
+  host's video under prompt cards.
+- **The invite link is host-only** (`isModerator`), and lives in the People
+  panel. The old link pointed at `/dashboard` and was useless without an
+  account; `/join` is the door.
+
+Guests join with `isHost={false}`, so leaving can never end the class, and
+`LiveKitRoom` takes an `onLeave` callback — the default `/dashboard` push
+bounces a guest to a login page for an account they don't have.
+
+## The call screen
+
+`CustomVideoConference` is hand-built rather than LiveKit's `VideoConference`
+prefab, and the tiles are ours (`VideoTile`) rather than `ParticipantTile`.
+That is not preference: `ParticipantTile`'s `children` *replaces* its
+internals, and wrapping it breaks `GridLayout`'s sizing, so per-tile overlay
+controls are not possible with the stock components.
+
+**One control row, no floating buttons.** `CallControlBar` is a single centred
+row: mic▾, camera▾, present, effects, chat, people, view, leave. The screen had
+previously grown one floating button per feature. New features belong in the
+People panel or the view menu, not as another button.
+
+- **View menu** (the layout glyph) is layout only: Speaker (follows the room's
+  spotlight), Gallery (equal grid), Active speaker (follows the voice). Active
+  speaker tracks the *last* speaker — LiveKit's active-speaker list empties on
+  every pause, and a view that falls back to the grid between sentences is
+  unwatchable. Under 640px the row overflows and the People button is hidden,
+  so this menu carries a People entry on phones only.
+- **People panel** (`PeoplePanel`) is the one sidebar: the guest invite link,
+  the roster with spotlight / mute / ask-to-unmute / remove, and ringing a
+  student into the running call.
+- **Tile ⋮** (moderators, other people's tiles) carries the same actions plus
+  rename. Fixed 220px wide — shrink-to-fit on an absolutely positioned box
+  resolves to the tile's width.
+- **Default layout is role-based**: teacher/admin → gallery, student → speaker
+  focused on `teacherIdentity` until room metadata arrives.
+
+Tiles are `object-fit: contain` on the main frame: a phone publishes a tall
+9:16 stream, and `cover` on a widescreen tile crops someone to a slice of their
+neck. Small floating tiles keep `cover`.
+
+### What the server can and cannot force
+
+LiveKit will force a mic or camera **off**, never back **on** — a server
+shouldn't silently open someone's microphone. So:
+
+| Action | Mechanism |
+| --- | --- |
+| Mute / turn off camera | `POST /api/sessions/[id]/mute-participant` (server) |
+| Ask to unmute / ask for camera | data channel message, `MediaRequestModal` on their side |
+| Rename | `POST /api/sessions/[id]/participant` (the name comes from the JWT) |
+| Remove from call | `DELETE /api/sessions/[id]/participant?identity=…` |
+
+Removal is per-call, not a ban: LiveKit closes that connection, and nothing
+stops the person rejoining from their dashboard. Both surfaces confirm twice
+before removing — a mis-tap throws a child out of their lesson, and a browser
+`confirm()` steals focus from the call and reads as a page error on a phone.
+
+Every host route resolves the caller against the session, and an `ORG_ADMIN`
+counts as a host **only for their own org** — role alone let an admin of one
+org reach into another org's live class.
+
+### Spotlight
+
+Stored in room metadata as `spotlightIdentity`, matched on `baseIdentity()`.
+It seeds to the *session teacher*, never the joining user, so an admin dropping
+in to observe doesn't become the big picture on every student's screen. The
+join route backfills it via `listRooms` + `updateRoomMetadata` for the case
+where a student's connection auto-created the room with empty metadata before
+the teacher's `createRoom` ran, and never clobbers a spotlight set by hand.
+
+### Backgrounds
+
+`@livekit/track-processors` (client-side MediaPipe), available to everyone:
+none / two blur levels / eleven hand-written SVG wallpapers in
+`public/backgrounds`. Those SVGs need explicit `width`/`height`, not just a
+`viewBox` — they're loaded through `new Image()` + `createImageBitmap`, which
+has no intrinsic size to work from otherwise.
+
+The choice persists in `localStorage` (`nt.background-effect`), per browser
+rather than per account: a phone and a desk want different setups. Effects
+attach to `useLocalParticipant().cameraTrack`, not `localParticipant` — keyed
+off the participant alone, a background chosen on the pre-join screen was
+remembered but never applied, because no track exists at mount.
+
+## Ending a call, and the billing leak
+
+`POST /api/sessions/[id]/end` updates the DB **and** calls
+`deleteRoom(roomName)`. It used to do only the first, so rooms stayed open
+(and billing) until LiveKit's idle timeout eventually caught them.
+
+`/api/admin/livekit-rooms` (ORG_ADMIN/SUPER_ADMIN) lists every open room with
+participant counts and force-closes one or all of them — the self-serve check
+when usage minutes look wrong.
+
+Deleting a session goes through `deleteSessionCascade()`
+(`src/lib/session-cleanup.ts`), which covers all eight tables carrying an FK to
+`sessions`, guest knocks included.
+
+## Testing it
+
+There is no automated test for the call screen; a green build proves nothing
+about it. The check that has actually caught bugs is scripting a real call with
+`puppeteer-core` against the installed Chrome, launched with
+`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`, driving
+login → instant meeting → join in one browser and `/join/[id]` in another.
+
+Run the dev server with the origin pinned or Better-Auth rejects the login:
+
+```
+PORT=3005 BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3005 \
+NEXT_PUBLIC_APP_URL=http://localhost:3005 BETTER_AUTH_URL=http://localhost:3005 \
+npm run dev
+```
+
+Dev compiles routes on demand, so wait on selectors rather than sleeping, and
+retry the first API call. **It hits the live Neon database and real LiveKit** —
+delete the sessions it creates afterwards.
