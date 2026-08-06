@@ -1,5 +1,10 @@
 # Iqra Academy — What's Been Built (Walkthrough)
 
+> **Historical.** This is a status snapshot from the Iqra Academy phase of the
+> project and is no longer maintained. It still describes Jitsi, Dockploy and a
+> VPS, none of which are used. For what is true now see `architecture.md`,
+> `integration-livekit.md`, and the project notes.
+
 ## Overview
 
 | Phase | What | Status |

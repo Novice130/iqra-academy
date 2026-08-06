@@ -1,5 +1,10 @@
 # Iqra Academy — Task Checklist
 
+> **Historical.** This is a status snapshot from the Iqra Academy phase of the
+> project and is no longer maintained. It still describes Jitsi, Dockploy and a
+> VPS, none of which are used. For what is true now see `architecture.md`,
+> `integration-livekit.md`, and the project notes.
+
 Everything that's been built so far and what's remaining.
 
 ## Phase 1: Schema Foundation ✅

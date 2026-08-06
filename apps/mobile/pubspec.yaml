@@ -33,7 +33,7 @@ dependencies:
   intl: ^0.19.0
   gap: ^3.0.1
 
-  # Jitsi (video calls via WebView)
+  # WebView — hosts the web app's LiveKit call screen
   flutter_inappwebview: ^6.1.5
 
   # Push Notifications

@@ -1,15 +1,22 @@
-/// Live Session Screen — Jitsi video call via WebView
+/// Live Session Screen — the web app's call screen in a WebView.
 ///
-/// 📚 EDUCATIONAL NOTE:
-/// We embed Jitsi Meet inside a WebView instead of using the native SDK.
-/// WHY? The native Jitsi SDK for Flutter is poorly maintained and crashes
-/// frequently. WebView is more stable and easier to update.
+/// Jitsi is long gone; calls run on LiveKit. We load the Next.js call page
+/// rather than the LiveKit Flutter SDK because that page is a hand-built UI
+/// (tile controls, spotlight, backgrounds, guest admission) that took a lot of
+/// work to get right — a native rebuild would mean maintaining two of them.
 ///
 /// FLOW:
-/// 1. Call the /api/sessions/{id}/join endpoint to get a Jitsi JWT + URL
-/// 2. Load the Jitsi URL in an InAppWebView
-/// 3. The JWT authenticates the user and sets permissions (mute, etc.)
-/// 4. When the call ends, navigate back to the dashboard
+/// 1. Call /api/sessions/{id}/join
+/// 2. Load the returned page in an InAppWebView
+/// 3. Leaving the call navigates back to the dashboard
+///
+/// TWO KNOWN GAPS, both described in docs/mobile-app.md:
+/// - That endpoint no longer always returns `joinUrl`. It can answer
+///   `{waiting: true}` (class not open yet) or `{redirectSessionId}` (the
+///   class is running on another session row). Both currently fall into the
+///   error branch below; they need handling the way the web page does.
+/// - The page authenticates by cookie, and a Dio login does not populate the
+///   WebView's cookie jar.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

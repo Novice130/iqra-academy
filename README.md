@@ -135,10 +135,10 @@ quran-lms/
 │   ├── integration-stripe.md
 │   ├── integration-calcom.md
 │   ├── integration-livekit.md
-│   └── deployment-runbook.md
+│   ├── timezones.md
+│   ├── mobile-app.md
+│   └── test-accounts.md
 ├── .env.example                       # All env vars with setup instructions
-├── Dockerfile
-├── docker-compose.yml
 └── package.json
 ```
 
@@ -272,10 +272,10 @@ npm run db:seed      # Seed database with test data
 | **CRM** | Twenty (open-source) | Self-hosted, Postgres-based |
 | **Payments** | Stripe | Manual invoice support |
 | **Scheduling** | Cal.com (self-hosted) | Open-source scheduling engine |
-| **Video** | LiveKit (self-hosted) | Token-secured video rooms |
+| **Video** | LiveKit Cloud | Token-secured video rooms |
 | **Email** | Resend | Developer-first transactional email |
 | **Notifications** | Web Push (VAPID) | No app install needed |
-| **Deploy** | Docker + Dockploy | VPS-friendly, multi-project |
+| **Deploy** | Cloudflare Workers (OpenNext) | `npm run deploy:cf` |
 
 ---
 
@@ -330,12 +330,10 @@ Key files to study:
 - [ ] Install Flutter SDK and run `flutter create` for native scaffolding
 - [ ] Connect API client to live backend
 - [ ] Firebase push notifications setup
-- [ ] Jitsi WebView testing on real devices
+- [ ] WebView call testing on real devices
 - [ ] App Store / Play Store submission
 
 ### Infrastructure
-- [x] Docker Compose for all services (Next.js, LiveKit, Redis, Cal.com, Twenty CRM)
-- [x] Dockploy deployment guide with step-by-step instructions
 - [ ] Create dedicated Postgres `app_user` role (not superuser) for RLS enforcement
 - [ ] Set up CI/CD pipeline
 - [ ] Staging environment
@@ -343,7 +341,7 @@ Key files to study:
 
 ---
 
-## 🏗️ Deployment (Cloudflare Workers & Dockploy)
+## 🏗️ Deployment (Cloudflare Workers)
 
 **Domain**: `novicetutor.com`
 
@@ -353,7 +351,7 @@ Key files to study:
 | LiveKit Video | **LiveKit Cloud** | `wss://novice-tutor-kl6pco38.livekit.cloud` |
 | Database | **Neon Postgres** | Cloud Serverless DB |
 
-**Full guide**: See [docs/deployment-dockploy.md](docs/deployment-dockploy.md) for step-by-step instructions.
+Deploy with `cd apps/web && npm run deploy:cf`. There is no VPS and no Docker in the live system — see [docs/architecture.md](docs/architecture.md).
 
 ---
 

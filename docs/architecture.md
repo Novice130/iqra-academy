@@ -1,69 +1,62 @@
-# Iqra Academy — Architecture & Implementation Plan
+# Architecture
 
-## Deployment Architecture
+What runs where, as of 2026-08-06. The previous version of this page described
+four Docker containers on a VPS managed by Dockploy, with Jitsi for video —
+none of which has been true for a long time.
+
+## Deployment
 
 ```
-                    ┌──────────────────────────────────┐
-                    │          DOCKPLOY (VPS)           │
-                    │  (manages all Docker containers)  │
-                    ├──────────────────────────────────┤
-                    │                                    │
- novicetutor.com ─────→  🌐 Next.js App (:3000)    │
-                    │                                    │
- cal.novicetutor.com ────→  📅 Cal.com (:3001)          │
-                    │                                    │
- meet.novicetutor.com ───→  📹 LiveKit / Video (:7880)  │
-                    │                                    │
- crm.novicetutor.com ────→  📊 Twenty CRM (:3002)      │
-                    │                                    │
-                    └──────────────────────────────────┘
-                                    │
-                                    ▼
-                    ☁️ Neon Postgres (managed, external)
-                    ☁️ Stripe (managed, external)
-                    ☁️ Resend (managed, external)
+                    ┌───────────────────────────────┐
+                    │   Cloudflare Workers          │
+                    │   novicetutor.com             │
+                    │   Next.js via @opennextjs      │
+                    └───────────┬───────────────────┘
+                                │
+        ┌───────────────────────┼───────────────────────┐
+        │                       │                       │
+┌───────▼────────┐   ┌──────────▼─────────┐   ┌─────────▼────────┐
+│ Neon Postgres  │   │  LiveKit Cloud     │   │ Stripe / Resend  │
+│ (serverless)   │   │  (SFU + TURN)      │   │                  │
+└────────────────┘   └────────────────────┘   └──────────────────┘
 ```
 
-## Self-Hosted Services (4)
+One Next.js app at `apps/web`, deployed to Cloudflare Workers with
+`@opennextjs/cloudflare` and Wrangler (`npm run deploy:cf`). There is no VPS,
+no Docker, and no container orchestration anywhere in the live system.
 
-| Service | Purpose | Docker Image |
-|---------|---------|-------------|
-| Next.js App | Web app + API + admin | Built from `Dockerfile` |
-| Jitsi Meet | Video calls (4 containers) | `jitsi/*:stable-9823` |
-| Cal.com | Scheduling & booking | `calcom/cal.com:latest` |
-| Twenty CRM | Contact management | `twentycrm/twenty:latest` |
+- **Database** — Neon Postgres over the serverless driver. Every DB-touching
+  route or page must be wrapped in `withDb()` (`src/lib/db.ts`): Workers cannot
+  reuse a connection pool across requests.
+- **Auth** — Better Auth, cookie sessions. `session.user.role` is always
+  undefined (no `additionalFields` configured) — read the role from the `users`
+  table. Email verification and Google sign-in are wired but not enabled.
+- **Video** — LiveKit Cloud. See `integration-livekit.md`, which also covers
+  what moving to a self-hosted SFU would involve.
+- **Payments** — Stripe. **Email** — Resend.
+- **Mobile** — `apps/mobile`, Flutter, currently a never-built draft. See
+  `mobile-app.md`.
 
-## Managed Services (3)
+## Schema
 
-| Service | Purpose | Provider |
-|---------|---------|----------|
-| Neon Postgres | Database + RLS | neon.tech |
-| Stripe | Payments | stripe.com |
-| Resend | Email | resend.com |
+Drizzle ORM, `apps/web/src/db/schema.ts`, ~30 tables. Multi-tenant: nearly
+everything carries `orgId`, and there is one org today
+(`seed_org_iqra_academy`). Roles are STUDENT, TEACHER, ORG_ADMIN, SUPER_ADMIN,
+enforced through `requireAuth` / `requireRole` in `src/lib/rbac.ts`.
 
-## Flutter App
+Migrations are hand-written scripts run against Neon, not `drizzle-kit push` —
+see the deploy notes for why that tool misbehaves against this database.
 
-Lives at `apps/mobile/` inside the monorepo. Docker ignores it via `.dockerignore`. You build it locally with `flutter run`.
+## What is aspirational, not live
 
-## Neon Database Branching
+Worth knowing before you trust a file:
 
-**Recommended setup:**
-- `main` branch → production database
-- `dev` branch → development database (isolated, copy-on-write)
-
-Create a dev branch in Neon Console → Branches → Create Branch.
-Use the dev branch connection string in your local `.env`.
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/db/schema.ts` | 25 tables + 13 enums |
-| `src/db/rls-policies.sql` | 15+ Postgres RLS policies |
-| `src/lib/auth.ts` | Better Auth + Google OAuth |
-| `src/lib/rbac.ts` | Role hierarchy |
-| `src/lib/db.ts` | Drizzle client + `withRLS()` |
-| `src/lib/admin.ts` | AdminJS configuration |
-| `src/lib/crm.ts` | Twenty CRM sync |
-| `docker-compose.yml` | All 9 containers |
-| `.env.example` | Every env var documented |
+- **Cal.com** — `src/lib/calcom.ts` and `/api/webhooks/calcom` exist and are
+  written, but nothing in the product calls out to Cal.com. Booking and
+  teacher availability are still mock UI.
+- **Twenty CRM** — `src/lib/crm.ts` exists; same story.
+- **Push notifications** — `src/lib/push.ts` and the `push_subscriptions` table
+  exist and are unused. Everything in the app is polling. This is the main
+  thing the mobile app is meant to unlock.
+- **RLS** — `src/db/rls-policies.sql` is present; authorisation in practice is
+  done in application code.

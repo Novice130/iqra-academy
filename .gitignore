@@ -28,6 +28,17 @@ repos*.json
 repo_files.json
 .commandcode/
 
+# Machine-generated, and previously committed by accident: 22MB of turbo
+# cache, the graphify code-graph output, and TypeScript's incremental cache.
+# All of it regenerates; none of it belongs in history.
+.turbo/
+**/.turbo/
+.graphify/
+**/.graphify/
+*.tsbuildinfo
+.DS_Store
+**/.DS_Store
+
 **/node_modules/
 **/.next/
 **/build/
