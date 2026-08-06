@@ -8,6 +8,17 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
 
+    <!-- A teacher ringing a student has to behave like a phone call: wake the
+         screen, ring over the lock screen, show a call UI rather than a tray
+         item. Android 14 restricts USE_FULL_SCREEN_INTENT to calling and alarm
+         apps — sideloading is fine; a Play Store listing needs a declaration. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>
+
     <application
         android:label="Novice Tutor"
         android:name="${applicationName}"

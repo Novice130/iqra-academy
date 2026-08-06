@@ -87,6 +87,42 @@ run on Cloudflare Workers and Workers has no `crypto.createSign`. Dead tokens
 catches it, and runs as a plain WebView. That is intentional — the app builds
 and works before the Firebase project exists.
 
+## Ringing the phone
+
+A teacher pressing "Ring" on a student is a phone call, not a notification.
+`IncomingCallOverlay` on the web only rings a student who already has the site
+open and foregrounded — the case that matters (phone in a pocket, screen off)
+was unreachable until this.
+
+**Server:** `POST /api/calls` sends `sendCallPush` — **data-only**, HIGH
+priority, 45s TTL. Data-only matters: include a `notification` block and
+Android renders it itself and never wakes the app, which is the difference
+between a phone that rings and a tray badge. The 45s TTL matches the teacher's
+own ring timeout, because a ring that arrives at midnight is worse than one
+that never arrives. `cancel`, `decline` and `accept` all send `CALL_ENDED` so
+the handset stops ringing — including the student's *other* devices when they
+answer on one of them.
+
+**App:** `lib/shell/incoming_call.dart` draws it with
+`flutter_callkit_incoming` (ringtone, Accept/Decline, over the lock screen).
+The FCM background handler shows the call even from a killed process.
+
+Accept and Decline have to work with **no WebView on screen**, so they read the
+session cookie straight out of `CookieManager` — process-wide, not per-widget —
+and attach it to a plain `HttpClient` POST. One source of truth for the
+session: the cookie the site itself set. Both are best-effort; if the phone is
+offline at that moment the teacher's 45s timeout still resolves the call as
+"no answer".
+
+Answering from a lock screen while the app is **killed** launches the app
+rather than delivering an event, so `PushService.init` also checks
+`FlutterCallkitIncoming.activeCalls()` and picks the accepted call up from
+there.
+
+Needs `USE_FULL_SCREEN_INTENT` in the manifest. Android 14 restricts that to
+calling and alarm apps — sideloading is fine, a Play Store listing needs a
+declaration.
+
 ### Turning push on
 
 1. Firebase console → new project → add an Android app with package name
@@ -109,13 +145,27 @@ the Android SDK where Android Studio put it.
 
 ```sh
 export PATH="$HOME/dev-tools/flutter/bin:$PATH"
-export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+# JDK 17, not Android Studio's JBR 21: flutter_callkit_incoming asks Gradle
+# for a Java 17 toolchain, and under JBR 21 the build dies with "Cannot find a
+# Java installation ... languageVersion=17".
+export JAVA_HOME="$HOME/dev-tools/jdk-17.0.20+8/Contents/Home"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 cd apps/mobile
 flutter analyze
 flutter build apk --debug          # build/app/outputs/flutter-apk/app-debug.apk
 flutter run                        # onto a connected handset
+```
+
+`flutter build apk --release` fails with a bare `25.0.2` from the Flutter tool
+wrapper. Gradle itself is fine — go around it, which also gives per-ABI APKs a
+tenth the size of the debug one:
+
+```sh
+cd apps/mobile/android
+./gradlew :app:assembleRelease -Psplit-per-abi=true \
+  -Ptarget-platform=android-arm64,android-arm
+# build/app/outputs/apk/release/app-arm64-v8a-release.apk  (~18MB)
 ```
 
 Point it at something other than production with

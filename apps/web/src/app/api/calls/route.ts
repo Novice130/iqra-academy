@@ -9,7 +9,8 @@
  *     (used by the in-call "Add Student" button — a Teams-style "bring in
  *     the student who didn't show up" without ending the current call).
  * Either way the student's dashboard polls GET /api/calls/incoming and
- * shows a full-screen ring UI.
+ * shows a full-screen ring UI, and the mobile app is sent a ring push so a
+ * phone with the site closed still rings.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -18,6 +19,7 @@ import { bookings, callInvites, sessions, studentProfiles, users } from "@/db/sc
 import { requireRole } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { sendCallPush } from "@/lib/fcm";
 import { and, eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -111,6 +113,15 @@ export async function POST(request: NextRequest) {
         callerId: ctx.userId,
         calleeId: studentProfile.userId,
         status: "RINGING",
+      });
+
+      // The dashboard poll only rings a student who has the site open. This
+      // rings the phone itself — no-op unless they have the app and push is
+      // configured.
+      await sendCallPush([studentProfile.userId], {
+        callId,
+        sessionId,
+        callerName: teacher.name,
       });
 
       return NextResponse.json({

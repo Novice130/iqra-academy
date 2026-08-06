@@ -16,13 +16,27 @@ import 'dart:convert';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_callkit_incoming/entities/entities.dart';
+import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
+import 'incoming_call.dart';
+
 /// Background isolate handler — must be a top-level function.
+///
+/// This is what makes a closed app ring: a data-only message arrives here even
+/// when no UI exists, and the call screen is drawn from it.
 @pragma('vm:entry-point')
 Future<void> _onBackgroundMessage(RemoteMessage message) async {
-  // Nothing to do: the notification itself is shown by the system. This exists
-  // so data-only messages still wake the app.
+  final call = IncomingCall.fromData(message.data);
+  if (call != null) {
+    await CallService.instance.show(call);
+    return;
+  }
+  if (message.data['type'] == 'CALL_ENDED') {
+    final callId = message.data['callId'];
+    if (callId is String) await CallService.instance.end(callId);
+  }
 }
 
 class PushService {
@@ -68,10 +82,68 @@ class PushService {
     final initial = await messaging.getInitialMessage();
     if (initial != null) _pendingPath = _pathOf(initial);
 
+    // Answered from the lock screen while the app was killed: the tap starts
+    // the app rather than delivering an event, so the accepted call has to be
+    // picked up from the plugin's own state instead.
+    try {
+      final active = await FlutterCallkitIncoming.activeCalls();
+      if (active is List && active.isNotEmpty) {
+        final extra = active.first['extra'];
+        if (extra is Map) {
+          final callId = extra['callId'];
+          final sessionId = extra['sessionId'];
+          if (callId is String) await CallService.instance.accept(callId);
+          if (sessionId is String) _pendingPath = '/dashboard/session/$sessionId';
+        }
+      }
+    } catch (e) {
+      debugPrint('activeCalls check failed: $e');
+    }
+
     // Tapped while the app was in the background.
     FirebaseMessaging.onMessageOpenedApp.listen((m) {
       final path = _pathOf(m);
       if (path != null) _deepLinkController.add(path);
+    });
+
+    // Arrived while the app was open and on screen. A ring still has to ring:
+    // a student staring at the dashboard should get the same call UI as one
+    // whose phone is in a pocket.
+    FirebaseMessaging.onMessage.listen((m) {
+      final call = IncomingCall.fromData(m.data);
+      if (call != null) {
+        CallService.instance.show(call);
+        return;
+      }
+      if (m.data['type'] == 'CALL_ENDED') {
+        final callId = m.data['callId'];
+        if (callId is String) CallService.instance.end(callId);
+      }
+    });
+
+    _listenForCallActions();
+  }
+
+  /// Accept / Decline taps on the native call screen.
+  void _listenForCallActions() {
+    FlutterCallkitIncoming.onEvent.listen((event) async {
+      if (event == null) return;
+      final extra = (event.body['extra'] ?? {}) as Map<dynamic, dynamic>;
+      final callId = extra['callId'] as String?;
+      final sessionId = extra['sessionId'] as String?;
+
+      switch (event.event) {
+        case Event.actionCallAccept:
+          if (callId != null) await CallService.instance.accept(callId);
+          if (sessionId != null) _deepLinkController.add('/dashboard/session/$sessionId');
+          break;
+        case Event.actionCallDecline:
+        case Event.actionCallTimeout:
+          if (callId != null) await CallService.instance.decline(callId);
+          break;
+        default:
+          break;
+      }
     });
   }
 

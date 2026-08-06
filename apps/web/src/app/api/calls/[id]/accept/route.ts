@@ -13,6 +13,7 @@ import { callInvites } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, ConflictError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
+import { sendCallEndedPush } from "@/lib/fcm";
 
 export async function POST(
   request: NextRequest,
@@ -36,6 +37,9 @@ export async function POST(
         .returning({ id: callInvites.id, sessionId: callInvites.sessionId });
 
       if (result.length === 0) throw new ConflictError("This call is no longer ringing.");
+
+      // Answered here — every other device of theirs should stop ringing.
+      await sendCallEndedPush([call.calleeId], id);
 
       return NextResponse.json({ success: true, sessionId: result[0].sessionId });
     } catch (error) {

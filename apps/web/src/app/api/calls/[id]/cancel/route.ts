@@ -13,6 +13,7 @@ import { callInvites } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
+import { sendCallEndedPush } from "@/lib/fcm";
 
 export async function POST(
   request: NextRequest,
@@ -33,6 +34,10 @@ export async function POST(
         .update(callInvites)
         .set({ status: "EXPIRED", respondedAt: new Date() })
         .where(and(eq(callInvites.id, id), eq(callInvites.status, "RINGING")));
+
+      // Silence the handset too — a poll can dismiss an on-screen ring, but
+      // nothing stops a phone ringing on a lock screen except telling it to.
+      await sendCallEndedPush([call.calleeId], id);
 
       return NextResponse.json({ success: true });
     } catch (error) {

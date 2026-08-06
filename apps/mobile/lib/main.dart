@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import 'shell/web_shell.dart';
 import 'shell/push.dart';
+import 'shell/incoming_call.dart';
 
 const appUrl = String.fromEnvironment(
   'APP_URL',
@@ -20,6 +21,10 @@ const appUrl = String.fromEnvironment(
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Answering a call has to work with no WebView on screen, so the call
+  // service needs to know which origin the session cookie belongs to.
+  CallService.instance.appOrigin = Uri.parse(appUrl);
 
   // Firebase is optional at this stage: without android/app/google-services.json
   // initialization throws, and an app that cannot push is still an app that

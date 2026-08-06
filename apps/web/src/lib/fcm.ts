@@ -35,6 +35,19 @@ export interface PushPayload {
   sessionId?: string;
 }
 
+/**
+ * A ring, not a notification. Data-only and HIGH priority so Android delivers
+ * it through Doze to an app that isn't running: the phone has to ring in a
+ * pocket, which a normal notification cannot do. The app draws the incoming
+ * call screen itself from this data — if we also sent a `notification` block,
+ * Android would post its own silent tray item instead of waking the app.
+ */
+export interface CallPayload {
+  callId: string;
+  sessionId: string;
+  callerName: string;
+}
+
 function config() {
   const projectId = process.env.FCM_PROJECT_ID;
   const clientEmail = process.env.FCM_CLIENT_EMAIL;
@@ -129,14 +142,15 @@ async function getAccessToken(): Promise<string | null> {
 }
 
 /**
- * Push to every device belonging to these users.
+ * Delivers one already-built FCM message body to every device of these users.
  *
- * Never throws: a class starting must not fail because Google is having a bad
- * afternoon. Returns how many devices accepted the message.
+ * Never throws: a class starting — or a teacher ringing a student — must not
+ * fail because Google is having a bad afternoon. Returns how many devices
+ * accepted it.
  */
-export async function sendPushToUsers(
+async function sendToDevices(
   userIds: string[],
-  payload: PushPayload
+  build: (token: string) => Record<string, unknown>
 ): Promise<number> {
   if (userIds.length === 0 || !isPushConfigured()) return 0;
 
@@ -157,22 +171,7 @@ export async function sendPushToUsers(
 
     await Promise.all(
       devices.map(async (device) => {
-        const message = {
-          message: {
-            token: device.token,
-            notification: { title: payload.title, body: payload.body },
-            // Data travels alongside the notification so the app knows where
-            // to go when it is tapped — see PushService._pathOf.
-            data: {
-              ...(payload.path ? { path: payload.path } : {}),
-              ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
-            },
-            android: {
-              priority: "HIGH" as const,
-              notification: { channelId: "novice_tutor_default" },
-            },
-          },
-        };
+        const message = { message: build(device.token) };
 
         const res = await fetch(url, {
           method: "POST",
@@ -208,6 +207,68 @@ export async function sendPushToUsers(
     console.error("[fcm] push failed", error);
     return 0;
   }
+}
+
+/**
+ * A tray notification — "your class has started". Tapping it opens `path`.
+ */
+export async function sendPushToUsers(
+  userIds: string[],
+  payload: PushPayload
+): Promise<number> {
+  return sendToDevices(userIds, (token) => ({
+    token,
+    notification: { title: payload.title, body: payload.body },
+    // Data travels alongside the notification so the app knows where to go
+    // when it is tapped — see PushService._pathOf.
+    data: {
+      ...(payload.path ? { path: payload.path } : {}),
+      ...(payload.sessionId ? { sessionId: payload.sessionId } : {}),
+    },
+    android: {
+      priority: "HIGH",
+      notification: { channelId: "novice_tutor_default" },
+    },
+  }));
+}
+
+/**
+ * Ring the student's phone. The app turns this into a full-screen incoming
+ * call — ringtone, Accept/Decline, over the lock screen.
+ *
+ * Deliberately data-only: a `notification` block would make Android render
+ * the message itself and never hand it to the app, which is the difference
+ * between a phone that rings and a phone with an unread badge.
+ */
+export async function sendCallPush(userIds: string[], payload: CallPayload): Promise<number> {
+  return sendToDevices(userIds, (token) => ({
+    token,
+    data: {
+      type: "INCOMING_CALL",
+      callId: payload.callId,
+      sessionId: payload.sessionId,
+      callerName: payload.callerName,
+    },
+    android: {
+      priority: "HIGH",
+      // A ring is worthless late. If the phone was off, the teacher has long
+      // since given up — better it never arrives than arrives at midnight.
+      ttl: "45s",
+    },
+  }));
+}
+
+/**
+ * Stop a ring already in progress: the teacher hung up, or the student
+ * answered on another device. Without this the phone keeps ringing into a
+ * call that no longer exists.
+ */
+export async function sendCallEndedPush(userIds: string[], callId: string): Promise<number> {
+  return sendToDevices(userIds, (token) => ({
+    token,
+    data: { type: "CALL_ENDED", callId },
+    android: { priority: "HIGH", ttl: "60s" },
+  }));
 }
 
 /** Remove one device (sign-out on that handset). */

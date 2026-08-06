@@ -12,6 +12,7 @@ import { callInvites } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
+import { sendCallEndedPush } from "@/lib/fcm";
 
 export async function POST(
   request: NextRequest,
@@ -32,6 +33,9 @@ export async function POST(
         .update(callInvites)
         .set({ status: "DECLINED", respondedAt: new Date() })
         .where(and(eq(callInvites.id, id), eq(callInvites.status, "RINGING")));
+
+      // Declining in the browser must also stop the phone in their pocket.
+      await sendCallEndedPush([call.calleeId], id);
 
       return NextResponse.json({ success: true });
     } catch (error) {

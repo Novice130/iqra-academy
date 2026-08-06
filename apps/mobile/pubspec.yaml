@@ -24,6 +24,11 @@ dependencies:
   firebase_core: ^3.10.1
   firebase_messaging: ^15.2.1
 
+  # The full-screen incoming call: ringtone, Accept/Decline, over the lock
+  # screen. A notification cannot do this; a teacher ringing a student has to
+  # behave like a phone call.
+  flutter_callkit_incoming: ^2.5.2
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
