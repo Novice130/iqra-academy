@@ -1,0 +1,14 @@
+# Commit text as LF regardless of the checkout platform. Without this, editing
+# a CRLF file on a machine configured for LF rewrites every line, which is how
+# schema.ts landed as a 1262-line diff for a 42-line change (6a5afcb).
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.pdf binary

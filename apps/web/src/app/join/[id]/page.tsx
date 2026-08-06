@@ -14,6 +14,8 @@ import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScree
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 
 const POLL_INTERVAL_MS = 2500;
+/** Matches the server's knock window — past this the request is EXPIRED anyway. */
+const WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
 type Stage = 'form' | 'waiting' | 'denied' | 'admitted' | 'error';
 
@@ -28,29 +30,63 @@ export default function GuestJoinPage() {
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
   const [choices, setChoices] = useState<JoinChoices | null>(null);
+  const [deniedReason, setDeniedReason] = useState<string | null>(null);
   const requestIdRef = useRef<string | null>(null);
+  // Once we hold a token the answer is final: a poll already in flight must
+  // not drag us back out of the room when the server retires the used request.
+  const settledRef = useRef(false);
 
   // Poll our own request until the host answers.
   useEffect(() => {
     if (stage !== 'waiting') return;
     let cancelled = false;
+    const startedAt = Date.now();
+
+    const giveUp = (reason: string) => {
+      if (cancelled || settledRef.current) return;
+      settledRef.current = true;
+      setDeniedReason(reason);
+      setStage('denied');
+    };
 
     const poll = async () => {
-      if (!requestIdRef.current) return;
+      if (!requestIdRef.current || settledRef.current) return;
       try {
         const res = await fetch(`/api/guest/join?requestId=${requestIdRef.current}`);
+        // The request can vanish under us — the host deleting the session
+        // cascades it away. Without this the page polled a 404 forever and
+        // sat on the spinner with nothing to show for it.
+        if (res.status === 404 || res.status === 410) {
+          giveUp('This class is no longer available.');
+          return;
+        }
+        if (!res.ok) {
+          if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
+            giveUp('We couldn’t reach the classroom. Try the link again.');
+          }
+          return;
+        }
         const data = await res.json();
-        if (cancelled) return;
+        if (cancelled || settledRef.current) return;
         if (data.status === 'ADMITTED' && data.token) {
+          settledRef.current = true;
           setToken(data.token);
           setServerUrl(data.serverUrl);
           setTeacherIdentity(data.teacherIdentity ?? null);
           setStage('admitted');
-        } else if (data.status === 'DENIED' || data.status === 'EXPIRED') {
-          setStage('denied');
+        } else if (data.status === 'DENIED') {
+          giveUp('The host didn’t admit you to this class.');
+        } else if (data.status === 'EXPIRED') {
+          giveUp('Nobody answered. The host may have stepped away — try again.');
+        } else if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
+          giveUp('Nobody answered. The host may have stepped away — try again.');
         }
       } catch {
-        // Keep waiting — a dropped poll isn't a refusal.
+        // Keep waiting — a dropped poll isn't a refusal — unless we've been
+        // waiting long enough that nothing is coming.
+        if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
+          giveUp('We couldn’t reach the classroom. Try the link again.');
+        }
       }
     };
 
@@ -64,6 +100,8 @@ export default function GuestJoinPage() {
 
   const knock = async () => {
     setMessage(null);
+    setDeniedReason(null);
+    settledRef.current = false;
     try {
       const res = await fetch('/api/guest/join', {
         method: 'POST',
@@ -99,6 +137,18 @@ export default function GuestJoinPage() {
         isHost={false}
         choices={choices}
         teacherIdentity={teacherIdentity}
+        // A guest has no dashboard. Sending them there put them on a login
+        // page for an account they don't have, so leaving drops them back on
+        // the knock screen instead.
+        onLeave={() => {
+          settledRef.current = false;
+          requestIdRef.current = null;
+          setToken(null);
+          setServerUrl(null);
+          setChoices(null);
+          setMessage(null);
+          setStage('form');
+        }}
       />
     );
   }
@@ -126,10 +176,15 @@ export default function GuestJoinPage() {
           <>
             <h1 className="text-lg font-semibold text-white">You weren&apos;t let in</h1>
             <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
-              The host didn&apos;t admit you to this class.
+              {deniedReason ?? 'The host didn’t admit you to this class.'}
             </p>
             <button
-              onClick={() => setStage('form')}
+              onClick={() => {
+                settledRef.current = false;
+                requestIdRef.current = null;
+                setDeniedReason(null);
+                setStage('form');
+              }}
               className="mt-6 w-full py-3 rounded-full text-sm font-semibold cursor-pointer"
               style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
             >

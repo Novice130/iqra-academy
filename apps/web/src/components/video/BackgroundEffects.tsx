@@ -108,8 +108,10 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
   // pre-join screen was remembered but never applied: at mount there is no
   // published track yet, and nothing re-ran once there was one.
   const { localParticipant, cameraTrack } = useLocalParticipant();
+  // Lazy: loadSavedEffect() touches localStorage, so passing it eagerly ran a
+  // getItem + JSON.parse on every render of the conference.
   const [selection, setSelection] = useState<EffectSelection>(
-    initial ?? loadSavedEffect() ?? { kind: 'none' }
+    () => initial ?? loadSavedEffect() ?? { kind: 'none' }
   );
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);

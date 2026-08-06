@@ -14,13 +14,43 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { and, eq, gt } from "drizzle-orm";
+import { and, count, eq, gt } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
 import { createId } from "@paralleldrive/cuid2";
 
 /** A class nobody has started (or that ended hours ago) can't be knocked on. */
 const JOINABLE_WINDOW_MS = 6 * 60 * 60 * 1000;
+
+/** How long a knock stays live before it's treated as abandoned. */
+const KNOCK_WINDOW_MS = 10 * 60 * 1000;
+
+/**
+ * How long an admission is good for. The guest's requestId travels in a URL
+ * they can forward, so an ADMITTED row that never expires is a bearer
+ * credential for the whole class. Long enough to survive a page reload or a
+ * phone waking up; short enough that a forwarded link is dead on arrival.
+ */
+const ADMIT_GRACE_MS = 2 * 60 * 1000;
+
+/** Enough guests to cover a real class; a script pointed at this endpoint stops here. */
+const MAX_PENDING_PER_SESSION = 12;
+
+type SessionRow = typeof sessions.$inferSelect;
+
+/**
+ * The one predicate for "this class can be joined". Both halves of this file
+ * use it: the GET path used to check only actualStart, so a guest kept being
+ * handed fresh tokens after the teacher ended the class — and LiveKit
+ * auto-creates rooms on join, so they'd sit in an unsupervised room alone.
+ */
+function isJoinable(session: SessionRow): boolean {
+  return (
+    session.status === "IN_PROGRESS" &&
+    !!session.actualStart &&
+    session.actualStart.getTime() > Date.now() - JOINABLE_WINDOW_MS
+  );
+}
 
 export async function POST(request: NextRequest) {
   return withDb(async () => {
@@ -42,11 +72,7 @@ export async function POST(request: NextRequest) {
       });
       if (!session) throw new NotFoundError("Session");
 
-      const startedRecently =
-        session.status === "IN_PROGRESS" &&
-        !!session.actualStart &&
-        session.actualStart.getTime() > Date.now() - JOINABLE_WINDOW_MS;
-      if (!startedRecently) {
+      if (!isJoinable(session)) {
         throw new BusinessRuleError("This class hasn't started yet. Try the link again once it's live.");
       }
 
@@ -54,6 +80,44 @@ export async function POST(request: NextRequest) {
         where: eq(users.id, session.teacherId),
         columns: { name: true },
       });
+
+      const knockedSince = new Date(Date.now() - KNOCK_WINDOW_MS);
+
+      // Knocking twice is the same knock. Without this, the "Ask again"
+      // button and an impatient double-tap both stack another card on the
+      // host's screen.
+      const existing = await db.query.guestJoinRequests.findFirst({
+        where: and(
+          eq(guestJoinRequests.sessionId, sessionId),
+          eq(guestJoinRequests.name, name),
+          eq(guestJoinRequests.status, "PENDING"),
+          gt(guestJoinRequests.createdAt, knockedSince)
+        ),
+      });
+      if (existing) {
+        return NextResponse.json({
+          requestId: existing.id,
+          sessionTitle: session.title,
+          teacherName: teacher?.name ?? null,
+        });
+      }
+
+      // This endpoint is unauthenticated and every PENDING row draws a card
+      // over the host's video, so an uncapped insert is a way to bury the
+      // call UI mid-lesson.
+      const [{ pending }] = await db
+        .select({ pending: count() })
+        .from(guestJoinRequests)
+        .where(
+          and(
+            eq(guestJoinRequests.sessionId, sessionId),
+            eq(guestJoinRequests.status, "PENDING"),
+            gt(guestJoinRequests.createdAt, knockedSince)
+          )
+        );
+      if (pending >= MAX_PENDING_PER_SESSION) {
+        throw new BusinessRuleError("Too many people are waiting to be let in. Try again in a few minutes.");
+      }
 
       const id = createId();
       await db.insert(guestJoinRequests).values({
@@ -77,7 +141,8 @@ export async function POST(request: NextRequest) {
 
 /**
  * GET /api/guest/join?requestId=... — the guest polls their own request.
- * Returns a LiveKit token only once the host has admitted them.
+ * Returns a LiveKit token only once the host has admitted them, and only
+ * inside ADMIT_GRACE_MS of that admission.
  */
 export async function GET(request: NextRequest) {
   return withDb(async () => {
@@ -90,17 +155,36 @@ export async function GET(request: NextRequest) {
       });
       if (!req) throw new NotFoundError("Request");
 
+      // A knock nobody answered is expired, not eternally pending. Writing it
+      // here is what makes the waiting screen able to give up: the status is
+      // the only thing the guest can see.
+      if (req.status === "PENDING" && req.createdAt.getTime() < Date.now() - KNOCK_WINDOW_MS) {
+        await db
+          .update(guestJoinRequests)
+          .set({ status: "EXPIRED" })
+          .where(eq(guestJoinRequests.id, req.id));
+        return NextResponse.json({ status: "EXPIRED" });
+      }
+
       if (req.status !== "ADMITTED") {
         return NextResponse.json({ status: req.status });
       }
 
+      const admittedAt = req.respondedAt?.getTime() ?? req.createdAt.getTime();
+      if (admittedAt < Date.now() - ADMIT_GRACE_MS) {
+        await db
+          .update(guestJoinRequests)
+          .set({ status: "EXPIRED" })
+          .where(eq(guestJoinRequests.id, req.id));
+        return NextResponse.json({ status: "EXPIRED" });
+      }
+
       const session = await db.query.sessions.findFirst({
-        where: and(
-          eq(sessions.id, req.sessionId),
-          gt(sessions.actualStart, new Date(Date.now() - JOINABLE_WINDOW_MS))
-        ),
+        where: eq(sessions.id, req.sessionId),
       });
-      if (!session) throw new BusinessRuleError("This class is no longer running.");
+      if (!session || !isJoinable(session)) {
+        throw new BusinessRuleError("This class is no longer running.");
+      }
 
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, session.teacherId),

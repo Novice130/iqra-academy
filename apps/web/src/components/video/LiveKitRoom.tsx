@@ -73,6 +73,12 @@ interface LiveKitRoomProps {
   choices: JoinChoices;
   /** The class teacher's identity — what a student's view focuses by default. */
   teacherIdentity: string | null;
+  /**
+   * Where to send someone once the room closes. Defaults to the dashboard,
+   * which is right for anyone with an account and wrong for a guest — the
+   * auth middleware bounces them to a login page they can't use.
+   */
+  onLeave?: () => void;
 }
 
 export default function LiveKitRoom({
@@ -83,6 +89,7 @@ export default function LiveKitRoom({
   isHost,
   choices,
   teacherIdentity,
+  onLeave,
 }: LiveKitRoomProps) {
   const router = useRouter();
   useWakeLock();
@@ -96,8 +103,12 @@ export default function LiveKitRoom({
     if (isHost) {
       fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
     }
+    if (onLeave) {
+      onLeave();
+      return;
+    }
     router.push('/dashboard');
-  }, [isHost, sessionId, router]);
+  }, [isHost, sessionId, router, onLeave]);
 
   return (
     <LKRoom

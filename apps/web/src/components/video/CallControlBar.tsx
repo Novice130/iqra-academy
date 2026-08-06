@@ -362,14 +362,19 @@ export default function CallControlBar({
               </div>
             </div>
 
-            <button
-              type="button"
-              onClick={copyLink}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
-              style={{ color: '#e8eaed' }}
-            >
-              {copied ? '✓ Link copied' : 'Copy guest invite link'}
-            </button>
+            {/* Host only. The old link went to /dashboard and was useless
+                without an account; /join lets anyone knock, so handing it to
+                every participant hands out the door to the class. */}
+            {isModerator && (
+              <button
+                type="button"
+                onClick={copyLink}
+                className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
+                style={{ color: '#e8eaed' }}
+              >
+                {copied ? '✓ Link copied' : 'Copy guest invite link'}
+              </button>
+            )}
 
             <button
               type="button"
