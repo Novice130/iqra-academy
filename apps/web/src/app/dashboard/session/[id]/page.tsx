@@ -126,8 +126,8 @@ export default function SessionRoomPage() {
     );
   }
 
-  // Arriving early is normal — this is where early goes, instead of into an
-  // empty room of your own.
+  // Only for a class that isn't due yet. Once the room opens — an hour before
+  // the slot — anyone attending walks straight in, first arrival included.
   if (waiting) {
     return (
       <div className="flex items-center justify-center min-h-screen p-6" style={{ background: '#131417' }}>
@@ -143,12 +143,11 @@ export default function SessionRoomPage() {
               animation: 'lk-spin 900ms linear infinite',
             }}
           />
-          <h1 className="text-lg font-semibold text-white">
-            {waiting.teacherName ? `Waiting for ${waiting.teacherName}` : 'Waiting for your teacher'}
-          </h1>
+          <h1 className="text-lg font-semibold text-white">This class isn&apos;t open yet</h1>
           <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            {waiting.sessionTitle || 'Your class'} hasn&apos;t started yet. You&apos;ll join automatically the
-            moment it does — keep this page open.
+            {waiting.sessionTitle || 'Your class'}
+            {waiting.teacherName ? ` with ${waiting.teacherName}` : ''} opens an hour before it starts. Keep
+            this page open and you&apos;ll go straight in — whether or not anyone else is there yet.
           </p>
           {waiting.scheduledStart && (
             <p className="text-sm mt-4" style={{ color: '#8ab4f8' }}>

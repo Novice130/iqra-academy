@@ -4,29 +4,32 @@
  * RBAC: STUDENT or TEACHER
  * GET /api/sessions/[id]/join
  *
- * THE ONE RULE HERE: a student never opens a room. LiveKit auto-creates a room
- * on join, so handing a student a token for a class their teacher hasn't
- * started puts them alone in a room of their own making — and on 2026-08-06
- * that is exactly what happened to a real class of three, each student sitting
- * in a separate room built out of their own INDIVIDUAL session row while the
- * teacher waited somewhere else.
+ * THE ONE RULE HERE: one class, one room, whoever arrives first.
  *
- * So a student's request resolves to one of three things:
- *   1. this session is live      → token
- *   2. their teacher is live elsewhere → { redirectSessionId }
- *   3. nobody has started yet    → { waiting: true }, and the page holds them
- *      in a lobby that polls until (1) or (2) becomes true
+ * A class is spread over several session rows — a group row plus an INDIVIDUAL
+ * row per student — and each person's dashboard links at their own. Since
+ * LiveKit creates a room on join, "join the room named after my row" gave
+ * every student a private room and an empty screen, which is what happened to
+ * a real class of three on 2026-08-06.
  *
- * Only a teacher walking in starts a class, and that is what creates the room.
+ * Every request therefore resolves through `resolveClassRoom` to one canonical
+ * row for the occurrence (see lib/class-room.ts) and answers with:
+ *   1. a token, when that row is this one
+ *   2. { redirectSessionId }, when the class is happening on another row
+ *   3. { waiting: true }, only when the class isn't due at all yet
+ *
+ * A student who turns up early opens the room and waits *in* it; the next
+ * student joins them; the teacher arriving late joins the same room.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { and, desc, eq, gt } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { sessions, users, bookings, studentProfiles } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { resolveClassRoom } from "@/lib/class-room";
 import { createId } from "@paralleldrive/cuid2";
 
 export async function GET(
@@ -67,12 +70,17 @@ export async function GET(
       let isStudent = session.bookings.some((b: any) => b.userId === ctx.userId);
       const isInstantMeeting = session.consumesQuota === false && session.title?.startsWith("Instant Meeting");
 
-      // Auto-book on the way in for an instant meeting, or for any class this
-      // teacher currently has running. Without the second case a student who
-      // follows the "your teacher has started the class" ribbon into a session
-      // they were never explicitly booked for gets a 403 and ends up back on
-      // their own scheduled (empty) room — the exact split-room bug.
-      if (!isStudent && !isTeacher && (isInstantMeeting || session.status === "IN_PROGRESS")) {
+      // Where is this class actually happening? Everyone asks the same
+      // question and gets the same answer, so nobody opens a second room.
+      const resolution = await resolveClassRoom(session);
+      const isTheRoom = resolution.session.id === sessionId && resolution.kind !== "too-early";
+
+      // Auto-book on the way in for an instant meeting, for a class this
+      // teacher currently has running, or for the row that *is* the room for
+      // this occurrence. Without this a student redirected onto the teacher's
+      // group row — a row they were never booked on — gets a 403 and bounces
+      // back to their own empty session, which is the split-room bug itself.
+      if (!isStudent && !isTeacher && (isInstantMeeting || session.status === "IN_PROGRESS" || isTheRoom)) {
         const [profiles, taughtBefore] = await Promise.all([
           db.query.studentProfiles.findMany({
             where: eq(studentProfiles.userId, ctx.userId),
@@ -86,6 +94,9 @@ export async function GET(
             .limit(1),
         ]);
 
+        // Still a roster check: the student has to be someone this teacher has
+        // actually taught. An instant meeting is the exception — its whole
+        // point is pulling in whoever the teacher just handed the link to.
         if (profiles.length > 0 && (isInstantMeeting || taughtBefore.length > 0)) {
            await db.insert(bookings).values({
              id: createId(),
@@ -103,30 +114,16 @@ export async function GET(
         throw new ForbiddenError("You are not part of this session.");
       }
 
-      // A student opening a session their teacher isn't in gets sent to the
-      // room the teacher *is* in. Their dashboard links at their own
-      // scheduled session, but the teacher's live class is very often a
-      // different session row — a group class, or an instant meeting.
-      if (!isTeacher && session.status !== "IN_PROGRESS") {
-        const liveCutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
-        const liveSession = await db.query.sessions.findFirst({
-          where: and(
-            eq(sessions.teacherId, session.teacherId),
-            eq(sessions.status, "IN_PROGRESS"),
-            gt(sessions.actualStart, liveCutoff)
-          ),
-          orderBy: [desc(sessions.actualStart)],
-          columns: { id: true },
-        });
+      if (resolution.session.id !== sessionId) {
+        // The class lives on another row — the teacher's group class, an
+        // instant meeting, or simply whichever sibling row got picked as
+        // canonical. Follow it.
+        return NextResponse.json({ redirectSessionId: resolution.session.id });
+      }
 
-        if (liveSession && liveSession.id !== sessionId) {
-          return NextResponse.json({ redirectSessionId: liveSession.id });
-        }
-
-        // Nothing is running. Hold them in the lobby rather than issuing a
-        // token: a token here would auto-create a room per student, which is
-        // the split-class bug this route exists to prevent. Arriving early is
-        // fine and expected — waiting is what early means.
+      if (resolution.kind === "too-early") {
+        // Not due yet. This is the only case that still holds someone
+        // outside: opening a room hours ahead of a class helps nobody.
         return NextResponse.json({
           waiting: true,
           sessionTitle: session.title,
@@ -170,15 +167,19 @@ export async function GET(
         }
       };
 
-      // The teacher walking into the room IS the class starting. Nothing else
-      // in the app ever flipped a SCHEDULED session to IN_PROGRESS, so a
-      // regular (non-instant) class stayed "SCHEDULED" for its whole
-      // duration — invisible to the admins' live-classes panel and to the
-      // students' "your teacher has started" ribbon, both of which key off
-      // IN_PROGRESS. Only the session's own teacher starts it; an admin
-      // dropping in to observe must not.
+      // Whoever walks in first opens the class — a student half an hour early
+      // included, because being early should put you *in* the room where the
+      // others will find you. Nothing else in the app ever flipped SCHEDULED
+      // to IN_PROGRESS, so a regular class used to stay "SCHEDULED" for its
+      // whole duration, invisible to the admins' live-classes panel and to
+      // the students' ribbon, both of which key off IN_PROGRESS.
+      //
+      // An admin dropping in to observe is the one exception: they are
+      // neither teaching nor attending, and their visit must not mark a class
+      // as having begun.
       const isOwningTeacher = session.teacherId === ctx.userId;
-      const shouldMarkStarted = isOwningTeacher && session.status === "SCHEDULED";
+      const isAttending = isOwningTeacher || isStudent;
+      const shouldMarkStarted = isAttending && session.status === "SCHEDULED";
 
       const [token] = await Promise.all([
         generateLiveKitToken({
@@ -187,7 +188,10 @@ export async function GET(
           userEmail: user?.email || "",
           isModerator: isTeacher,
         }),
-        isTeacher ? ensureSpotlight() : Promise.resolve(),
+        // Seed the spotlight whoever opens the room — it always names the
+        // class teacher, so a student opening early still lands everyone on
+        // the teacher once they arrive.
+        isAttending ? ensureSpotlight() : Promise.resolve(),
         shouldMarkStarted
           ? db
               .update(sessions)
