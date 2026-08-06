@@ -9,16 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { and, eq, like } from "drizzle-orm";
-import {
-  sessions,
-  bookings,
-  sessionAttendees,
-  chatRooms,
-  chatMessages,
-  chatModerationActions,
-  teacherFeedback,
-  progressRecords,
-} from "@/db/schema";
+import { sessions } from "@/db/schema";
+import { deleteSessionCascade } from "@/lib/session-cleanup";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 
@@ -44,27 +36,7 @@ export async function POST(request: NextRequest) {
 
       await db.transaction(async (tx) => {
         for (const { id: sessionId } of toDelete) {
-          const rooms = await tx.query.chatRooms.findMany({
-            where: eq(chatRooms.sessionId, sessionId),
-            columns: { id: true },
-          });
-          for (const room of rooms) {
-            const messages = await tx.query.chatMessages.findMany({
-              where: eq(chatMessages.roomId, room.id),
-              columns: { id: true },
-            });
-            for (const message of messages) {
-              await tx.delete(chatModerationActions).where(eq(chatModerationActions.messageId, message.id));
-            }
-            await tx.delete(chatMessages).where(eq(chatMessages.roomId, room.id));
-          }
-          await tx.delete(chatRooms).where(eq(chatRooms.sessionId, sessionId));
-
-          await tx.delete(progressRecords).where(eq(progressRecords.sessionId, sessionId));
-          await tx.delete(teacherFeedback).where(eq(teacherFeedback.sessionId, sessionId));
-          await tx.delete(sessionAttendees).where(eq(sessionAttendees.sessionId, sessionId));
-          await tx.delete(bookings).where(eq(bookings.sessionId, sessionId));
-          await tx.delete(sessions).where(eq(sessions.id, sessionId));
+          await deleteSessionCascade(tx as never, sessionId);
           deletedCount++;
         }
       });

@@ -9,17 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import {
-  sessions,
-  users,
-  bookings,
-  sessionAttendees,
-  chatRooms,
-  chatMessages,
-  chatModerationActions,
-  teacherFeedback,
-  progressRecords,
-} from "@/db/schema";
+import { sessions, users } from "@/db/schema";
+import { deleteSessionCascade } from "@/lib/session-cleanup";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
@@ -57,27 +48,7 @@ export async function DELETE(
       await getRoomServiceClient().deleteRoom(roomName).catch(() => {});
 
       await db.transaction(async (tx) => {
-        const rooms = await tx.query.chatRooms.findMany({
-          where: eq(chatRooms.sessionId, sessionId),
-          columns: { id: true },
-        });
-        for (const room of rooms) {
-          const messages = await tx.query.chatMessages.findMany({
-            where: eq(chatMessages.roomId, room.id),
-            columns: { id: true },
-          });
-          for (const message of messages) {
-            await tx.delete(chatModerationActions).where(eq(chatModerationActions.messageId, message.id));
-          }
-          await tx.delete(chatMessages).where(eq(chatMessages.roomId, room.id));
-        }
-        await tx.delete(chatRooms).where(eq(chatRooms.sessionId, sessionId));
-
-        await tx.delete(progressRecords).where(eq(progressRecords.sessionId, sessionId));
-        await tx.delete(teacherFeedback).where(eq(teacherFeedback.sessionId, sessionId));
-        await tx.delete(sessionAttendees).where(eq(sessionAttendees.sessionId, sessionId));
-        await tx.delete(bookings).where(eq(bookings.sessionId, sessionId));
-        await tx.delete(sessions).where(eq(sessions.id, sessionId));
+        await deleteSessionCascade(tx as never, sessionId);
       });
 
       return NextResponse.json({ success: true });

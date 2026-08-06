@@ -15,6 +15,7 @@ import {
 import CallControlBar from './CallControlBar';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
+import GuestKnockPrompt from './GuestKnockPrompt';
 import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
@@ -383,6 +384,8 @@ export default function CustomVideoConference({
               </DraggableTile>
             ))}
           </div>
+
+          {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
 
           <MediaRequestModal />
 

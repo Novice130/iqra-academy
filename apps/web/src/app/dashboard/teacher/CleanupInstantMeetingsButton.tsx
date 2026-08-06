@@ -14,11 +14,13 @@ export default function CleanupInstantMeetingsButton() {
     try {
       setIsLoading(true);
       const res = await fetch("/api/teachers/instant-meeting/cleanup", { method: "POST" });
-      const data = await res.json();
-      if (data.success) {
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.success) {
         router.refresh();
       } else {
-        alert("Failed to clean up meetings.");
+        // Show what the server actually said — a generic "failed" hid a
+        // foreign-key error for weeks.
+        alert(data.error || `Failed to clean up meetings (${res.status}).`);
       }
     } catch (error) {
       console.error(error);

@@ -56,6 +56,40 @@ export interface BackgroundEffects {
   select: (next: EffectSelection) => void;
 }
 
+/**
+ * The chosen background is remembered across calls — a teacher who always
+ * teaches against the Arches shouldn't have to pick it every lesson. Stored
+ * per browser (localStorage), not per account: it describes this device's
+ * camera setup, and a teacher on a phone may reasonably want something
+ * different from their desk.
+ */
+const STORAGE_KEY = 'nt.background-effect';
+
+export function loadSavedEffect(): EffectSelection | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as EffectSelection;
+    if (parsed?.kind === 'none') return parsed;
+    if (parsed?.kind === 'blur' && typeof parsed.radius === 'number') return parsed;
+    // Drop a wallpaper that no longer exists rather than failing to apply it.
+    if (parsed?.kind === 'image' && WALLPAPERS.some((w) => w.id === parsed.id)) return parsed;
+  } catch {
+    // Corrupt or unavailable storage — fall back to no effect.
+  }
+  return undefined;
+}
+
+function saveEffect(selection: EffectSelection) {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+  } catch {
+    // Private mode / storage full — the effect still applies for this call.
+  }
+}
+
 /** Turns a selection into the processor options the track expects. */
 export function toProcessorOptions(next: EffectSelection): SwitchBackgroundProcessorOptions {
   if (next.kind === 'none') return { mode: 'disabled' };
@@ -67,13 +101,16 @@ export function toProcessorOptions(next: EffectSelection): SwitchBackgroundProce
 }
 
 export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffects {
+  // The pre-join choice wins; otherwise fall back to whatever was used last.
   // cameraTrack (not just localParticipant) is the dependency that actually
   // changes when the camera track is published or republished. Keying the
   // effect off localParticipant alone meant a background chosen on the
   // pre-join screen was remembered but never applied: at mount there is no
   // published track yet, and nothing re-ran once there was one.
   const { localParticipant, cameraTrack } = useLocalParticipant();
-  const [selection, setSelection] = useState<EffectSelection>(initial ?? { kind: 'none' });
+  const [selection, setSelection] = useState<EffectSelection>(
+    initial ?? loadSavedEffect() ?? { kind: 'none' }
+  );
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);
   const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
@@ -110,8 +147,10 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
         localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
 
       // Remember the choice even with the camera off, so turning the camera
-      // back on restores it via the effect above.
+      // back on restores it via the effect above — and remember it for the
+      // next class too.
       setSelection(next);
+      saveEffect(next);
       if (!track) return;
 
       const target = toProcessorOptions(next);
@@ -156,7 +195,9 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
  * anyone sees them, which is the whole point of a pre-join screen.
  */
 export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): BackgroundEffects {
-  const [selection, setSelection] = useState<EffectSelection>({ kind: 'none' });
+  // Opens on whatever was used last, so the preview already looks the way
+  // the class will.
+  const [selection, setSelection] = useState<EffectSelection>(() => loadSavedEffect() ?? { kind: 'none' });
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);
   const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
@@ -180,6 +221,7 @@ export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): Back
   const select = useCallback(
     (next: EffectSelection) => {
       setSelection(next);
+      saveEffect(next);
       if (!track) return;
       const target = toProcessorOptions(next);
       setBusy(true);

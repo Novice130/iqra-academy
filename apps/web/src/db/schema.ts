@@ -173,6 +173,17 @@ export const callStatusEnum = pgEnum("CallStatus", [
   "EXPIRED",
 ]);
 
+/**
+ * Guest knock-to-join. A guest opens a share link, asks to be let in, and
+ * the host admits or denies — nobody gets into a class on a link alone.
+ */
+export const guestJoinStatusEnum = pgEnum("GuestJoinStatus", [
+  "PENDING",
+  "ADMITTED",
+  "DENIED",
+  "EXPIRED",
+]);
+
 export const crmSyncTypeEnum = pgEnum("CrmSyncType", [
   "CONTACT_CREATED",
   "CONTACT_UPDATED",
@@ -1187,6 +1198,37 @@ export const callInvites = pgTable(
     index("call_invites_session_idx").on(t.sessionId),
   ]
 );
+
+/**
+ * GuestJoinRequest — someone with the share link knocking on a session.
+ *
+ * 📚 WHY A TABLE AND NOT JUST A DATA MESSAGE: the guest isn't in the room
+ * yet (that's the whole point), so there's no data channel to reach them on.
+ * The request is a row both sides poll: the guest waits for ADMITTED, the
+ * host lists what's PENDING. No user account is involved anywhere.
+ */
+export const guestJoinRequests = pgTable(
+  "guest_join_requests",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    /** Display name the guest typed — the only thing we know about them. */
+    name: text("name").notNull(),
+    status: guestJoinStatusEnum("status").notNull().default("PENDING"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    respondedAt: timestamp("responded_at"),
+  },
+  (t) => [
+    index("guest_join_requests_session_idx").on(t.sessionId),
+    index("guest_join_requests_status_idx").on(t.status),
+  ]
+);
+
+export const guestJoinRequestsRelations = relations(guestJoinRequests, ({ one }) => ({
+  org: one(organizations, { fields: [guestJoinRequests.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [guestJoinRequests.sessionId], references: [sessions.id] }),
+}));
 
 export const callInvitesRelations = relations(callInvites, ({ one }) => ({
   org: one(organizations, { fields: [callInvites.orgId], references: [organizations.id] }),

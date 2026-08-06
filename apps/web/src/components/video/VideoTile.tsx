@@ -160,8 +160,15 @@ export default function VideoTile({
 
           {menuOpen && (
             <div
-              className="absolute top-11 right-2 z-30 rounded-xl overflow-hidden shadow-2xl min-w-[190px]"
-              style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.14)' }}
+              // Fixed width, not min-width: shrink-to-fit on an absolutely
+              // positioned box resolved to ~520px here, which left a short
+              // label like "Rename…" swimming in empty space.
+              className="absolute top-11 right-2 z-30 w-[220px] rounded-2xl overflow-hidden"
+              style={{
+                background: '#26282c',
+                border: '1px solid rgba(255,255,255,0.08)',
+                boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+              }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {renaming ? (
@@ -195,7 +202,7 @@ export default function VideoTile({
                   </div>
                 </div>
               ) : (
-                <div className="py-1">
+                <div className="py-1.5">
                   {actions?.onSpotlight && (
                     <MenuItem
                       label={isSpotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}
@@ -259,7 +266,7 @@ function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left px-3 py-2.5 text-sm cursor-pointer hover:bg-white/10"
+      className="w-full text-left px-3.5 py-2 text-[13px] leading-5 cursor-pointer hover:bg-white/10 transition-colors"
       style={{ color: '#e8eaed' }}
     >
       {label}

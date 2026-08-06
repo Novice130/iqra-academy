@@ -232,9 +232,12 @@ export default function CallControlBar({
 
   const toggleMenu = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
 
+  // The guest link, not the dashboard one: /join works without an account,
+  // and the host still has to admit whoever turns up. Students with accounts
+  // reach the same room from their own dashboard anyway.
   const copyLink = () => {
     navigator.clipboard
-      .writeText(`${window.location.origin}/dashboard/session/${sessionId}`)
+      .writeText(`${window.location.origin}/join/${sessionId}`)
       .then(() => {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
@@ -365,7 +368,7 @@ export default function CallControlBar({
               className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
               style={{ color: '#e8eaed' }}
             >
-              {copied ? '✓ Link copied' : 'Copy joining link'}
+              {copied ? '✓ Link copied' : 'Copy guest invite link'}
             </button>
 
             <button
