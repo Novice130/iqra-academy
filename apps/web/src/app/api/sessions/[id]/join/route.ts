@@ -1,8 +1,23 @@
 /**
- * @fileoverview Session Join API — generates Jitsi JWT for a session
+ * @fileoverview Session Join API — issues the LiveKit token for a session.
  *
  * RBAC: STUDENT or TEACHER
- * GET /api/sessions/[id]/join — Get JWT to join the Jitsi room
+ * GET /api/sessions/[id]/join
+ *
+ * THE ONE RULE HERE: a student never opens a room. LiveKit auto-creates a room
+ * on join, so handing a student a token for a class their teacher hasn't
+ * started puts them alone in a room of their own making — and on 2026-08-06
+ * that is exactly what happened to a real class of three, each student sitting
+ * in a separate room built out of their own INDIVIDUAL session row while the
+ * teacher waited somewhere else.
+ *
+ * So a student's request resolves to one of three things:
+ *   1. this session is live      → token
+ *   2. their teacher is live elsewhere → { redirectSessionId }
+ *   3. nobody has started yet    → { waiting: true }, and the page holds them
+ *      in a lobby that polls until (1) or (2) becomes true
+ *
+ * Only a teacher walking in starts a class, and that is what creates the room.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -90,9 +105,8 @@ export async function GET(
 
       // A student opening a session their teacher isn't in gets sent to the
       // room the teacher *is* in. Their dashboard links at their own
-      // scheduled session, but a teacher who hits "Start Instant Meeting"
-      // creates a different session row — following the stale link put the
-      // student alone in a room while the teacher waited in another.
+      // scheduled session, but the teacher's live class is very often a
+      // different session row — a group class, or an instant meeting.
       if (!isTeacher && session.status !== "IN_PROGRESS") {
         const liveCutoff = new Date(Date.now() - 6 * 60 * 60 * 1000);
         const liveSession = await db.query.sessions.findFirst({
@@ -108,6 +122,17 @@ export async function GET(
         if (liveSession && liveSession.id !== sessionId) {
           return NextResponse.json({ redirectSessionId: liveSession.id });
         }
+
+        // Nothing is running. Hold them in the lobby rather than issuing a
+        // token: a token here would auto-create a room per student, which is
+        // the split-class bug this route exists to prevent. Arriving early is
+        // fine and expected — waiting is what early means.
+        return NextResponse.json({
+          waiting: true,
+          sessionTitle: session.title,
+          teacherName: sessionTeacher?.name || null,
+          scheduledStart: session.scheduledStart?.toISOString() ?? null,
+        });
       }
 
       const roomName = generateRoomName(sessionId);

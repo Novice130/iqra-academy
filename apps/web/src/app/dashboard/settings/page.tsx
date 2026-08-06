@@ -5,6 +5,7 @@
  */
 
 import { useState } from "react";
+import TimeZoneCard from "./TimeZoneCard";
 
 export default function SettingsPage() {
   const [name, setName] = useState("Syed Amer");
@@ -73,6 +74,8 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
+
+      <TimeZoneCard />
 
       {/* Student profiles */}
       <section className="card mb-6">

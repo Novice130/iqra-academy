@@ -1,9 +1,19 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
+import LocalTime from '@/components/LocalTime';
+
+/** How often the lobby re-asks whether the teacher has started. */
+const LOBBY_POLL_MS = 5000;
+
+interface Waiting {
+  sessionTitle: string | null;
+  teacherName: string | null;
+  scheduledStart: string | null;
+}
 
 export default function SessionRoomPage() {
   const params = useParams();
@@ -12,6 +22,7 @@ export default function SessionRoomPage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('Student');
@@ -19,42 +30,66 @@ export default function SessionRoomPage() {
   const [isHost, setIsHost] = useState(false);
   const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
   const [choices, setChoices] = useState<JoinChoices | null>(null);
+  const joinedRef = useRef(false);
 
-  useEffect(() => {
-    async function fetchToken() {
-      try {
-        const res = await fetch(`/api/sessions/${sessionId}/join`);
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.error || 'Failed to join session');
-        }
-        const data = await res.json();
-        // The server can point a student at the room their teacher is
-        // actually in (see the join route) — follow it instead of opening a
-        // room of our own.
-        if (data.redirectSessionId) {
-          router.replace(`/dashboard/session/${data.redirectSessionId}`);
-          return;
-        }
-        setToken(data.jwt || data.token); // accept either jwt or token
-        setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
-        setIsModerator(!!data.isModerator);
-        setIsHost(!!data.isHost);
-        setTeacherIdentity(data.teacherIdentity ?? null);
-        if (data.userName) {
-          setUserName(data.userName);
-        }
-      } catch (err: any) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
+  const attemptJoin = useCallback(async () => {
+    if (joinedRef.current) return;
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/join`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to join session');
       }
-    }
+      const data = await res.json();
 
-    if (sessionId) {
-      fetchToken();
+      // The server can point a student at the room their teacher is actually
+      // in — follow it instead of opening a room of our own.
+      if (data.redirectSessionId) {
+        joinedRef.current = true;
+        router.replace(`/dashboard/session/${data.redirectSessionId}`);
+        return;
+      }
+
+      // Class hasn't started. No token by design, so there's no room to sit
+      // alone in; the lobby keeps asking.
+      if (data.waiting) {
+        setWaiting({
+          sessionTitle: data.sessionTitle ?? null,
+          teacherName: data.teacherName ?? null,
+          scheduledStart: data.scheduledStart ?? null,
+        });
+        return;
+      }
+
+      joinedRef.current = true;
+      setWaiting(null);
+      setToken(data.jwt || data.token); // accept either jwt or token
+      setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
+      setIsModerator(!!data.isModerator);
+      setIsHost(!!data.isHost);
+      setTeacherIdentity(data.teacherIdentity ?? null);
+      if (data.userName) {
+        setUserName(data.userName);
+      }
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
     }
   }, [sessionId, router]);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    attemptJoin();
+  }, [sessionId, attemptJoin]);
+
+  // Keep asking while we're in the lobby. The moment the teacher starts — this
+  // session or another one — the next poll picks up a token or a redirect.
+  useEffect(() => {
+    if (!waiting) return;
+    const interval = setInterval(attemptJoin, LOBBY_POLL_MS);
+    return () => clearInterval(interval);
+  }, [waiting, attemptJoin]);
 
   // The pre-join choices double as the "has joined" flag — there's no room
   // to render until the user has actually picked their devices.
@@ -85,6 +120,47 @@ export default function SessionRoomPage() {
             className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all cursor-pointer"
           >
             Back to Dashboard
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Arriving early is normal — this is where early goes, instead of into an
+  // empty room of your own.
+  if (waiting) {
+    return (
+      <div className="flex items-center justify-center min-h-screen p-6" style={{ background: '#131417' }}>
+        <div
+          className="w-full max-w-sm rounded-2xl p-7 text-center"
+          style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.12)' }}
+        >
+          <div
+            className="mx-auto mb-4 w-12 h-12 rounded-full"
+            style={{
+              border: '3px solid rgba(138,180,248,0.25)',
+              borderTopColor: '#8ab4f8',
+              animation: 'lk-spin 900ms linear infinite',
+            }}
+          />
+          <h1 className="text-lg font-semibold text-white">
+            {waiting.teacherName ? `Waiting for ${waiting.teacherName}` : 'Waiting for your teacher'}
+          </h1>
+          <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            {waiting.sessionTitle || 'Your class'} hasn&apos;t started yet. You&apos;ll join automatically the
+            moment it does — keep this page open.
+          </p>
+          {waiting.scheduledStart && (
+            <p className="text-sm mt-4" style={{ color: '#8ab4f8' }}>
+              Scheduled for <LocalTime iso={waiting.scheduledStart} mode="weekday-time" withZone />
+            </p>
+          )}
+          <button
+            onClick={() => router.push('/dashboard')}
+            className="mt-6 w-full py-3 rounded-full text-sm font-semibold cursor-pointer"
+            style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+          >
+            Back to dashboard
           </button>
         </div>
       </div>

@@ -12,6 +12,7 @@ import { db, withDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import DashboardChrome from "./DashboardChrome";
+import { ViewerTimeZoneProvider } from "@/components/LocalTime";
 
 export default async function DashboardLayout({
   children,
@@ -28,11 +29,18 @@ export default async function DashboardLayout({
 
     const dbUser = await db.query.users.findFirst({
       where: eq(users.email, session.user.email),
-      columns: { role: true },
+      columns: { role: true, timezone: true },
     });
 
     const user = { ...session.user, role: dbUser?.role || "STUDENT" } as { name?: string; email?: string; role?: string };
 
-    return <DashboardChrome user={user}>{children}</DashboardChrome>;
+    // Every time on every dashboard page renders through this. Without it the
+    // browser's zone is the only signal, and a device set to the wrong country
+    // silently shows the wrong hour for the class.
+    return (
+      <ViewerTimeZoneProvider timeZone={dbUser?.timezone ?? null}>
+        <DashboardChrome user={user}>{children}</DashboardChrome>
+      </ViewerTimeZoneProvider>
+    );
   });
 }

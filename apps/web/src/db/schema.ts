@@ -265,6 +265,14 @@ export const users = pgTable(
     name: text("name").notNull(),
     image: text("image"),
     phone: text("phone"),
+    /**
+     * IANA zone this person's times are shown in, e.g. "America/Chicago".
+     * Null means "use whatever the browser reports", which is the right
+     * default but not something to rely on: a student in Illinois on a phone
+     * still set to India time was shown their teacher's 4:30 AM instead of
+     * their own 6:00 PM. Set it and the device no longer gets a vote.
+     */
+    timezone: text("timezone"),
     role: userRoleEnum("role").notNull().default("STUDENT"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
