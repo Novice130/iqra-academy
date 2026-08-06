@@ -245,8 +245,8 @@ export default function CallControlBar({
   return (
     <>
       <div
-        className="flex items-center justify-center gap-1.5 sm:gap-3 px-2 sm:px-3 shrink-0"
-        style={{ height: 76, background: '#131417', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        className="call-control-bar flex items-center justify-center gap-1.5 sm:gap-3 px-2 sm:px-3 shrink-0"
+        style={{ background: '#131417', borderTop: '1px solid rgba(255,255,255,0.08)' }}
       >
         <ToggleWithCaret
           source={Track.Source.Microphone}

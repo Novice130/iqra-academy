@@ -13,7 +13,7 @@ import {
   useCreateLayoutContext,
 } from '@livekit/components-react';
 import CallControlBar from './CallControlBar';
-import PeoplePanel, { UnmuteRequestModal } from './PeoplePanel';
+import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
@@ -205,7 +205,7 @@ export default function CustomVideoConference({
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], { onlySubscribed: false });
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const metadata = useLiveRoomMetadata();
-  const { muteTrack, askToUnmute, rename } = useHostControls(sessionId);
+  const { muteTrack, askToUnmute, askForCamera, rename } = useHostControls(sessionId);
 
   // Optimistic override so the moderator who clicked sees an instant result
   // instead of waiting on the metadata round-trip; cleared once the room's
@@ -292,11 +292,12 @@ export default function CustomVideoConference({
       onMute: p.micSid && !p.micMuted ? () => muteTrack(p.identity, p.micSid!) : undefined,
       onAskToUnmute: p.micMuted ? () => askToUnmute(p.identity) : undefined,
       onCameraOff: p.cameraSid && !p.cameraOff ? () => muteTrack(p.identity, p.cameraSid!) : undefined,
+      onAskForCamera: p.cameraOff ? () => askForCamera(p.identity) : undefined,
       onRename: (name: string) => rename(p.identity, name),
     };
   };
 
-  const renderTile = (p: Described) => (
+  const renderTile = (p: Described, fit: 'cover' | 'contain' = 'contain') => (
     <VideoTile
       trackRef={p.trackRef}
       name={p.name}
@@ -305,6 +306,7 @@ export default function CustomVideoConference({
       isLocal={p.isLocal}
       isSpotlighted={p.base === focusIdentity}
       actions={actionsFor(p)}
+      fit={fit}
     />
   );
 
@@ -342,19 +344,12 @@ export default function CustomVideoConference({
 
   return (
     <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
-      <div
-        className="lk-video-conference"
-        style={
-          {
-            height: '100%',
-            // The chat panel sizes itself against this, so it has to match
-            // our real bar height (LiveKit's default is 69px).
-            ['--lk-control-bar-height' as string]: '76px',
-          } as React.CSSProperties
-        }
-      >
+      {/* Bar height (and the --lk-control-bar-height the chat panel sizes
+          itself against) lives in globals.css so it can shrink on a phone
+          held sideways, where a 76px bar eats a quarter of the screen. */}
+      <div className="lk-video-conference call-surface" style={{ height: '100%' }}>
         <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
-          <div style={{ height: 'calc(100% - 76px)', position: 'relative', overflow: 'hidden' }}>
+          <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
             {focused ? (
               <div className="w-full h-full p-2">{renderTile(focused)}</div>
             ) : (
@@ -382,12 +377,14 @@ export default function CustomVideoConference({
                 defaultPosition={{ right: 16, bottom: 16 + i * 124 }}
                 onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
               >
-                {renderTile(p)}
+                {/* Small tiles fill their box; the main tiles show the whole
+                    frame (see VideoTile's `fit`). */}
+                {renderTile(p, 'cover')}
               </DraggableTile>
             ))}
           </div>
 
-          <UnmuteRequestModal />
+          <MediaRequestModal />
 
           <CallControlBar
             sessionId={sessionId}

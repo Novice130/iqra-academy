@@ -15,6 +15,7 @@ import { useCallback } from 'react';
 import { useRoomContext } from '@livekit/components-react';
 
 export const UNMUTE_REQUEST_TOPIC = 'unmute-request';
+export const CAMERA_REQUEST_TOPIC = 'camera-request';
 
 export function useHostControls(sessionId: string) {
   const room = useRoomContext();
@@ -44,6 +45,20 @@ export function useHostControls(sessionId: string) {
     [room]
   );
 
+  /** Same story as unmute: a camera can be forced off but never back on. */
+  const askForCamera = useCallback(
+    (identity: string) => {
+      room.localParticipant
+        .publishData(new TextEncoder().encode('camera'), {
+          destinationIdentities: [identity],
+          topic: CAMERA_REQUEST_TOPIC,
+          reliable: true,
+        })
+        .catch(() => {});
+    },
+    [room]
+  );
+
   const rename = useCallback(
     (identity: string, name: string) => {
       fetch(`/api/sessions/${sessionId}/participant`, {
@@ -55,5 +70,5 @@ export function useHostControls(sessionId: string) {
     [sessionId]
   );
 
-  return { muteTrack, askToUnmute, rename };
+  return { muteTrack, askToUnmute, askForCamera, rename };
 }

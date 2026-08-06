@@ -13,8 +13,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
-import { useHostControls, UNMUTE_REQUEST_TOPIC } from './hostControls';
-import { MicIcon } from './CallIcons';
+import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
+import { CameraIcon, MicIcon } from './CallIcons';
 
 const POLL_INTERVAL_MS = 2000;
 const RING_TIMEOUT_MS = 45000;
@@ -25,18 +25,19 @@ function baseIdentity(identity: string | null | undefined): string | null {
 }
 
 /**
- * LiveKit deliberately has no server-forced unmute (a server shouldn't be
- * able to switch someone's mic on silently), so "ask to unmute" is a data
- * message and the person decides.
+ * LiveKit can force a mic or camera *off* but never back on — a server
+ * shouldn't be able to switch someone's camera on silently. So both are
+ * requests sent over the data channel, and the person decides.
  *
- * This is a centred modal rather than the small corner toast it started as:
- * a student mid-lesson, often on a phone, simply never noticed a chip in the
- * corner. It takes over the screen, pulses, and can't be missed.
+ * A centred modal rather than the small corner toast this started as: a
+ * student mid-lesson, usually on a phone, simply never noticed a chip in the
+ * corner. The backdrop is deliberately light — it dims the call enough to
+ * pull the eye without blacking out the teacher mid-sentence.
  */
-export function UnmuteRequestModal() {
+export function MediaRequestModal() {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
-  const [asked, setAsked] = useState(false);
+  const [request, setRequest] = useState<'mic' | 'camera' | null>(null);
 
   useEffect(() => {
     const handler = (
@@ -45,7 +46,8 @@ export function UnmuteRequestModal() {
       _kind: unknown,
       topic?: string
     ) => {
-      if (topic === UNMUTE_REQUEST_TOPIC) setAsked(true);
+      if (topic === UNMUTE_REQUEST_TOPIC) setRequest('mic');
+      if (topic === CAMERA_REQUEST_TOPIC) setRequest('camera');
     };
     room.on(RoomEvent.DataReceived, handler);
     return () => {
@@ -53,12 +55,20 @@ export function UnmuteRequestModal() {
     };
   }, [room]);
 
-  if (!asked) return null;
+  if (!request) return null;
+
+  const isMic = request === 'mic';
+
+  const accept = () => {
+    setRequest(null);
+    if (isMic) localParticipant.setMicrophoneEnabled(true).catch(() => {});
+    else localParticipant.setCameraEnabled(true).catch(() => {});
+  };
 
   return (
     <div
       className="fixed inset-0 z-[120] flex items-center justify-center p-6"
-      style={{ background: 'rgba(8,10,14,0.72)', backdropFilter: 'blur(4px)' }}
+      style={{ background: 'rgba(20,22,28,0.38)' }}
     >
       <div
         className="w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl"
@@ -68,29 +78,30 @@ export function UnmuteRequestModal() {
           className="mx-auto mb-4 w-16 h-16 rounded-full flex items-center justify-center"
           style={{ background: 'rgba(138,180,248,0.18)', color: '#8ab4f8', animation: 'lk-pulse 1.4s ease-in-out infinite' }}
         >
-          <MicIcon className="w-7 h-7" />
+          {isMic ? <MicIcon className="w-7 h-7" /> : <CameraIcon className="w-7 h-7" />}
         </div>
-        <h2 className="text-lg font-semibold text-white">Your teacher asked you to unmute</h2>
+        <h2 className="text-lg font-semibold text-white">
+          {isMic ? 'Your teacher asked you to unmute' : 'Your teacher asked you to turn on your camera'}
+        </h2>
         <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
-          Turn your microphone on so everyone can hear you.
+          {isMic
+            ? 'Turn your microphone on so everyone can hear you.'
+            : 'Turn your camera on so everyone can see you.'}
         </p>
         <div className="flex gap-3 mt-6">
           <button
-            onClick={() => setAsked(false)}
+            onClick={() => setRequest(null)}
             className="flex-1 py-2.5 rounded-full text-sm font-medium cursor-pointer"
             style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
           >
             Not now
           </button>
           <button
-            onClick={() => {
-              setAsked(false);
-              localParticipant.setMicrophoneEnabled(true).catch(() => {});
-            }}
+            onClick={accept}
             className="flex-1 py-2.5 rounded-full text-sm font-semibold cursor-pointer"
             style={{ background: '#8ab4f8', color: '#202124' }}
           >
-            Unmute
+            {isMic ? 'Unmute' : 'Turn on camera'}
           </button>
         </div>
       </div>

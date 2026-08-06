@@ -24,6 +24,8 @@ export interface TileActions {
   onMute?: () => void;
   onAskToUnmute?: () => void;
   onCameraOff?: () => void;
+  /** LiveKit can force a camera *off* but never back on — this asks. */
+  onAskForCamera?: () => void;
   onRename?: (name: string) => void;
 }
 
@@ -36,6 +38,7 @@ export default function VideoTile({
   isSpotlighted,
   actions,
   rounded = true,
+  fit = 'contain',
 }: {
   trackRef: TrackReferenceOrPlaceholder;
   name: string;
@@ -45,6 +48,14 @@ export default function VideoTile({
   isSpotlighted?: boolean;
   actions?: TileActions;
   rounded?: boolean;
+  /**
+   * `contain` shows the whole frame and letterboxes — the right default for
+   * a main tile, because a phone publishes a tall 9:16 stream and `cover`
+   * crops it down to a slice of somebody's neck on a widescreen monitor.
+   * `cover` is kept for the small floating tiles, where filling the box
+   * matters more than seeing every pixel.
+   */
+  fit?: 'cover' | 'contain';
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -66,7 +77,12 @@ export default function VideoTile({
   const hasVideo = isTrackReference(trackRef) && !cameraOff;
   const hasActions =
     !!actions &&
-    !!(actions.onSpotlight || actions.onMute || actions.onAskToUnmute || actions.onCameraOff || actions.onRename);
+    !!(actions.onSpotlight ||
+      actions.onMute ||
+      actions.onAskToUnmute ||
+      actions.onCameraOff ||
+      actions.onAskForCamera ||
+      actions.onRename);
 
   const submitRename = () => {
     const next = draft.trim();
@@ -91,7 +107,7 @@ export default function VideoTile({
           className="w-full h-full"
           // Mirror your own camera only — everyone else should look the way
           // they actually look.
-          style={{ objectFit: 'cover', transform: isLocal ? 'scaleX(-1)' : undefined }}
+          style={{ objectFit: fit, transform: isLocal ? 'scaleX(-1)' : undefined }}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center">
@@ -208,15 +224,25 @@ export default function VideoTile({
                           }}
                         />
                       )}
-                  {!cameraOff && actions?.onCameraOff && (
-                    <MenuItem
-                      label="Turn off camera"
-                      onClick={() => {
-                        actions.onCameraOff?.();
-                        setMenuOpen(false);
-                      }}
-                    />
-                  )}
+                  {cameraOff
+                    ? actions?.onAskForCamera && (
+                        <MenuItem
+                          label="Ask to turn on camera"
+                          onClick={() => {
+                            actions.onAskForCamera?.();
+                            setMenuOpen(false);
+                          }}
+                        />
+                      )
+                    : actions?.onCameraOff && (
+                        <MenuItem
+                          label="Turn off camera"
+                          onClick={() => {
+                            actions.onCameraOff?.();
+                            setMenuOpen(false);
+                          }}
+                        />
+                      )}
                   {actions?.onRename && <MenuItem label="Rename…" onClick={() => setRenaming(true)} />}
                 </div>
               )}

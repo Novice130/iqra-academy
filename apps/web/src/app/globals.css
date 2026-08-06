@@ -175,3 +175,23 @@ body {
     width: 340px;
   }
 }
+
+/* ── Call control bar height. Also drives --lk-control-bar-height, which
+   LiveKit's chat panel uses to size its own rows and its mobile bottom
+   offset — the two must agree or the chat sheet sits over the buttons.
+   A phone held sideways is only ~390px tall, where a 76px bar is a quarter
+   of the screen, so it shrinks. ── */
+.call-surface {
+  --lk-control-bar-height: 76px;
+}
+.call-control-bar {
+  height: 76px;
+}
+@media (max-height: 480px) {
+  .call-surface {
+    --lk-control-bar-height: 60px;
+  }
+  .call-control-bar {
+    height: 60px;
+  }
+}
