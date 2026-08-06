@@ -70,5 +70,20 @@ export function useHostControls(sessionId: string) {
     [sessionId]
   );
 
-  return { muteTrack, askToUnmute, askForCamera, rename };
+  /**
+   * Drops someone from the call. Per-connection, like muting: removing the
+   * phone somebody joined on twice leaves their laptop where it is. LiveKit
+   * disconnects them; nothing stops them rejoining from their dashboard, so
+   * this is "leave the room now", not a ban.
+   */
+  const removeParticipant = useCallback(
+    (identity: string) => {
+      fetch(`/api/sessions/${sessionId}/participant?identity=${encodeURIComponent(identity)}`, {
+        method: 'DELETE',
+      }).catch(() => {});
+    },
+    [sessionId]
+  );
+
+  return { muteTrack, askToUnmute, askForCamera, rename, removeParticipant };
 }

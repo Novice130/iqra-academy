@@ -36,15 +36,22 @@ import {
   ChevronUpIcon,
   EffectsIcon,
   FlipCameraIcon,
+  LayoutIcon,
   LeaveIcon,
   MicIcon,
   MicOffIcon,
-  MoreIcon,
   PeopleIcon,
   ScreenShareIcon,
 } from './CallIcons';
 
-type MenuId = 'mic' | 'camera' | 'effects' | 'more' | null;
+type MenuId = 'mic' | 'camera' | 'effects' | 'view' | null;
+
+/**
+ * Per-viewer layout. Local only, never synced — `speaker` follows the room's
+ * spotlight, `active` follows whoever is talking, and they're different
+ * things: a teacher can spotlight a student who then goes quiet.
+ */
+export type ViewMode = 'speaker' | 'gallery' | 'active';
 
 const OFF_BG = '#ea4335';
 const ON_BG = 'rgba(255,255,255,0.12)';
@@ -192,8 +199,14 @@ function Popover({
   );
 }
 
+/** What each layout actually does, in the words of someone in a lesson. */
+const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
+  { id: 'speaker', label: 'Speaker', hint: 'The spotlighted person fills the screen' },
+  { id: 'gallery', label: 'Gallery', hint: 'Everyone in an equal grid' },
+  { id: 'active', label: 'Active speaker', hint: 'Follows whoever is talking' },
+];
+
 export default function CallControlBar({
-  sessionId,
   isModerator,
   effects,
   unreadMessages,
@@ -204,7 +217,6 @@ export default function CallControlBar({
   viewMode,
   onViewModeChange,
 }: {
-  sessionId: string;
   isModerator: boolean;
   effects: BackgroundEffects;
   unreadMessages: number;
@@ -212,13 +224,11 @@ export default function CallControlBar({
   peopleOpen: boolean;
   onToggleChat: () => void;
   onTogglePeople: () => void;
-  viewMode: 'speaker' | 'gallery';
-  onViewModeChange: (mode: 'speaker' | 'gallery') => void;
+  viewMode: ViewMode;
+  onViewModeChange: (mode: ViewMode) => void;
 }) {
   const room = useRoomContext();
-  const { localParticipant } = useLocalParticipant();
   const [menu, setMenu] = useState<MenuId>(null);
-  const [copied, setCopied] = useState(false);
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
   const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
@@ -231,19 +241,6 @@ export default function CallControlBar({
   }, []);
 
   const toggleMenu = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
-
-  // The guest link, not the dashboard one: /join works without an account,
-  // and the host still has to admit whoever turns up. Students with accounts
-  // reach the same room from their own dashboard anyway.
-  const copyLink = () => {
-    navigator.clipboard
-      .writeText(`${window.location.origin}/join/${sessionId}`)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
-  };
 
   return (
     <>
@@ -292,8 +289,8 @@ export default function CallControlBar({
           </RoundButton>
         </span>
 
-        <RoundButton label="More options" active={menu === 'more'} onClick={() => toggleMenu('more')}>
-          <MoreIcon />
+        <RoundButton label="View options" active={menu === 'view'} onClick={() => toggleMenu('view')}>
+          <LayoutIcon />
         </RoundButton>
 
         <RoundButton label="Leave call" danger onClick={() => room.disconnect()}>
@@ -335,70 +332,57 @@ export default function CallControlBar({
         </Popover>
       )}
 
-      {menu === 'more' && (
+      {menu === 'view' && (
         <Popover onClose={() => setMenu(null)}>
           <div className="p-2">
-            {/* Available to everyone: a teacher sometimes wants one student
-                big, a student sometimes wants to see the whole class. */}
-            <div className="px-1 pb-2">
-              <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                Layout
-              </div>
-              <div className="flex gap-2 px-2">
-                {(['speaker', 'gallery'] as const).map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    onClick={() => onViewModeChange(m)}
-                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium capitalize cursor-pointer"
-                    style={{
-                      background: viewMode === m ? 'rgba(138,180,248,0.18)' : 'rgba(255,255,255,0.06)',
-                      color: viewMode === m ? '#8ab4f8' : '#e8eaed',
-                    }}
-                  >
-                    {m}
-                  </button>
-                ))}
-              </div>
+            {/* Layout only. Muting, spotlight, people and the invite link all
+                have their own button or live in the People panel — repeating
+                them here was the "jargon" the bar was rebuilt to get rid of. */}
+            <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+              View
             </div>
+            {VIEW_MODES.map((m) => {
+              const selected = viewMode === m.id;
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => {
+                    onViewModeChange(m.id);
+                    setMenu(null);
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left cursor-pointer"
+                  style={{ background: selected ? 'rgba(138,180,248,0.16)' : 'transparent' }}
+                >
+                  <span className="w-4 shrink-0 text-sm" style={{ color: '#8ab4f8' }}>
+                    {selected ? '✓' : ''}
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm" style={{ color: selected ? '#8ab4f8' : '#e8eaed' }}>
+                      {m.label}
+                    </span>
+                    <span className="block text-[11px] text-white/45">{m.hint}</span>
+                  </span>
+                </button>
+              );
+            })}
 
-            {/* Host only. The old link went to /dashboard and was useless
-                without an account; /join lets anyone knock, so handing it to
-                every participant hands out the door to the class. */}
-            {isModerator && (
+            {/* The People button is hidden under 640px because the row
+                overflows there, so on a phone this menu is the only way in. */}
+            <div className="sm:hidden">
+              <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
               <button
                 type="button"
-                onClick={copyLink}
+                onClick={() => {
+                  onTogglePeople();
+                  setMenu(null);
+                }}
                 className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
                 style={{ color: '#e8eaed' }}
               >
-                {copied ? '✓ Link copied' : 'Copy guest invite link'}
+                {isModerator ? 'People — spotlight, mute, invite…' : 'People'}
               </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => {
-                localParticipant.setMicrophoneEnabled(false).catch(() => {});
-                setMenu(null);
-              }}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
-              style={{ color: '#e8eaed' }}
-            >
-              Mute my microphone
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                onTogglePeople();
-                setMenu(null);
-              }}
-              className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
-              style={{ color: '#e8eaed' }}
-            >
-              {isModerator ? 'People — spotlight, mute, ring…' : 'People'}
-            </button>
+            </div>
           </div>
         </Popover>
       )}

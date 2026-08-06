@@ -9,10 +9,11 @@ import {
   ConnectionStateToast,
   useTracks,
   useRoomContext,
+  useSpeakingParticipants,
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
-import CallControlBar from './CallControlBar';
+import CallControlBar, { type ViewMode } from './CallControlBar';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
@@ -206,7 +207,7 @@ export default function CustomVideoConference({
   const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], { onlySubscribed: false });
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const metadata = useLiveRoomMetadata();
-  const { muteTrack, askToUnmute, askForCamera, rename } = useHostControls(sessionId);
+  const { muteTrack, askToUnmute, askForCamera, rename, removeParticipant } = useHostControls(sessionId);
 
   // Optimistic override so the moderator who clicked sees an instant result
   // instead of waiting on the metadata round-trip; cleared once the room's
@@ -226,7 +227,18 @@ export default function CustomVideoConference({
   // Per-viewer layout choice, like Zoom's gallery/speaker toggle — local only,
   // never synced. The defaults differ by role on purpose: a teacher wants
   // every student on screen at once, a student wants the teacher big.
-  const [viewMode, setViewMode] = useState<'speaker' | 'gallery'>(isModerator ? 'gallery' : 'speaker');
+  const [viewMode, setViewMode] = useState<ViewMode>(isModerator ? 'gallery' : 'speaker');
+
+  // Active-speaker view needs the *last* person to speak, not the current
+  // one: LiveKit's list empties the moment everybody stops talking, and a
+  // screen that falls back to the grid during every pause is unwatchable.
+  const speakers = useSpeakingParticipants();
+  const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
+  useEffect(() => {
+    // Prefer whoever isn't you — your own voice is not what you want to watch.
+    const speaking = speakers.find((p) => !p.isLocal) ?? speakers[0];
+    if (speaking) setLastSpeaker(speaking.identity);
+  }, [speakers]);
 
   const [widgetState, setWidgetState] = useState<WidgetState>({
     showChat: false,
@@ -295,6 +307,7 @@ export default function CustomVideoConference({
       onCameraOff: p.cameraSid && !p.cameraOff ? () => muteTrack(p.identity, p.cameraSid!) : undefined,
       onAskForCamera: p.cameraOff ? () => askForCamera(p.identity) : undefined,
       onRename: (name: string) => rename(p.identity, name),
+      onRemove: () => removeParticipant(p.identity),
     };
   };
 
@@ -335,7 +348,12 @@ export default function CustomVideoConference({
       floating = localCamera ? [localCamera] : [];
     }
   } else {
-    const focusTarget = all.find((p) => p.base === focusIdentity);
+    // Speaker follows the room's spotlight; active-speaker follows the voice,
+    // falling back to the spotlight until somebody actually says something.
+    const focusTarget =
+      viewMode === 'active'
+        ? all.find((p) => p.identity === lastSpeaker) ?? all.find((p) => p.base === focusIdentity)
+        : all.find((p) => p.base === focusIdentity);
     if (focusTarget) {
       focused = focusTarget;
       gridTiles = [];
@@ -390,7 +408,6 @@ export default function CustomVideoConference({
           <MediaRequestModal />
 
           <CallControlBar
-            sessionId={sessionId}
             isModerator={isModerator}
             effects={effects}
             unreadMessages={widgetState.unreadMessages}

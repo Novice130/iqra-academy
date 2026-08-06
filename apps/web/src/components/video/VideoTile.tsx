@@ -27,6 +27,8 @@ export interface TileActions {
   /** LiveKit can force a camera *off* but never back on — this asks. */
   onAskForCamera?: () => void;
   onRename?: (name: string) => void;
+  /** Drops them from the call. Asks for confirmation first — it's abrupt. */
+  onRemove?: () => void;
 }
 
 export default function VideoTile({
@@ -59,6 +61,7 @@ export default function VideoTile({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
   const [draft, setDraft] = useState(name);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -68,6 +71,7 @@ export default function VideoTile({
       if (!rootRef.current?.contains(e.target as Node)) {
         setMenuOpen(false);
         setRenaming(false);
+        setConfirmRemove(false);
       }
     };
     document.addEventListener('mousedown', close);
@@ -82,13 +86,20 @@ export default function VideoTile({
       actions.onAskToUnmute ||
       actions.onCameraOff ||
       actions.onAskForCamera ||
-      actions.onRename);
+      actions.onRename ||
+      actions.onRemove);
 
   const submitRename = () => {
     const next = draft.trim();
     setRenaming(false);
     setMenuOpen(false);
     if (next && next !== name) actions?.onRename?.(next);
+  };
+
+  const openMenu = () => {
+    setDraft(name);
+    setConfirmRemove(false);
+    setMenuOpen((v) => !v);
   };
 
   return (
@@ -147,8 +158,7 @@ export default function VideoTile({
             type="button"
             onClick={(e) => {
               e.stopPropagation();
-              setDraft(name);
-              setMenuOpen((v) => !v);
+              openMenu();
             }}
             onPointerDown={(e) => e.stopPropagation()}
             aria-label={`Options for ${name}`}
@@ -251,6 +261,46 @@ export default function VideoTile({
                         />
                       )}
                   {actions?.onRename && <MenuItem label="Rename…" onClick={() => setRenaming(true)} />}
+
+                  {/* Two taps, not a browser confirm(): the dialog steals
+                      focus from the call and reads as a page error on a
+                      phone. Kicking someone out of a lesson by a mis-tap is
+                      the thing worth preventing. */}
+                  {actions?.onRemove && (
+                    <>
+                      <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
+                      {confirmRemove ? (
+                        <div className="px-2 pb-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              actions.onRemove?.();
+                              setConfirmRemove(false);
+                              setMenuOpen(false);
+                            }}
+                            className="w-full py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
+                            style={{ background: '#ea4335', color: '#fff' }}
+                          >
+                            Remove {name}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setConfirmRemove(false)}
+                            className="w-full mt-1.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
+                            style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <MenuItem
+                          label="Remove from meeting"
+                          danger
+                          onClick={() => setConfirmRemove(true)}
+                        />
+                      )}
+                    </>
+                  )}
                 </div>
               )}
             </div>
@@ -261,13 +311,13 @@ export default function VideoTile({
   );
 }
 
-function MenuItem({ label, onClick }: { label: string; onClick: () => void }) {
+function MenuItem({ label, onClick, danger }: { label: string; onClick: () => void; danger?: boolean }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="w-full text-left px-3.5 py-2 text-[13px] leading-5 cursor-pointer hover:bg-white/10 transition-colors"
-      style={{ color: '#e8eaed' }}
+      style={{ color: danger ? '#f6a6a0' : '#e8eaed' }}
     >
       {label}
     </button>

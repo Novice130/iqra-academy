@@ -234,6 +234,45 @@ function RingStudents({ sessionId }: { sessionId: string }) {
   );
 }
 
+/**
+ * The guest link belongs with the other ways of getting someone into the
+ * room, not in a menu of unrelated options — inviting a stranger and ringing
+ * a student are the same job. Host only: /join needs no account, so the link
+ * is the door, unlike the old /dashboard one which was useless without one.
+ */
+function InviteGuest({ sessionId }: { sessionId: string }) {
+  const [copied, setCopied] = useState(false);
+  const link = typeof window === 'undefined' ? '' : `${window.location.origin}/join/${sessionId}`;
+
+  const copy = () => {
+    navigator.clipboard
+      .writeText(link)
+      .then(() => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      })
+      .catch(() => {});
+  };
+
+  return (
+    <div className="pb-3 mb-1" style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+        Add someone to this class
+      </div>
+      <button
+        onClick={copy}
+        className="w-full py-2.5 rounded-full text-xs font-semibold cursor-pointer"
+        style={{ background: copied ? 'rgba(138,180,248,0.2)' : '#8ab4f8', color: copied ? '#8ab4f8' : '#202124' }}
+      >
+        {copied ? '✓ Guest link copied' : 'Copy guest invite link'}
+      </button>
+      <p className="mt-2 px-1 text-[11px] leading-4 text-white/40">
+        Anyone with this link asks to join and waits for you to let them in. No account needed.
+      </p>
+    </div>
+  );
+}
+
 export default function PeoplePanel({
   sessionId,
   isModerator,
@@ -247,7 +286,8 @@ export default function PeoplePanel({
   onSpotlight: (identity: string | null) => void;
   onClose: () => void;
 }) {
-  const { muteTrack, askToUnmute } = useHostControls(sessionId);
+  const { muteTrack, askToUnmute, removeParticipant } = useHostControls(sessionId);
+  const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
@@ -295,6 +335,8 @@ export default function PeoplePanel({
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
+        {isModerator && <InviteGuest sessionId={sessionId} />}
+
         {people.map((p) => {
           const spotlighted = p.base === baseIdentity(spotlightIdentity);
           return (
@@ -334,6 +376,28 @@ export default function PeoplePanel({
                         style={{ background: '#ea4335', color: '#fff' }}
                       >
                         Mute
+                      </button>
+                    ))}
+                  {/* Two taps here too — same reasoning as the tile menu. */}
+                  {!p.isLocal &&
+                    (confirmRemove === p.identity ? (
+                      <button
+                        onClick={() => {
+                          removeParticipant(p.identity);
+                          setConfirmRemove(null);
+                        }}
+                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer"
+                        style={{ background: '#ea4335', color: '#fff' }}
+                      >
+                        Confirm remove
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmRemove(p.identity)}
+                        className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer"
+                        style={{ background: 'rgba(255,255,255,0.1)', color: '#f6a6a0' }}
+                      >
+                        Remove
                       </button>
                     ))}
                 </div>

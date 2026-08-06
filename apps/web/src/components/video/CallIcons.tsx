@@ -59,11 +59,17 @@ export const ScreenShareIcon = (p: P) => (
   </svg>
 );
 
+/**
+ * Background effects: a person standing in front of a dashed frame — the
+ * frame is what's being swapped out. The old glyph was a person with a
+ * sparkle, which read as "add someone to the call" sitting two buttons away
+ * from the People button.
+ */
 export const EffectsIcon = (p: P) => (
   <svg {...base} {...p}>
-    <circle cx="12" cy="9" r="3.2" />
-    <path d="M5.5 19.5a6.5 6.5 0 0 1 13 0" />
-    <path d="M19 3.2l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7z" />
+    <rect x="2.5" y="3.5" width="19" height="17" rx="3" strokeDasharray="3.2 2.6" />
+    <circle cx="12" cy="10" r="2.7" />
+    <path d="M7.3 17.6a5 5 0 0 1 9.4 0" />
   </svg>
 );
 
@@ -87,6 +93,15 @@ export const MoreIcon = (p: P) => (
     <circle cx="12" cy="5" r="1.4" fill="currentColor" />
     <circle cx="12" cy="12" r="1.4" fill="currentColor" />
     <circle cx="12" cy="19" r="1.4" fill="currentColor" />
+  </svg>
+);
+
+/** One big frame and two small ones — the speaker/gallery choice itself. */
+export const LayoutIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="2.5" y="5" width="12" height="14" rx="2" />
+    <rect x="16.5" y="5" width="5" height="6" rx="1.5" />
+    <rect x="16.5" y="13" width="5" height="6" rx="1.5" />
   </svg>
 );
 
