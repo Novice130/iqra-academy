@@ -20,6 +20,45 @@ The web app is the only real client. `apps/mobile` (Flutter) loads
 `/dashboard/session/[id]` in an `InAppWebView` rather than embedding the
 LiveKit SDK, so everything here applies there too.
 
+## One class, one room
+
+**This is the single most important thing in this document.** A class is not
+one session row. The normal shape here is a group row for the teacher *plus an
+INDIVIDUAL row per student*, and every person's dashboard links at their own
+row. Name the LiveKit room after the row and you get one room per person: on
+2026-08-06 a real class of three ran with each student alone in a separate
+room while the teacher sat in a fourth.
+
+So the room belongs to the **class occurrence**, not the row.
+`src/lib/class-room.ts` resolves any row to one canonical row for that teacher
+and slot, identically for every caller, and everyone joins the room named after
+*that*:
+
+1. Anything of this teacher's already `IN_PROGRESS` within 6h wins outright —
+   a sibling row, an instant meeting, whatever got there first.
+2. Otherwise, if the class is due (from an hour before its slot to three hours
+   after), the earliest sibling row within 90 minutes takes it, ties broken by
+   id. Deterministic on purpose: two students arriving at the same moment must
+   not open two rooms.
+3. Otherwise it isn't due — the session page shows a lobby rather than opening
+   a room for a class that isn't today.
+
+**Whoever arrives first opens the room, students included.** A student half an
+hour early is *in* the room, so the next student finds them there and the
+teacher joins them on arrival. Opening it marks the class `IN_PROGRESS`, which
+is what the admin live-classes panel and the students' ribbon key off. An
+admin dropping in to observe is excluded — they are neither teaching nor
+attending, and their visit must not mark a class as begun.
+
+A student redirected onto a row they were never booked on is auto-booked there
+(roster-checked: the teacher must have taught them before). Without that they
+hit a 403 and bounce back to their own empty room, which is the bug itself.
+
+`POST /api/teachers/instant-meeting` follows the same rule: it resumes a class
+already running, else starts the one scheduled around now, else creates an
+ad-hoc session. "Instant" does not mean "new" — minting a fresh row is what
+put the students somewhere else. It takes no arguments and the UI is one tap.
+
 ## Joining, and the two kinds of "host"
 
 `POST /api/sessions/[id]/join` issues the token and returns two separate flags:
