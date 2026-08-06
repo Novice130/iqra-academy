@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import PreJoinScreen from '@/components/video/PreJoinScreen';
+import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 
 export default function SessionRoomPage() {
@@ -17,7 +17,7 @@ export default function SessionRoomPage() {
   const [userName, setUserName] = useState<string>('Student');
   const [isModerator, setIsModerator] = useState(false);
   const [isHost, setIsHost] = useState(false);
-  const [showRoom, setShowRoom] = useState(false);
+  const [choices, setChoices] = useState<JoinChoices | null>(null);
 
   useEffect(() => {
     async function fetchToken() {
@@ -54,8 +54,10 @@ export default function SessionRoomPage() {
     }
   }, [sessionId, router]);
 
-  const handleJoin = () => {
-    setShowRoom(true);
+  // The pre-join choices double as the "has joined" flag — there's no room
+  // to render until the user has actually picked their devices.
+  const handleJoin = (picked: JoinChoices) => {
+    setChoices(picked);
   };
 
   if (loading) {
@@ -89,8 +91,17 @@ export default function SessionRoomPage() {
 
   if (!token || !serverUrl) return null;
 
-  if (showRoom) {
-    return <LiveKitRoom token={token} url={serverUrl} sessionId={sessionId} isModerator={isModerator} isHost={isHost} />;
+  if (choices) {
+    return (
+      <LiveKitRoom
+        token={token}
+        url={serverUrl}
+        sessionId={sessionId}
+        isModerator={isModerator}
+        isHost={isHost}
+        choices={choices}
+      />
+    );
   }
 
   return <PreJoinScreen userName={userName} onJoin={handleJoin} />;

@@ -1,146 +1,310 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+/**
+ * Pre-join screen — Google Meet's "ready to join?" step: a live self-preview
+ * with the mic and camera toggles sitting on it, the device pickers next to
+ * it, and a live mic level so you can see the microphone is actually picking
+ * you up before the class starts.
+ *
+ * Everything here runs on raw getUserMedia, not LiveKit hooks: there is no
+ * Room yet at this point in the flow. The choices are handed to the caller
+ * and applied when the room connects — see LiveKitRoom.
+ */
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { CameraIcon, CameraOffIcon, MicIcon, MicOffIcon } from './CallIcons';
+
+export interface JoinChoices {
+  videoEnabled: boolean;
+  audioEnabled: boolean;
+  videoDeviceId?: string;
+  audioDeviceId?: string;
+  audioOutputDeviceId?: string;
+}
 
 interface PreJoinScreenProps {
   userName: string;
-  onJoin: (options: { videoEnabled: boolean; audioEnabled: boolean }) => void;
+  onJoin: (choices: JoinChoices) => void;
+}
+
+function describeMediaError(err: unknown) {
+  const name = (err as { name?: string })?.name;
+  if (name === 'NotAllowedError')
+    return 'Camera or microphone access denied. Allow permission in your browser settings and try again.';
+  if (name === 'NotFoundError') return 'No camera or microphone found on this device.';
+  if (name === 'NotReadableError') return 'Your camera or microphone is already in use by another app or tab.';
+  return 'Could not access your camera or microphone. Check your device and permissions.';
+}
+
+function DeviceSelect({
+  label,
+  devices,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  devices: MediaDeviceInfo[];
+  value: string | undefined;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}) {
+  if (devices.length === 0) return null;
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-semibold uppercase tracking-wide text-white/45 mb-1">{label}</span>
+      <select
+        value={value ?? devices[0]?.deviceId ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3 py-2.5 rounded-lg text-sm cursor-pointer disabled:opacity-50"
+        style={{ background: '#2a2d33', color: '#e8eaed', border: '1px solid rgba(255,255,255,0.12)' }}
+      >
+        {devices.map((d, i) => (
+          <option key={d.deviceId || i} value={d.deviceId}>
+            {d.label || `${label} ${i + 1}`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
 }
 
 export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
-  const [stream, setStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
+  const [videoDeviceId, setVideoDeviceId] = useState<string>();
+  const [audioDeviceId, setAudioDeviceId] = useState<string>();
+  const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string>();
+  const [error, setError] = useState<string | null>(null);
+  const [level, setLevel] = useState(0);
+
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const rafRef = useRef<number | null>(null);
+
+  const stopStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
+    audioCtxRef.current?.close().catch(() => {});
+    audioCtxRef.current = null;
+    setLevel(0);
+  }, []);
+
+  // Device labels are empty until permission has been granted once, so the
+  // list is (re)read after every successful getUserMedia rather than upfront.
+  const refreshDevices = useCallback(async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      setCameras(all.filter((d) => d.kind === 'videoinput'));
+      setMics(all.filter((d) => d.kind === 'audioinput'));
+      setSpeakers(all.filter((d) => d.kind === 'audiooutput'));
+    } catch {
+      // Nothing to show; the selects just stay hidden.
+    }
+  }, []);
 
   useEffect(() => {
-    if (videoEnabled) {
-      navigator.mediaDevices
-        .getUserMedia({ video: true, audio: false })
-        .then((s) => {
-          setCameraError(null);
-          setStream(s);
-          if (videoRef.current) {
-            videoRef.current.srcObject = s;
-          }
-        })
-        .catch((err) => {
-          console.error('Error accessing camera:', err);
-          setCameraError(
-            err?.name === 'NotAllowedError'
-              ? 'Camera access denied. Allow camera permission in your browser settings and try again.'
-              : err?.name === 'NotFoundError'
-              ? 'No camera found on this device.'
-              : err?.name === 'NotReadableError'
-              ? 'Camera is already in use by another app or tab.'
-              : 'Could not access camera. Please check your device and permissions.'
-          );
-          setVideoEnabled(false);
-        });
-    } else {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-        setStream(null);
-      }
-    }
+    let cancelled = false;
 
-    return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
+    const open = async () => {
+      stopStream();
+      if (!videoEnabled && !audioEnabled) return;
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: videoEnabled ? (videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true) : false,
+          audio: audioEnabled ? (audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true) : false,
+        });
+        if (cancelled) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
+        streamRef.current = stream;
+        setError(null);
+        if (videoRef.current) videoRef.current.srcObject = stream;
+        refreshDevices();
+
+        // Mic level meter — the cheap reassurance that the right microphone
+        // is selected, without having to join and ask "can you hear me?".
+        const audioTrack = stream.getAudioTracks()[0];
+        if (audioTrack) {
+          const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+          const ctx = new Ctx();
+          audioCtxRef.current = ctx;
+          const source = ctx.createMediaStreamSource(new MediaStream([audioTrack]));
+          const analyser = ctx.createAnalyser();
+          analyser.fftSize = 512;
+          source.connect(analyser);
+          const data = new Uint8Array(analyser.frequencyBinCount);
+          const tick = () => {
+            analyser.getByteTimeDomainData(data);
+            let peak = 0;
+            for (let i = 0; i < data.length; i++) peak = Math.max(peak, Math.abs(data[i] - 128));
+            setLevel(Math.min(1, peak / 60));
+            rafRef.current = requestAnimationFrame(tick);
+          };
+          tick();
+        }
+      } catch (err) {
+        if (cancelled) return;
+        console.error('Pre-join media error', err);
+        setError(describeMediaError(err));
+        setVideoEnabled(false);
+        setAudioEnabled(false);
       }
     };
-  }, [videoEnabled]);
 
-  const handleJoin = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-    onJoin({ videoEnabled, audioEnabled });
+    open();
+    return () => {
+      cancelled = true;
+    };
+    // stopStream/refreshDevices are stable useCallbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [videoEnabled, audioEnabled, videoDeviceId, audioDeviceId]);
+
+  useEffect(() => {
+    const handler = () => refreshDevices();
+    navigator.mediaDevices?.addEventListener?.('devicechange', handler);
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', handler);
+  }, [refreshDevices]);
+
+  useEffect(() => stopStream, [stopStream]);
+
+  const join = () => {
+    stopStream();
+    onJoin({ videoEnabled, audioEnabled, videoDeviceId, audioDeviceId, audioOutputDeviceId });
   };
 
   return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white p-4 font-sans">
-      <div className="w-full max-w-2xl bg-slate-900/50 backdrop-blur-md rounded-2xl p-8 border border-slate-800 shadow-2xl flex flex-col md:flex-row gap-8">
-        <div className="flex-1 flex flex-col justify-center">
-          <h1 className="text-3xl font-bold tracking-tight mb-2 bg-gradient-to-r from-emerald-400 to-teal-300 bg-clip-text text-transparent">
-            Ready to Join?
-          </h1>
-          <p className="text-slate-400 text-sm mb-6">
-            Hi <span className="text-white font-medium">{userName}</span>, check your video and audio settings before joining the class.
-          </p>
+    <div className="min-h-screen flex items-center justify-center p-4 sm:p-8" style={{ background: '#131417' }}>
+      <div className="w-full max-w-5xl grid lg:grid-cols-[1.4fr_1fr] gap-6 lg:gap-10 items-center">
+        {/* Preview */}
+        <div>
+          <div
+            className="relative w-full aspect-video rounded-2xl overflow-hidden flex items-center justify-center"
+            style={{ background: '#0b0c0f', border: '1px solid rgba(255,255,255,0.1)' }}
+          >
+            {videoEnabled ? (
+              // Mirrored, like every other call app — an un-mirrored
+              // self-view reads as "wrong" even though it's what others see.
+              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
+            ) : (
+              <div className="flex flex-col items-center gap-3" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                <CameraOffIcon className="w-10 h-10" />
+                <span className="text-xs uppercase tracking-wider font-semibold">Camera is off</span>
+              </div>
+            )}
 
-          <div className="flex flex-col gap-4">
-            <button
-              onClick={() => {
-                setCameraError(null);
-                setVideoEnabled(!videoEnabled);
-              }}
-              className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
-                videoEnabled
-                  ? 'bg-slate-800/80 border-emerald-500/30 text-white'
-                  : 'bg-slate-900 border-slate-800 text-slate-500'
-              }`}
+            <div
+              className="absolute top-3 left-3 px-2.5 py-1 rounded-md text-xs"
+              style={{ background: 'rgba(0,0,0,0.55)', color: '#e8eaed' }}
             >
-              <span className="flex items-center gap-3">
-                <span className={`w-2 h-2 rounded-full ${videoEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
-                Camera
-              </span>
-              <span className="font-semibold text-sm">{videoEnabled ? 'ON' : 'OFF'}</span>
-            </button>
+              {userName}
+            </div>
 
-            <button
-              onClick={() => setAudioEnabled(!audioEnabled)}
-              className={`flex items-center justify-between p-4 rounded-xl border transition-all ${
-                audioEnabled
-                  ? 'bg-slate-800/80 border-emerald-500/30 text-white'
-                  : 'bg-slate-900 border-slate-800 text-slate-500'
-              }`}
-            >
-              <span className="flex items-center gap-3">
-                <span className={`w-2 h-2 rounded-full ${audioEnabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-600'}`} />
-                Microphone
-              </span>
-              <span className="font-semibold text-sm ml-3">{audioEnabled ? 'ON' : 'OFF'}</span>
-            </button>
+            {/* Mic level, only while the mic is live */}
+            {audioEnabled && (
+              <div
+                className="absolute top-3 right-3 flex items-center gap-1 px-2 py-1.5 rounded-md"
+                style={{ background: 'rgba(0,0,0,0.55)' }}
+              >
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <span
+                    key={i}
+                    className="w-1 rounded-full transition-all"
+                    style={{
+                      height: 4 + i * 3,
+                      background: level * 5 > i ? '#8ab4f8' : 'rgba(255,255,255,0.25)',
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* Toggles sit on the preview, Meet-style */}
+            <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-3">
+              <button
+                type="button"
+                onClick={() => setAudioEnabled((v) => !v)}
+                aria-label={audioEnabled ? 'Turn off microphone' : 'Turn on microphone'}
+                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer"
+                style={{ background: audioEnabled ? 'rgba(255,255,255,0.16)' : '#ea4335', color: '#fff' }}
+              >
+                {audioEnabled ? <MicIcon /> : <MicOffIcon />}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setVideoEnabled((v) => !v);
+                }}
+                aria-label={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
+                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer"
+                style={{ background: videoEnabled ? 'rgba(255,255,255,0.16)' : '#ea4335', color: '#fff' }}
+              >
+                {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
+              </button>
+            </div>
           </div>
 
-          {cameraError && (
-            <p className="mt-3 text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">
-              {cameraError}
+          {error && (
+            <p
+              className="mt-3 text-xs rounded-lg px-3 py-2"
+              style={{ background: 'rgba(234,67,53,0.12)', border: '1px solid rgba(234,67,53,0.35)', color: '#f6a6a0' }}
+            >
+              {error}
             </p>
           )}
+        </div>
+
+        {/* Settings + join */}
+        <div>
+          <h1 className="text-2xl font-semibold text-white">Ready to join?</h1>
+          <p className="text-sm mt-1 mb-6" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            Check your camera and microphone before the class starts.
+          </p>
+
+          <div className="space-y-3">
+            <DeviceSelect
+              label="Camera"
+              devices={cameras}
+              value={videoDeviceId}
+              onChange={setVideoDeviceId}
+              disabled={!videoEnabled}
+            />
+            <DeviceSelect
+              label="Microphone"
+              devices={mics}
+              value={audioDeviceId}
+              onChange={setAudioDeviceId}
+              disabled={!audioEnabled}
+            />
+            <DeviceSelect
+              label="Speaker"
+              devices={speakers}
+              value={audioOutputDeviceId}
+              onChange={setAudioOutputDeviceId}
+            />
+          </div>
 
           <button
-            onClick={handleJoin}
-            className="mt-8 w-full py-4 px-6 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-bold rounded-xl shadow-lg transition-transform active:scale-95 cursor-pointer"
+            onClick={join}
+            className="mt-7 w-full py-3.5 rounded-full font-semibold cursor-pointer transition-transform active:scale-[0.98]"
+            style={{ background: '#8ab4f8', color: '#202124' }}
           >
             Join Meeting
           </button>
-        </div>
 
-        <div className="flex-grow flex flex-col justify-center items-center">
-          <div className="w-full aspect-video rounded-xl bg-slate-950 overflow-hidden relative border border-slate-800 flex items-center justify-center">
-            {videoEnabled ? (
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover scale-x-[-1]"
-              />
-            ) : (
-              <div className="flex flex-col items-center gap-3 text-slate-600">
-                <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                </svg>
-                <span className="text-xs uppercase tracking-wider font-semibold">Camera is disabled</span>
-              </div>
-            )}
-            <div className="absolute bottom-3 left-3 bg-slate-900/80 backdrop-blur-sm px-3 py-1 rounded-md text-xs border border-slate-800 text-slate-400">
-              Preview
-            </div>
-          </div>
+          <p className="text-[11px] mt-3 text-center" style={{ color: 'rgba(255,255,255,0.35)' }}>
+            Background effects are available once you&apos;re in the call.
+          </p>
         </div>
       </div>
     </div>

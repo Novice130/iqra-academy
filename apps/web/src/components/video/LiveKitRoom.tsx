@@ -4,9 +4,25 @@ import React, { useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   LiveKitRoom as LKRoom,
+  useRoomContext,
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import CustomVideoConference from './CustomVideoConference';
+import type { JoinChoices } from './PreJoinScreen';
+
+/**
+ * Applies the speaker picked on the pre-join screen. Output device can only
+ * be set on a connected Room, so it can't ride along on LiveKitRoom's
+ * video/audio props the way the camera and mic do.
+ */
+function ApplyAudioOutput({ deviceId }: { deviceId?: string }) {
+  const room = useRoomContext();
+  useEffect(() => {
+    if (!deviceId) return;
+    room.switchActiveDevice('audiooutput', deviceId).catch(() => {});
+  }, [room, deviceId]);
+  return null;
+}
 
 /**
  * Keeps the screen awake for the duration of the call — otherwise the OS's
@@ -53,9 +69,11 @@ interface LiveKitRoomProps {
   isModerator: boolean;
   /** True only for the session's own teacher — see handleDisconnected. */
   isHost: boolean;
+  /** Camera/mic/speaker picked on the pre-join screen. */
+  choices: JoinChoices;
 }
 
-export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost }: LiveKitRoomProps) {
+export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost, choices }: LiveKitRoomProps) {
   const router = useRouter();
   useWakeLock();
 
@@ -76,12 +94,20 @@ export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost
       serverUrl={url}
       token={token}
       connect={true}
-      video={true}
-      audio={true}
+      // Honour the pre-join screen. This used to be hardcoded true/true, so
+      // joining with the camera or mic switched off turned them straight
+      // back on the moment the room connected.
+      video={
+        choices.videoEnabled ? (choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : true) : false
+      }
+      audio={
+        choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false
+      }
       data-lk-theme="default"
       style={{ height: '100dvh' }}
       onDisconnected={handleDisconnected}
     >
+      <ApplyAudioOutput deviceId={choices.audioOutputDeviceId} />
       <CustomVideoConference isModerator={isModerator} sessionId={sessionId} />
     </LKRoom>
   );
