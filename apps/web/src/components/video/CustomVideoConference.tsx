@@ -101,52 +101,95 @@ function useViewportOrientation(): 'portrait' | 'landscape' {
   return orientation;
 }
 
+/** Gap between floating tiles, and from the edge of the video area. */
+const FLOAT_GAP = 10;
+const FLOAT_MARGIN = 12;
+
+interface Slot {
+  left: number;
+  top: number;
+}
+
 /**
- * Small floating tile, draggable by pointer — the self-view, and each peer
- * while someone is spotlighted. Kept outside the grid entirely so dragging
- * one can never disturb the layout of the others.
+ * Parking slots for the floating tiles, filled bottom-right first and stacked
+ * upward, wrapping into a second column when the first one runs out of height.
+ *
+ * Slots exist so tiles can never sit on top of each other. The old code
+ * offset each tile by a flat 124px, which is fine for the 110px-tall landscape
+ * box and badly wrong for the 180px-tall portrait one — on a phone every peer
+ * covered the one below it, which is exactly what a class of three looked
+ * like.
+ */
+function computeSlots(
+  container: { width: number; height: number },
+  box: { width: number; height: number },
+  count: number
+): Slot[] {
+  if (count === 0 || container.width === 0 || container.height === 0) return [];
+
+  const usableHeight = container.height - FLOAT_MARGIN * 2;
+  const perColumn = Math.max(1, Math.floor((usableHeight + FLOAT_GAP) / (box.height + FLOAT_GAP)));
+
+  return Array.from({ length: count }, (_, i) => {
+    const col = Math.floor(i / perColumn);
+    const row = i % perColumn;
+    // Anchored to the bottom-right corner so the newest tiles march up and
+    // then leftward, staying clear of the main video's centre.
+    const left = container.width - FLOAT_MARGIN - (col + 1) * box.width - col * FLOAT_GAP;
+    const top = container.height - FLOAT_MARGIN - (row + 1) * box.height - row * FLOAT_GAP;
+    return {
+      left: Math.max(FLOAT_MARGIN, left),
+      top: Math.max(FLOAT_MARGIN, top),
+    };
+  });
+}
+
+/**
+ * Small floating tile — the self-view, and each peer while someone is
+ * spotlighted. Draggable, but it always lands in a slot: on release it snaps
+ * to the nearest one, swapping with whoever is parked there. Free-form
+ * dragging is what let them overlap in the first place.
  */
 function DraggableTile({
-  defaultPosition,
+  slot,
+  size,
   onTap,
+  onDropAt,
   children,
 }: {
-  defaultPosition: { right: number; bottom: number };
+  slot: Slot;
+  size: { width: number; height: number };
   /** Fired on a tap that wasn't a drag — used to flip the camera. */
   onTap?: () => void;
+  /** Where the tile was let go, in container coordinates. */
+  onDropAt?: (point: { left: number; top: number }) => void;
   children: React.ReactNode;
 }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const [drag, setDrag] = useState<{ left: number; top: number } | null>(null);
   const elRef = useRef<HTMLDivElement>(null);
-  const orientation = useViewportOrientation();
-  const boxSize = orientation === 'portrait' ? { width: 110, height: 180 } : { width: 180, height: 110 };
   const dragState = useRef({
     dragging: false,
     startX: 0,
     startY: 0,
-    startPosX: 0,
-    startPosY: 0,
+    startLeft: 0,
+    startTop: 0,
     startedAt: 0,
     moved: 0,
   });
 
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = elRef.current;
-    const parent = el?.offsetParent as HTMLElement | null;
-    if (!el || !parent) return;
-    const elRect = el.getBoundingClientRect();
-    const parentRect = parent.getBoundingClientRect();
-    const currentPos = pos ?? { x: elRect.left - parentRect.left, y: elRect.top - parentRect.top };
+    if (!el) return;
     dragState.current = {
       dragging: true,
       startX: e.clientX,
       startY: e.clientY,
-      startPosX: currentPos.x,
-      startPosY: currentPos.y,
+      startLeft: slot.left,
+      startTop: slot.top,
       startedAt: Date.now(),
       moved: 0,
     };
-    if (!pos) setPos(currentPos);
+    setDrag({ left: slot.left, top: slot.top });
     el.setPointerCapture(e.pointerId);
   };
 
@@ -155,18 +198,26 @@ function DraggableTile({
     const dx = e.clientX - dragState.current.startX;
     const dy = e.clientY - dragState.current.startY;
     dragState.current.moved = Math.max(dragState.current.moved, Math.abs(dx) + Math.abs(dy));
-    setPos({ x: dragState.current.startPosX + dx, y: dragState.current.startPosY + dy });
+    setDrag({ left: dragState.current.startLeft + dx, top: dragState.current.startTop + dy });
   };
 
   const onPointerUp = () => {
     const { dragging, moved, startedAt } = dragState.current;
     dragState.current.dragging = false;
+    const dropped = drag;
+    setDrag(null);
+    if (!dragging) return;
+
     // A tap and the start of a drag are the same gesture until the finger
     // moves, so only treat it as a tap if it barely moved and was quick.
-    if (dragging && onTap && moved < 8 && Date.now() - startedAt < 500) {
+    if (onTap && moved < 8 && Date.now() - startedAt < 500) {
       onTap();
+      return;
     }
+    if (dropped && moved >= 8) onDropAt?.(dropped);
   };
+
+  const position = drag ?? slot;
 
   return (
     <div
@@ -176,9 +227,13 @@ function DraggableTile({
       onPointerUp={onPointerUp}
       className="absolute z-40 rounded-xl overflow-hidden cursor-grab active:cursor-grabbing"
       style={{
-        width: boxSize.width,
-        height: boxSize.height,
-        ...(pos ? { left: pos.x, top: pos.y } : defaultPosition),
+        width: size.width,
+        height: size.height,
+        left: position.left,
+        top: position.top,
+        // The glide back into a slot is what makes the snap read as
+        // deliberate rather than as the tile jumping away from your finger.
+        transition: drag ? 'none' : 'left 160ms ease-out, top 160ms ease-out',
         border: '2px solid rgba(255,255,255,0.3)',
         boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
         touchAction: 'none',
@@ -250,6 +305,29 @@ export default function CustomVideoConference({
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [peopleOpen, setPeopleOpen] = useState(false);
+
+  // Floating tiles are positioned in pixels, so the video area has to be
+  // measured rather than guessed — it changes with the chat panel, rotation,
+  // and the browser's disappearing address bar.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const observer = new ResizeObserver(([entry]) => {
+      const { width, height } = entry.contentRect;
+      setStageSize({ width, height });
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const orientation = useViewportOrientation();
+  const floatBox =
+    orientation === 'portrait' ? { width: 110, height: 180 } : { width: 180, height: 110 };
+
+  /** Which slot each floating tile is parked in, keyed by tile. Drag swaps them. */
+  const [slotOrder, setSlotOrder] = useState<string[]>([]);
 
   const handleSpotlight = useCallback(
     (identity: string | null) => {
@@ -361,6 +439,53 @@ export default function CustomVideoConference({
     }
   }
 
+  // Keep the parking order stable across re-renders: people who were already
+  // floating stay where the viewer dragged them, newcomers take the next free
+  // slot, and anyone who left frees theirs.
+  const floatingKeys = floating.map((p) => p.key);
+  const orderedKeys = [
+    ...slotOrder.filter((k) => floatingKeys.includes(k)),
+    ...floatingKeys.filter((k) => !slotOrder.includes(k)),
+  ];
+  useEffect(() => {
+    setSlotOrder((prev) => {
+      const next = [
+        ...prev.filter((k) => floatingKeys.includes(k)),
+        ...floatingKeys.filter((k) => !prev.includes(k)),
+      ];
+      return next.length === prev.length && next.every((k, i) => k === prev[i]) ? prev : next;
+    });
+    // floatingKeys is derived from the track list; join it so the effect only
+    // runs when the set of floating participants actually changes.
+  }, [floatingKeys.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const slots = computeSlots(stageSize, floatBox, orderedKeys.length);
+
+  /** Snap a dropped tile to the nearest slot, swapping with whoever is there. */
+  const handleDrop = (key: string, point: { left: number; top: number }) => {
+    if (slots.length === 0) return;
+    let nearest = 0;
+    let best = Infinity;
+    slots.forEach((s, i) => {
+      const distance = Math.hypot(s.left - point.left, s.top - point.top);
+      if (distance < best) {
+        best = distance;
+        nearest = i;
+      }
+    });
+    setSlotOrder((prev) => {
+      const order = [
+        ...prev.filter((k) => floatingKeys.includes(k)),
+        ...floatingKeys.filter((k) => !prev.includes(k)),
+      ];
+      const from = order.indexOf(key);
+      if (from === -1 || from === nearest) return prev;
+      const next = [...order];
+      [next[from], next[nearest]] = [next[nearest], next[from]];
+      return next;
+    });
+  };
+
   return (
     <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
       {/* Bar height (and the --lk-control-bar-height the chat panel sizes
@@ -368,7 +493,10 @@ export default function CustomVideoConference({
           held sideways, where a 76px bar eats a quarter of the screen. */}
       <div className="lk-video-conference call-surface" style={{ height: '100%' }}>
         <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
-          <div style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+          <div
+            ref={stageRef}
+            style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}
+          >
             {focused ? (
               <div className="w-full h-full p-2">{renderTile(focused)}</div>
             ) : (
@@ -388,19 +516,25 @@ export default function CustomVideoConference({
             )}
 
             {/* Peers (and the teacher's own camera in gallery) float as small
-                draggable tiles, cascading up from the corner so they don't
-                land exactly on top of each other. */}
-            {floating.map((p, i) => (
-              <DraggableTile
-                key={p.key}
-                defaultPosition={{ right: 16, bottom: 16 + i * 124 }}
-                onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
-              >
-                {/* Small tiles fill their box; the main tiles show the whole
-                    frame (see VideoTile's `fit`). */}
-                {renderTile(p, 'cover')}
-              </DraggableTile>
-            ))}
+                draggable tiles, each parked in its own slot so they never
+                cover one another. */}
+            {floating.map((p) => {
+              const slot = slots[orderedKeys.indexOf(p.key)];
+              if (!slot) return null;
+              return (
+                <DraggableTile
+                  key={p.key}
+                  slot={slot}
+                  size={floatBox}
+                  onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
+                  onDropAt={(point) => handleDrop(p.key, point)}
+                >
+                  {/* Small tiles fill their box; the main tiles show the whole
+                      frame (see VideoTile's `fit`). */}
+                  {renderTile(p, 'cover')}
+                </DraggableTile>
+              );
+            })}
           </div>
 
           {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
@@ -408,7 +542,6 @@ export default function CustomVideoConference({
           <MediaRequestModal />
 
           <CallControlBar
-            isModerator={isModerator}
             effects={effects}
             unreadMessages={widgetState.unreadMessages}
             chatOpen={widgetState.showChat}

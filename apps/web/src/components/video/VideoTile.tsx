@@ -13,10 +13,14 @@
  * is simpler than fighting either behaviour.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { isTrackReference, type TrackReferenceOrPlaceholder } from '@livekit/components-core';
 import { VideoTrack } from '@livekit/components-react';
 import { MicOffIcon, MoreIcon } from './CallIcons';
+
+/** Wide enough for "Spotlight for everyone" on one line, narrow enough for a phone. */
+const MENU_WIDTH = 240;
 
 export interface TileActions {
   /** Host-only. Absent for students, and for your own tile. */
@@ -64,19 +68,66 @@ export default function VideoTile({
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [draft, setDraft] = useState(name);
   const rootRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
-      if (!rootRef.current?.contains(e.target as Node)) {
-        setMenuOpen(false);
-        setRenaming(false);
-        setConfirmRemove(false);
-      }
+      const target = e.target as Node;
+      // The menu is portalled to <body>, so it is not inside rootRef — check
+      // it separately or the first mousedown on a menu item closes the menu
+      // before the click ever lands.
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setMenuOpen(false);
+      setRenaming(false);
+      setConfirmRemove(false);
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
+
+  /**
+   * The menu used to be absolutely positioned inside the tile, which has
+   * `overflow: hidden` — on a phone the tile is ~170px wide and a 220px menu
+   * was clipped to a sliver, or slid off the left edge of the screen with the
+   * labels unreadable. It is now fixed and portalled to <body>, positioned
+   * from the button's own rect and clamped to the viewport, so it cannot be
+   * clipped by the tile, the grid, or the video above it.
+   */
+  useLayoutEffect(() => {
+    if (!menuOpen) return;
+
+    const place = () => {
+      const btn = buttonRef.current?.getBoundingClientRect();
+      if (!btn) return;
+      const margin = 8;
+      const width = Math.min(MENU_WIDTH, window.innerWidth - margin * 2);
+      const height = menuRef.current?.offsetHeight ?? 260;
+
+      // Right-aligned to the button, then pulled back inside the viewport.
+      let left = btn.right - width;
+      left = Math.min(Math.max(left, margin), window.innerWidth - width - margin);
+
+      // Below the button, unless that would run off the bottom — then above.
+      let top = btn.bottom + 6;
+      if (top + height > window.innerHeight - margin) {
+        top = Math.max(margin, Math.min(btn.top - 6 - height, window.innerHeight - height - margin));
+      }
+
+      setMenuPos({ top, left });
+    };
+
+    place();
+    window.addEventListener('resize', place);
+    // Capture phase: the tile grid and the people panel both scroll.
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [menuOpen, renaming, confirmRemove]);
 
   const hasVideo = isTrackReference(trackRef) && !cameraOff;
   const hasActions =
@@ -155,6 +206,7 @@ export default function VideoTile({
       {hasActions && (
         <>
           <button
+            ref={buttonRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -168,13 +220,19 @@ export default function VideoTile({
             <MoreIcon className="w-4 h-4" />
           </button>
 
-          {menuOpen && (
+          {menuOpen && typeof document !== 'undefined' && createPortal(
             <div
+              ref={menuRef}
               // Fixed width, not min-width: shrink-to-fit on an absolutely
               // positioned box resolved to ~520px here, which left a short
               // label like "Rename…" swimming in empty space.
-              className="absolute top-11 right-2 z-30 w-[220px] rounded-2xl overflow-hidden"
+              className="fixed z-[80] rounded-2xl overflow-hidden"
               style={{
+                top: menuPos?.top ?? -9999,
+                left: menuPos?.left ?? -9999,
+                width: `min(${MENU_WIDTH}px, calc(100vw - 16px))`,
+                // Hidden until measured, so it never flashes in the corner.
+                visibility: menuPos ? 'visible' : 'hidden',
                 background: '#26282c',
                 border: '1px solid rgba(255,255,255,0.08)',
                 boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
@@ -303,7 +361,8 @@ export default function VideoTile({
                   )}
                 </div>
               )}
-            </div>
+            </div>,
+            document.body
           )}
         </>
       )}

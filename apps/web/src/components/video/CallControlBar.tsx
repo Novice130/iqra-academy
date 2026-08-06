@@ -207,7 +207,6 @@ const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
 ];
 
 export default function CallControlBar({
-  isModerator,
   effects,
   unreadMessages,
   chatOpen,
@@ -217,7 +216,6 @@ export default function CallControlBar({
   viewMode,
   onViewModeChange,
 }: {
-  isModerator: boolean;
   effects: BackgroundEffects;
   unreadMessages: number;
   chatOpen: boolean;
@@ -271,23 +269,27 @@ export default function CallControlBar({
           </RoundButton>
         )}
 
-        <RoundButton
-          label="Background effects"
-          active={menu === 'effects' || effects.active}
-          onClick={() => toggleMenu('effects')}
-        >
-          <EffectsIcon />
-        </RoundButton>
+        {/* Backgrounds are a set-once thing; People is where the guest link
+            and ringing a student live, and a teacher needs it mid-class. On a
+            narrow phone only one of the two fits, so this is the one that
+            stays — backgrounds move into the view menu below. */}
+        <span className="hidden sm:contents">
+          <RoundButton
+            label="Background effects"
+            active={menu === 'effects' || effects.active}
+            onClick={() => toggleMenu('effects')}
+          >
+            <EffectsIcon />
+          </RoundButton>
+        </span>
 
         <RoundButton label="Chat" active={chatOpen} badge={chatOpen ? 0 : unreadMessages} onClick={onToggleChat}>
           <ChatIcon />
         </RoundButton>
 
-        <span className="hidden sm:contents">
-          <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
-            <PeopleIcon />
-          </RoundButton>
-        </span>
+        <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
+          <PeopleIcon />
+        </RoundButton>
 
         <RoundButton label="View options" active={menu === 'view'} onClick={() => toggleMenu('view')}>
           <LayoutIcon />
@@ -367,20 +369,17 @@ export default function CallControlBar({
               );
             })}
 
-            {/* The People button is hidden under 640px because the row
-                overflows there, so on a phone this menu is the only way in. */}
+            {/* Backgrounds lose their own button under 640px — the row
+                overflows there — so on a phone this menu is the way in. */}
             <div className="sm:hidden">
               <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
               <button
                 type="button"
-                onClick={() => {
-                  onTogglePeople();
-                  setMenu(null);
-                }}
+                onClick={() => setMenu('effects')}
                 className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
                 style={{ color: '#e8eaed' }}
               >
-                {isModerator ? 'People — spotlight, mute, invite…' : 'People'}
+                Background effects{effects.active ? ' — on' : ''}
               </button>
             </div>
           </div>
