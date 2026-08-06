@@ -56,9 +56,24 @@ export interface BackgroundEffects {
   select: (next: EffectSelection) => void;
 }
 
-export function useBackgroundEffects(): BackgroundEffects {
-  const { localParticipant } = useLocalParticipant();
-  const [selection, setSelection] = useState<EffectSelection>({ kind: 'none' });
+/** Turns a selection into the processor options the track expects. */
+export function toProcessorOptions(next: EffectSelection): SwitchBackgroundProcessorOptions {
+  if (next.kind === 'none') return { mode: 'disabled' };
+  if (next.kind === 'blur') return { mode: 'background-blur', blurRadius: next.radius };
+  return {
+    mode: 'virtual-background',
+    imagePath: WALLPAPERS.find((w) => w.id === next.id)?.path ?? '',
+  };
+}
+
+export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffects {
+  // cameraTrack (not just localParticipant) is the dependency that actually
+  // changes when the camera track is published or republished. Keying the
+  // effect off localParticipant alone meant a background chosen on the
+  // pre-join screen was remembered but never applied: at mount there is no
+  // published track yet, and nothing re-ran once there was one.
+  const { localParticipant, cameraTrack } = useLocalParticipant();
+  const [selection, setSelection] = useState<EffectSelection>(initial ?? { kind: 'none' });
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);
   const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
@@ -67,37 +82,39 @@ export function useBackgroundEffects(): BackgroundEffects {
     setSupported(supportsBackgroundProcessors());
   }, []);
 
-  // Re-apply after the camera track is republished (camera toggled off and
-  // back on, or a device switch) — a fresh LocalVideoTrack carries no
-  // processor even though the user still expects their effect to be on.
+  // Keeps the effect attached to whatever camera track is currently live.
+  // Two cases: the effect was chosen on the pre-join screen and there was no
+  // room track yet, and the track being republished (camera toggled off and
+  // on, or a device switch) — a fresh LocalVideoTrack carries no processor
+  // even though the user still expects their effect to be on.
   useEffect(() => {
     if (selection.kind === 'none') return;
-    const pub = localParticipant.getTrackPublication(Track.Source.Camera);
-    const track = pub?.track as LocalVideoTrack | undefined;
-    if (track && processorRef.current && track.getProcessor() !== processorRef.current) {
+    const track = (cameraTrack?.track ??
+      localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
+    if (!track) return;
+
+    if (!processorRef.current) {
+      const processor = BackgroundProcessor(toProcessorOptions(selection) as never);
+      processorRef.current = processor;
+      track.setProcessor(processor).catch(() => {});
+      return;
+    }
+    if (track.getProcessor() !== processorRef.current) {
       track.setProcessor(processorRef.current).catch(() => {});
     }
-  }, [selection, localParticipant]);
+  }, [selection, cameraTrack, localParticipant]);
 
   const select = useCallback(
     (next: EffectSelection) => {
-      const pub = localParticipant.getTrackPublication(Track.Source.Camera);
-      const track = pub?.track as LocalVideoTrack | undefined;
+      const track = (cameraTrack?.track ??
+        localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
 
       // Remember the choice even with the camera off, so turning the camera
       // back on restores it via the effect above.
       setSelection(next);
       if (!track) return;
 
-      const target: SwitchBackgroundProcessorOptions =
-        next.kind === 'none'
-          ? { mode: 'disabled' }
-          : next.kind === 'blur'
-            ? { mode: 'background-blur', blurRadius: next.radius }
-            : {
-                mode: 'virtual-background',
-                imagePath: WALLPAPERS.find((w) => w.id === next.id)?.path ?? '',
-              };
+      const target = toProcessorOptions(next);
 
       setBusy(true);
       (async () => {
@@ -121,7 +138,7 @@ export function useBackgroundEffects(): BackgroundEffects {
         }
       })();
     },
-    [localParticipant]
+    [cameraTrack, localParticipant]
   );
 
   return {
@@ -131,6 +148,66 @@ export function useBackgroundEffects(): BackgroundEffects {
     active: selection.kind !== 'none',
     select,
   };
+}
+
+/**
+ * Same contract as useBackgroundEffects, but for a track that isn't in a
+ * room yet — the pre-join preview. Lets someone pick their background before
+ * anyone sees them, which is the whole point of a pre-join screen.
+ */
+export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): BackgroundEffects {
+  const [selection, setSelection] = useState<EffectSelection>({ kind: 'none' });
+  const [supported, setSupported] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
+
+  useEffect(() => {
+    setSupported(supportsBackgroundProcessors());
+  }, []);
+
+  // The preview track is recreated whenever the camera or device changes, so
+  // the processor has to be re-attached to the new one.
+  useEffect(() => {
+    processorRef.current = null;
+    if (!track || selection.kind === 'none') return;
+    const processor = BackgroundProcessor(toProcessorOptions(selection) as never);
+    processorRef.current = processor;
+    track.setProcessor(processor).catch(() => {});
+    // Only re-run for a genuinely new track; selection changes go through select().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [track]);
+
+  const select = useCallback(
+    (next: EffectSelection) => {
+      setSelection(next);
+      if (!track) return;
+      const target = toProcessorOptions(next);
+      setBusy(true);
+      (async () => {
+        try {
+          if (target.mode === 'disabled') {
+            if (processorRef.current) await track.stopProcessor();
+            processorRef.current = null;
+            return;
+          }
+          if (processorRef.current) {
+            await processorRef.current.switchTo(target);
+          } else {
+            const processor = BackgroundProcessor(target);
+            await track.setProcessor(processor);
+            processorRef.current = processor;
+          }
+        } catch (err) {
+          console.error('Preview background effect failed', err);
+        } finally {
+          setBusy(false);
+        }
+      })();
+    },
+    [track]
+  );
+
+  return { supported, busy, selection, active: selection.kind !== 'none', select };
 }
 
 function Swatch({

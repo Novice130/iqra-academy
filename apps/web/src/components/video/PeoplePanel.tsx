@@ -13,8 +13,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
+import { useHostControls, UNMUTE_REQUEST_TOPIC } from './hostControls';
+import { MicIcon } from './CallIcons';
 
-const UNMUTE_REQUEST_TOPIC = 'unmute-request';
 const POLL_INTERVAL_MS = 2000;
 const RING_TIMEOUT_MS = 45000;
 
@@ -26,9 +27,13 @@ function baseIdentity(identity: string | null | undefined): string | null {
 /**
  * LiveKit deliberately has no server-forced unmute (a server shouldn't be
  * able to switch someone's mic on silently), so "ask to unmute" is a data
- * message and the person decides. Mounted for everyone, not just students.
+ * message and the person decides.
+ *
+ * This is a centred modal rather than the small corner toast it started as:
+ * a student mid-lesson, often on a phone, simply never noticed a chip in the
+ * corner. It takes over the screen, pulses, and can't be missed.
  */
-export function UnmuteRequestToast() {
+export function UnmuteRequestModal() {
   const room = useRoomContext();
   const { localParticipant } = useLocalParticipant();
   const [asked, setAsked] = useState(false);
@@ -52,26 +57,43 @@ export function UnmuteRequestToast() {
 
   return (
     <div
-      className="fixed bottom-28 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl"
-      style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.15)' }}
+      className="fixed inset-0 z-[120] flex items-center justify-center p-6"
+      style={{ background: 'rgba(8,10,14,0.72)', backdropFilter: 'blur(4px)' }}
     >
-      <span className="text-sm text-white">Your teacher asked you to unmute.</span>
-      <button
-        onClick={() => {
-          setAsked(false);
-          localParticipant.setMicrophoneEnabled(true).catch(() => {});
-        }}
-        className="px-3 py-1.5 rounded text-xs font-semibold cursor-pointer"
-        style={{ background: '#8ab4f8', color: '#202124' }}
+      <div
+        className="w-full max-w-sm rounded-2xl p-6 text-center shadow-2xl"
+        style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.14)', animation: 'lk-pop-in 220ms ease-out' }}
       >
-        Unmute
-      </button>
-      <button
-        onClick={() => setAsked(false)}
-        className="px-3 py-1.5 rounded text-xs font-medium cursor-pointer text-white/60"
-      >
-        Dismiss
-      </button>
+        <div
+          className="mx-auto mb-4 w-16 h-16 rounded-full flex items-center justify-center"
+          style={{ background: 'rgba(138,180,248,0.18)', color: '#8ab4f8', animation: 'lk-pulse 1.4s ease-in-out infinite' }}
+        >
+          <MicIcon className="w-7 h-7" />
+        </div>
+        <h2 className="text-lg font-semibold text-white">Your teacher asked you to unmute</h2>
+        <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
+          Turn your microphone on so everyone can hear you.
+        </p>
+        <div className="flex gap-3 mt-6">
+          <button
+            onClick={() => setAsked(false)}
+            className="flex-1 py-2.5 rounded-full text-sm font-medium cursor-pointer"
+            style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+          >
+            Not now
+          </button>
+          <button
+            onClick={() => {
+              setAsked(false);
+              localParticipant.setMicrophoneEnabled(true).catch(() => {});
+            }}
+            className="flex-1 py-2.5 rounded-full text-sm font-semibold cursor-pointer"
+            style={{ background: '#8ab4f8', color: '#202124' }}
+          >
+            Unmute
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -214,7 +236,7 @@ export default function PeoplePanel({
   onSpotlight: (identity: string | null) => void;
   onClose: () => void;
 }) {
-  const room = useRoomContext();
+  const { muteTrack, askToUnmute } = useHostControls(sessionId);
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
 
@@ -240,23 +262,6 @@ export default function PeoplePanel({
       };
     });
 
-  const askToUnmute = (identity: string) => {
-    room.localParticipant
-      .publishData(new TextEncoder().encode('unmute'), {
-        destinationIdentities: [identity],
-        topic: UNMUTE_REQUEST_TOPIC,
-        reliable: true,
-      })
-      .catch(() => {});
-  };
-
-  const mute = (identity: string, trackSid: string) => {
-    fetch(`/api/sessions/${sessionId}/mute-participant`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ identity, trackSid, muted: true }),
-    }).catch(() => {});
-  };
 
   return (
     <div
@@ -313,7 +318,7 @@ export default function PeoplePanel({
                       </button>
                     ) : (
                       <button
-                        onClick={() => p.micSid && mute(p.identity, p.micSid)}
+                        onClick={() => p.micSid && muteTrack(p.identity, p.micSid)}
                         className="px-2.5 py-1.5 rounded-full text-[11px] font-semibold cursor-pointer"
                         style={{ background: '#ea4335', color: '#fff' }}
                       >

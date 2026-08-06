@@ -35,6 +35,15 @@ export async function GET(
         }),
       ]);
 
+      // The class teacher, who may not be the person making this request —
+      // an admin can be joining to observe.
+      const sessionTeacher = session
+        ? await db.query.users.findFirst({
+            where: eq(users.id, session.teacherId),
+            columns: { email: true, name: true },
+          })
+        : undefined;
+
       if (!session) throw new NotFoundError("Session");
       if (!user) throw new NotFoundError("User");
 
@@ -103,19 +112,23 @@ export async function GET(
 
       const roomName = generateRoomName(sessionId);
 
-      // Default the room's spotlight to the teacher so students land on a
-      // stable "teacher is the main view" layout instead of LiveKit's
-      // default active-speaker auto-focus. createRoom alone isn't enough:
-      // if a student's connection reaches LiveKit first, it can implicitly
-      // auto-create the room with empty metadata, and createRoom then
-      // becomes a no-op — leaving spotlightIdentity unset for the whole
-      // session. So after createRoom, also check the room's actual current
-      // metadata and backfill spotlightIdentity if it's missing (but never
-      // overwrite a spotlight the teacher already set manually).
+      // Default the room's spotlight to the CLASS TEACHER so students land on
+      // a stable "teacher is the main view" layout instead of LiveKit's
+      // default active-speaker auto-focus. It used to default to whoever
+      // triggered this call, which meant an admin dropping in to observe
+      // became the big picture on every student's screen.
+      //
+      // createRoom alone isn't enough: if a student's connection reaches
+      // LiveKit first, it can implicitly auto-create the room with empty
+      // metadata and createRoom becomes a no-op, leaving spotlightIdentity
+      // unset for the whole session. So after createRoom, check the room's
+      // actual metadata and backfill — but never overwrite a spotlight the
+      // teacher has already set by hand.
+      const defaultSpotlight = sessionTeacher?.email || user.email;
       const ensureSpotlight = async () => {
         const svc = getRoomServiceClient();
         await svc
-          .createRoom({ name: roomName, metadata: JSON.stringify({ spotlightIdentity: user.email }) })
+          .createRoom({ name: roomName, metadata: JSON.stringify({ spotlightIdentity: defaultSpotlight }) })
           .catch(() => {});
         try {
           const rooms = await svc.listRooms([roomName]);
@@ -123,7 +136,7 @@ export async function GET(
           if (!existing.spotlightIdentity) {
             await svc.updateRoomMetadata(
               roomName,
-              JSON.stringify({ ...existing, spotlightIdentity: user.email })
+              JSON.stringify({ ...existing, spotlightIdentity: defaultSpotlight })
             );
           }
         } catch {
@@ -171,6 +184,10 @@ export async function GET(
         userName: user?.name || "Participant",
         joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
         isModerator: isTeacher,
+        // Who the class teacher is, so a student's client can focus them by
+        // default even before any spotlight metadata has landed.
+        teacherIdentity: sessionTeacher?.email || null,
+        teacherName: sessionTeacher?.name || null,
         // Distinct from isModerator on purpose: an admin observing another
         // teacher's class gets moderator *controls*, but is not the host.
         // Leaving must not end the class for the teacher still teaching it.

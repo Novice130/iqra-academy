@@ -12,7 +12,13 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { CameraIcon, CameraOffIcon, MicIcon, MicOffIcon } from './CallIcons';
+import { LocalVideoTrack } from 'livekit-client';
+import { CameraIcon, CameraOffIcon, EffectsIcon, MicIcon, MicOffIcon } from './CallIcons';
+import {
+  BackgroundEffectsContent,
+  usePreviewBackgroundEffects,
+  type EffectSelection,
+} from './BackgroundEffects';
 
 export interface JoinChoices {
   videoEnabled: boolean;
@@ -20,6 +26,8 @@ export interface JoinChoices {
   videoDeviceId?: string;
   audioDeviceId?: string;
   audioOutputDeviceId?: string;
+  /** Background chosen here, re-applied to the real camera track on join. */
+  backgroundEffect?: EffectSelection;
 }
 
 interface PreJoinScreenProps {
@@ -82,12 +90,22 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
   const [error, setError] = useState<string | null>(null);
   const [level, setLevel] = useState(0);
 
+  const [previewTrack, setPreviewTrack] = useState<LocalVideoTrack | null>(null);
+  const [effectsOpen, setEffectsOpen] = useState(false);
+  const effects = usePreviewBackgroundEffects(previewTrack);
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const previewTrackRef = useRef<LocalVideoTrack | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const rafRef = useRef<number | null>(null);
 
   const stopStream = useCallback(() => {
+    // Stopping the LocalVideoTrack also tears down any processor attached to
+    // it; the underlying MediaStreamTrack is stopped with the raw stream.
+    previewTrackRef.current?.stop();
+    previewTrackRef.current = null;
+    setPreviewTrack(null);
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
@@ -128,8 +146,19 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
         }
         streamRef.current = stream;
         setError(null);
-        if (videoRef.current) videoRef.current.srcObject = stream;
         refreshDevices();
+
+        // Wrap the raw camera track in a LiveKit LocalVideoTrack so the same
+        // background processors used in-call can run on the preview, and
+        // attach *that* to the <video> so what you see is the processed
+        // output, not the bare camera.
+        const rawVideo = stream.getVideoTracks()[0];
+        if (rawVideo && videoRef.current) {
+          const lkTrack = new LocalVideoTrack(rawVideo);
+          previewTrackRef.current = lkTrack;
+          setPreviewTrack(lkTrack);
+          lkTrack.attach(videoRef.current);
+        }
 
         // Mic level meter — the cheap reassurance that the right microphone
         // is selected, without having to join and ask "can you hear me?".
@@ -179,7 +208,14 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
 
   const join = () => {
     stopStream();
-    onJoin({ videoEnabled, audioEnabled, videoDeviceId, audioDeviceId, audioOutputDeviceId });
+    onJoin({
+      videoEnabled,
+      audioEnabled,
+      videoDeviceId,
+      audioDeviceId,
+      audioOutputDeviceId,
+      backgroundEffect: effects.selection,
+    });
   };
 
   return (
@@ -251,7 +287,29 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
               >
                 {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
               </button>
+              <button
+                type="button"
+                onClick={() => setEffectsOpen((v) => !v)}
+                aria-label="Background effects"
+                disabled={!videoEnabled}
+                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer disabled:opacity-40"
+                style={{
+                  background: effectsOpen || effects.active ? '#8ab4f8' : 'rgba(255,255,255,0.16)',
+                  color: effectsOpen || effects.active ? '#202124' : '#fff',
+                }}
+              >
+                <EffectsIcon />
+              </button>
             </div>
+
+            {effectsOpen && videoEnabled && (
+              <div
+                className="absolute inset-x-2 bottom-20 rounded-xl overflow-y-auto shadow-2xl"
+                style={{ background: 'rgba(32,33,36,0.97)', border: '1px solid rgba(255,255,255,0.14)', maxHeight: '70%' }}
+              >
+                <BackgroundEffectsContent effects={effects} />
+              </div>
+            )}
           </div>
 
           {error && (
@@ -303,7 +361,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
           </button>
 
           <p className="text-[11px] mt-3 text-center" style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Background effects are available once you&apos;re in the call.
+            Your background carries into the call.
           </p>
         </div>
       </div>

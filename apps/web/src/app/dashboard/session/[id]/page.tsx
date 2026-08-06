@@ -17,6 +17,7 @@ export default function SessionRoomPage() {
   const [userName, setUserName] = useState<string>('Student');
   const [isModerator, setIsModerator] = useState(false);
   const [isHost, setIsHost] = useState(false);
+  const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
   const [choices, setChoices] = useState<JoinChoices | null>(null);
 
   useEffect(() => {
@@ -39,6 +40,7 @@ export default function SessionRoomPage() {
         setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
         setIsModerator(!!data.isModerator);
         setIsHost(!!data.isHost);
+        setTeacherIdentity(data.teacherIdentity ?? null);
         if (data.userName) {
           setUserName(data.userName);
         }
@@ -100,6 +102,7 @@ export default function SessionRoomPage() {
         isModerator={isModerator}
         isHost={isHost}
         choices={choices}
+        teacherIdentity={teacherIdentity}
       />
     );
   }

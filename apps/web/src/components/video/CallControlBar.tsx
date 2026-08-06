@@ -335,29 +335,29 @@ export default function CallControlBar({
       {menu === 'more' && (
         <Popover onClose={() => setMenu(null)}>
           <div className="p-2">
-            {!isModerator && (
-              <div className="px-1 pb-2">
-                <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-                  Layout
-                </div>
-                <div className="flex gap-2 px-2">
-                  {(['speaker', 'gallery'] as const).map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      onClick={() => onViewModeChange(m)}
-                      className="flex-1 px-3 py-2 rounded-lg text-sm font-medium capitalize cursor-pointer"
-                      style={{
-                        background: viewMode === m ? 'rgba(138,180,248,0.18)' : 'rgba(255,255,255,0.06)',
-                        color: viewMode === m ? '#8ab4f8' : '#e8eaed',
-                      }}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
+            {/* Available to everyone: a teacher sometimes wants one student
+                big, a student sometimes wants to see the whole class. */}
+            <div className="px-1 pb-2">
+              <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
+                Layout
               </div>
-            )}
+              <div className="flex gap-2 px-2">
+                {(['speaker', 'gallery'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => onViewModeChange(m)}
+                    className="flex-1 px-3 py-2 rounded-lg text-sm font-medium capitalize cursor-pointer"
+                    style={{
+                      background: viewMode === m ? 'rgba(138,180,248,0.18)' : 'rgba(255,255,255,0.06)',
+                      color: viewMode === m ? '#8ab4f8' : '#e8eaed',
+                    }}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
 
             <button
               type="button"

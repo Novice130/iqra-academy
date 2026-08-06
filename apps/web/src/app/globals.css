@@ -152,17 +152,14 @@ body {
   transform: translateY(0);
 }
 
-/* ── Hide LiveKit's fixed carousel strip when peers are shown as floating
-   draggable tiles instead (CustomVideoConference.tsx). The carousel is
-   still rendered (inside FocusLayoutContainer, untouched, to avoid its
-   documented grid-sizing fragility) — just visually hidden here so the
-   focused participant's tile gets the full width instead of sharing it
-   with an empty reserved column. ── */
-.lk-carousel-hidden .lk-focus-layout {
-  grid-template-columns: 1fr;
+/* ── Call screen animations (ask-to-unmute modal). ── */
+@keyframes lk-pop-in {
+  from { opacity: 0; transform: scale(0.94) translateY(8px); }
+  to   { opacity: 1; transform: none; }
 }
-.lk-carousel-hidden .lk-carousel {
-  display: none;
+@keyframes lk-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50%      { transform: scale(1.12); opacity: 0.75; }
 }
 
 /* ── LiveKit's own .lk-control-bar is no longer rendered: the call uses

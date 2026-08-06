@@ -71,9 +71,19 @@ interface LiveKitRoomProps {
   isHost: boolean;
   /** Camera/mic/speaker picked on the pre-join screen. */
   choices: JoinChoices;
+  /** The class teacher's identity — what a student's view focuses by default. */
+  teacherIdentity: string | null;
 }
 
-export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost, choices }: LiveKitRoomProps) {
+export default function LiveKitRoom({
+  token,
+  url,
+  sessionId,
+  isModerator,
+  isHost,
+  choices,
+  teacherIdentity,
+}: LiveKitRoomProps) {
   const router = useRouter();
   useWakeLock();
 
@@ -108,7 +118,12 @@ export default function LiveKitRoom({ token, url, sessionId, isModerator, isHost
       onDisconnected={handleDisconnected}
     >
       <ApplyAudioOutput deviceId={choices.audioOutputDeviceId} />
-      <CustomVideoConference isModerator={isModerator} sessionId={sessionId} />
+      <CustomVideoConference
+        isModerator={isModerator}
+        sessionId={sessionId}
+        teacherIdentity={teacherIdentity}
+        initialEffect={choices.backgroundEffect}
+      />
     </LKRoom>
   );
 }
