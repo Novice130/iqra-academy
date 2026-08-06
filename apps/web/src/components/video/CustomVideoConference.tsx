@@ -9,7 +9,6 @@ import {
   FocusLayout,
   FocusLayoutContainer,
   ParticipantTile,
-  ControlBar,
   Chat,
   RoomAudioRenderer,
   ConnectionStateToast,
@@ -18,10 +17,10 @@ import {
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
-import AddStudentToCallButton from './AddStudentToCallButton';
-import BackgroundBlurToggle from './BackgroundBlurToggle';
-import MuteControls from './MuteControls';
-import DeviceSwitcher, { useCycleCamera, useHasMultipleCameras } from './DeviceSwitcher';
+import CallControlBar from './CallControlBar';
+import PeoplePanel, { UnmuteRequestToast } from './PeoplePanel';
+import { useBackgroundEffects } from './BackgroundEffects';
+import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 
 /**
  * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
@@ -72,149 +71,6 @@ function parseSpotlightIdentity(metadata: string | undefined): string | null {
   } catch {
     return null;
   }
-}
-
-function CopyLinkButton({ sessionId }: { sessionId: string }) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = useCallback(() => {
-    const url = `${window.location.origin}/dashboard/session/${sessionId}`;
-    navigator.clipboard
-      .writeText(url)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
-  }, [sessionId]);
-
-  return (
-    <button
-      type="button"
-      onClick={handleCopy}
-      className="px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors"
-      style={{
-        background: copied ? '#10b981' : 'rgba(255,255,255,0.1)',
-        color: '#fff',
-        border: '1px solid rgba(255,255,255,0.25)',
-      }}
-    >
-      {copied ? 'Link copied' : 'Copy invite link'}
-    </button>
-  );
-}
-
-function ViewModeToggle({
-  viewMode,
-  onChange,
-}: {
-  viewMode: 'speaker' | 'gallery';
-  onChange: (mode: 'speaker' | 'gallery') => void;
-}) {
-  return (
-    <div className="flex items-center rounded-md overflow-hidden" style={{ border: '1px solid rgba(255,255,255,0.25)' }}>
-      {(['speaker', 'gallery'] as const).map((mode) => (
-        <button
-          key={mode}
-          type="button"
-          onClick={() => onChange(mode)}
-          className="px-2.5 py-1 text-[11px] font-semibold cursor-pointer capitalize transition-colors"
-          style={{
-            background: viewMode === mode ? '#10b981' : 'rgba(255,255,255,0.1)',
-            color: '#fff',
-          }}
-        >
-          {mode}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-/**
- * A dedicated top bar, deliberately kept OUTSIDE the GridLayout/
- * ParticipantTile tree. Two different attempts at overlaying a button on
- * top of a tile (wrapping it in a div, then passing it as ParticipantTile's
- * children) each broke tile rendering in a different way — GridLayout's
- * sizing expects ParticipantTile to be its untouched direct child, and
- * ParticipantTile's `children` prop replaces its internal video/placeholder
- * content instead of layering on top of it. This sidesteps both.
- */
-function TopBar({
-  sessionId,
-  isModerator,
-  tracks,
-  spotlightIdentity,
-  onSpotlight,
-  viewMode,
-  onViewModeChange,
-}: {
-  sessionId: string;
-  isModerator: boolean;
-  tracks: { participant: { identity: string; name?: string } }[];
-  spotlightIdentity: string | null;
-  onSpotlight: (identity: string | null) => void;
-  viewMode: 'speaker' | 'gallery';
-  onViewModeChange: (mode: 'speaker' | 'gallery') => void;
-}) {
-  // Deduped by base identity so one person joined from two devices is a
-  // single spotlight entry, not two.
-  const seen = new Set<string>();
-  const people = tracks.filter((t) => {
-    const base = baseIdentity(t.participant.identity)!;
-    if (seen.has(base)) return false;
-    seen.add(base);
-    return true;
-  });
-
-  return (
-    // Absolutely positioned so it floats over the video area instead of
-    // taking flex space — the grid/focus wrappers below size themselves via
-    // a fixed calc() against the control bar height only, and would overflow
-    // if this bar consumed layout space as a normal flex sibling.
-    <div
-      className="absolute top-0 left-0 right-0 z-30 flex flex-wrap items-center justify-between gap-2 px-3 py-2"
-      style={{ background: 'rgba(0,0,0,0.5)' }}
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        {isModerator && people.length > 0 && (
-          <>
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-white/50 mr-1">
-              Spotlight:
-            </span>
-            {people.map((t) => {
-              const identity = baseIdentity(t.participant.identity)!;
-              const isSpotlighted = identity === baseIdentity(spotlightIdentity);
-              return (
-                <button
-                  key={identity}
-                  type="button"
-                  onClick={() => onSpotlight(isSpotlighted ? null : identity)}
-                  className="px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer transition-colors"
-                  style={{
-                    background: isSpotlighted ? '#10b981' : 'rgba(255,255,255,0.1)',
-                    color: '#fff',
-                    border: '1px solid rgba(255,255,255,0.25)',
-                  }}
-                >
-                  {isSpotlighted ? '★ ' : ''}
-                  {t.participant.name || identity}
-                </button>
-              );
-            })}
-          </>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        {!isModerator && <ViewModeToggle viewMode={viewMode} onChange={onViewModeChange} />}
-        <DeviceSwitcher />
-        <BackgroundBlurToggle />
-        <MuteControls sessionId={sessionId} isModerator={isModerator} />
-        {isModerator && <AddStudentToCallButton sessionId={sessionId} />}
-        <CopyLinkButton sessionId={sessionId} />
-      </div>
-    </div>
-  );
 }
 
 /**
@@ -384,6 +240,12 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
 
+  // Owned here rather than in the control bar so the processor survives the
+  // effects panel being opened and closed.
+  const effects = useBackgroundEffects();
+
+  const [peopleOpen, setPeopleOpen] = useState(false);
+
   const screenShareTrack = tracks.find(
     (t) => t.source === Track.Source.ScreenShare && t.publication?.isSubscribed
   );
@@ -424,12 +286,20 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
   let focusTrack: TrackReferenceOrPlaceholder | undefined;
   let selfViewTrack: TrackReferenceOrPlaceholder | undefined;
 
+  const otherCameraTracks = tracks.filter(
+    (t) => !(t.participant.isLocal && t.source === Track.Source.Camera)
+  );
+
   if (screenShareTrack) {
     focusTrack = screenShareTrack;
-  } else if (isModerator) {
-    mainTracks = tracks.filter((t) => !(t.participant.isLocal && t.source === Track.Source.Camera));
+  } else if (isModerator && otherCameraTracks.length > 0) {
+    mainTracks = otherCameraTracks;
     selfViewTrack = localCameraTrack;
-  } else if (viewMode === 'speaker' && spotlightTrack) {
+    // A teacher waiting alone previously got a black void with their own
+    // camera as a thumbnail in the corner, because their tile was filtered
+    // out of the grid and nothing replaced it. Alone in the room, you are
+    // the grid — same as Meet.
+  } else if (!isModerator && viewMode === 'speaker' && spotlightTrack) {
     focusTrack = spotlightTrack;
   }
 
@@ -440,23 +310,25 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
     : mainTracks;
 
   return (
-    // The chat panel is a *sibling* of the video area inside
-    // .lk-video-conference (a flex row), which is how LiveKit's own
-    // VideoConference lays it out — the toggle in the control bar only
-    // flips widget state, it doesn't render anything. Without this wrapper
-    // and the <Chat> below, pressing Chat visibly did nothing at all.
+    // Google Meet's shape: a single video column with the control bar under
+    // it, and side panels (chat, people) as flex siblings that squeeze the
+    // video rather than floating over it. Chat only renders because we place
+    // it ourselves — the control bar's chat button just flips widget state.
     <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
-      <div className="lk-video-conference" style={{ height: '100%' }}>
+      <div
+        className="lk-video-conference"
+        style={
+          {
+            height: '100%',
+            // Both the video wrappers and LiveKit's chat panel size
+            // themselves against this variable, so it has to match our real
+            // bar height (LiveKit's default is 69px) or the grid overflows
+            // and the mobile chat sheet overlaps the buttons.
+            ['--lk-control-bar-height' as string]: '76px',
+          } as React.CSSProperties
+        }
+      >
         <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
-          <TopBar
-            sessionId={sessionId}
-            isModerator={isModerator}
-            tracks={tracks}
-            spotlightIdentity={spotlightIdentity}
-            onSpotlight={handleSpotlight}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
           {!focusTrack ? (
             <div className="lk-grid-layout-wrapper">
               <GridLayout tracks={mainTracks}>
@@ -484,7 +356,7 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
               <DraggableTile
                 key={`${t.participant.identity}-${t.source}`}
                 trackRef={t}
-                defaultPosition={{ right: 16, bottom: 84 + i * 116 }}
+                defaultPosition={{ right: 16, bottom: 92 + i * 116 }}
                 onTap={
                   hasMultipleCameras && t.participant.isLocal && t.source === Track.Source.Camera
                     ? cycleCamera
@@ -495,13 +367,38 @@ export default function CustomVideoConference({ isModerator, sessionId }: Custom
           {selfViewTrack && (
             <DraggableTile
               trackRef={selfViewTrack}
-              defaultPosition={{ right: 16, bottom: 84 }}
+              defaultPosition={{ right: 16, bottom: 92 }}
               onTap={hasMultipleCameras ? cycleCamera : undefined}
             />
           )}
-          <ControlBar controls={{ chat: true, screenShare: true }} />
+
+          <UnmuteRequestToast />
+
+          <CallControlBar
+            sessionId={sessionId}
+            isModerator={isModerator}
+            effects={effects}
+            unreadMessages={widgetState.unreadMessages}
+            chatOpen={widgetState.showChat}
+            peopleOpen={peopleOpen}
+            onToggleChat={() => layoutContext.widget.dispatch?.({ msg: 'toggle_chat' })}
+            onTogglePeople={() => setPeopleOpen((v) => !v)}
+            viewMode={viewMode}
+            onViewModeChange={setViewMode}
+          />
         </div>
+
         <Chat style={{ display: widgetState.showChat ? 'grid' : 'none' }} />
+
+        {peopleOpen && (
+          <PeoplePanel
+            sessionId={sessionId}
+            isModerator={isModerator}
+            spotlightIdentity={spotlightIdentity}
+            onSpotlight={handleSpotlight}
+            onClose={() => setPeopleOpen(false)}
+          />
+        )}
       </div>
       <RoomAudioRenderer />
       <ConnectionStateToast />

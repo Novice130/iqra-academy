@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- Dawn ridgelines. Each layer is lighter and hazier than the one in
+       front of it, which is what actually sells distance in a flat drawing. -->
+  <defs>
+    <linearGradient id="dawn" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e3a5f"/>
+      <stop offset="40%" stop-color="#5c7ea6"/>
+      <stop offset="72%" stop-color="#d9a279"/>
+      <stop offset="100%" stop-color="#f3cfa5"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="66%" cy="63%" r="26%">
+      <stop offset="0%" stop-color="#fff3d0"/>
+      <stop offset="35%" stop-color="#ffd79a" stop-opacity=".65"/>
+      <stop offset="100%" stop-color="#ffd79a" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="mist" x="-10%" y="-10%" width="120%" height="120%">
+      <feGaussianBlur stdDeviation="12"/>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#dawn)"/>
+  <circle cx="845" cy="455" r="52" fill="#fff0cd"/>
+  <rect width="1280" height="720" fill="url(#sun)"/>
+
+  <!-- Farthest ridge -->
+  <path d="M0 470 L180 360 L330 450 L470 330 L640 470 L790 380 L960 470 L1120 350 L1280 470 L1280 720 L0 720 Z"
+        fill="#7d95b8" opacity=".75"/>
+  <rect x="0" y="440" width="1280" height="70" fill="#e6d2bb" opacity=".45" filter="url(#mist)"/>
+
+  <!-- Middle ridge -->
+  <path d="M0 560 L220 430 L400 540 L560 420 L760 560 L940 450 L1120 560 L1280 480 L1280 720 L0 720 Z"
+        fill="#4a6485" opacity=".9"/>
+  <rect x="0" y="540" width="1280" height="60" fill="#e6d2bb" opacity=".3" filter="url(#mist)"/>
+
+  <!-- Near ridge with snow caps -->
+  <path d="M0 700 L260 520 L470 660 L680 500 L900 690 L1120 560 L1280 690 L1280 720 L0 720 Z" fill="#25364d"/>
+  <path d="M660 520 L680 500 L706 528 L688 522 L674 534 Z" fill="#eef3f8" opacity=".85"/>
+  <path d="M244 540 L260 520 L282 546 L266 540 L254 552 Z" fill="#eef3f8" opacity=".7"/>
+</svg>

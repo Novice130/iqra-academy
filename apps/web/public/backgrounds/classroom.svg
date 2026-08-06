@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- Simple classroom: green board, wall trim, a clock. Reads as "teaching"
+       at a glance, which is the point for a Quran class. -->
+  <defs>
+    <linearGradient id="cwall" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#e9e3d5"/>
+      <stop offset="100%" stop-color="#c5bda9"/>
+    </linearGradient>
+    <linearGradient id="board" x1="0" y1="0" x2="0.3" y2="1">
+      <stop offset="0%" stop-color="#2f5f4a"/>
+      <stop offset="100%" stop-color="#1f4433"/>
+    </linearGradient>
+    <filter id="cblur" x="-8%" y="-8%" width="116%" height="116%">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+    <radialGradient id="cvig" cx="50%" cy="46%" r="72%">
+      <stop offset="60%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity=".34"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#cwall)"/>
+  <rect y="600" width="1280" height="120" fill="#a08a68"/>
+  <rect y="592" width="1280" height="14" fill="#7d6a4f"/>
+
+  <g filter="url(#cblur)">
+    <rect x="180" y="110" width="920" height="420" rx="10" fill="#8a6f4c"/>
+    <rect x="196" y="126" width="888" height="388" rx="6" fill="url(#board)"/>
+    <g stroke="#dfe8e2" stroke-width="6" stroke-linecap="round" opacity=".55" fill="none">
+      <path d="M260 210 h300"/>
+      <path d="M260 260 h420"/>
+      <path d="M260 310 h240"/>
+      <path d="M760 210 h240"/>
+      <path d="M760 260 h180"/>
+    </g>
+    <rect x="196" y="500" width="888" height="14" fill="#a98a5f"/>
+    <rect x="300" y="486" width="70" height="14" rx="6" fill="#f2eee2"/>
+    <circle cx="1160" cy="180" r="52" fill="#f4f1e8"/>
+    <circle cx="1160" cy="180" r="46" fill="#fffdf7"/>
+    <g stroke="#3a3a3a" stroke-width="5" stroke-linecap="round">
+      <path d="M1160 180 V148"/>
+      <path d="M1160 180 h24"/>
+    </g>
+  </g>
+
+  <rect width="1280" height="720" fill="url(#cvig)"/>
+</svg>

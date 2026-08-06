@@ -165,25 +165,16 @@ body {
   display: none;
 }
 
-/* ── Call control bar: never let buttons go off-screen on narrow phones ──
-   LiveKit's default .lk-control-bar is a centered flex row with no wrap
-   and no overflow handling — on a narrow viewport with 5 button groups
-   (mic, camera, screen share, chat, leave) it can silently push a button
-   past the screen edge with no way to reach it. Scope this to just the
-   bar itself so it degrades to a horizontal scroll instead. */
-.lk-control-bar {
-  overflow-x: auto;
-  overflow-y: hidden;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.lk-control-bar::-webkit-scrollbar {
-  display: none;
-}
-@media (max-width: 480px) {
-  .lk-control-bar {
-    gap: 0.25rem;
-    padding: 0.5rem 0.375rem;
-    justify-content: flex-start;
+/* ── LiveKit's own .lk-control-bar is no longer rendered: the call uses
+   CallControlBar (a Google-Meet-style round-button row) instead. The
+   overflow-scroll workaround that used to live here was also what clipped
+   LiveKit's device menus into a sliver, which is part of why it went. ── */
+
+/* ── Chat panel width. LiveKit's default is clamp(200px, 55ch, 60ch), which
+   is wider than the video column deserves once the People panel can also be
+   open beside it. Full-screen on a phone is left as LiveKit has it. ── */
+@media (min-width: 640px) {
+  .lk-chat {
+    width: 340px;
   }
 }

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+  <!-- Out-of-focus night lights. The classic "hide my room" background: no
+       edges to line up with, so segmentation artefacts don't read as wrong. -->
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#131a33"/>
+      <stop offset="55%" stop-color="#1d2350"/>
+      <stop offset="100%" stop-color="#3a2350"/>
+    </linearGradient>
+    <filter id="bok" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+    <radialGradient id="bvig" cx="50%" cy="50%" r="70%">
+      <stop offset="55%" stop-color="#000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000" stop-opacity=".5"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1280" height="720" fill="url(#night)"/>
+
+  <g filter="url(#bok)">
+    <g fill="#ffd79a" opacity=".55">
+      <circle cx="180" cy="180" r="58"/>
+      <circle cx="1050" cy="150" r="72"/>
+      <circle cx="640" cy="520" r="46"/>
+      <circle cx="330" cy="600" r="64"/>
+    </g>
+    <g fill="#7fd8ff" opacity=".42">
+      <circle cx="880" cy="420" r="80"/>
+      <circle cx="470" cy="250" r="52"/>
+      <circle cx="1180" cy="560" r="66"/>
+    </g>
+    <g fill="#ff9ecb" opacity=".33">
+      <circle cx="760" cy="180" r="44"/>
+      <circle cx="150" cy="420" r="70"/>
+      <circle cx="1000" cy="660" r="50"/>
+    </g>
+    <g fill="#b7ffd0" opacity=".28">
+      <circle cx="560" cy="660" r="60"/>
+      <circle cx="1220" cy="300" r="48"/>
+    </g>
+  </g>
+
+  <rect width="1280" height="720" fill="url(#bvig)"/>
+</svg>
