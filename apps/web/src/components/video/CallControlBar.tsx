@@ -242,9 +242,17 @@ export default function CallControlBar({
 
   return (
     <>
+      {/* Every control stays on the bar, including on a phone. Hiding one to
+          make room is how "the app has no background button" happens — the
+          row scrolls sideways instead if it genuinely cannot fit, which on a
+          360px screen it just about does. */}
       <div
-        className="call-control-bar flex items-center justify-center gap-1.5 sm:gap-3 px-2 sm:px-3 shrink-0"
-        style={{ background: '#131417', borderTop: '1px solid rgba(255,255,255,0.08)' }}
+        className="call-control-bar flex items-center justify-center gap-1 sm:gap-3 px-1.5 sm:px-3 shrink-0 overflow-x-auto"
+        style={{
+          background: '#131417',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+          scrollbarWidth: 'none',
+        }}
       >
         <ToggleWithCaret
           source={Track.Source.Microphone}
@@ -269,19 +277,13 @@ export default function CallControlBar({
           </RoundButton>
         )}
 
-        {/* Backgrounds are a set-once thing; People is where the guest link
-            and ringing a student live, and a teacher needs it mid-class. On a
-            narrow phone only one of the two fits, so this is the one that
-            stays — backgrounds move into the view menu below. */}
-        <span className="hidden sm:contents">
-          <RoundButton
-            label="Background effects"
-            active={menu === 'effects' || effects.active}
-            onClick={() => toggleMenu('effects')}
-          >
-            <EffectsIcon />
-          </RoundButton>
-        </span>
+        <RoundButton
+          label="Background effects"
+          active={menu === 'effects' || effects.active}
+          onClick={() => toggleMenu('effects')}
+        >
+          <EffectsIcon />
+        </RoundButton>
 
         <RoundButton label="Chat" active={chatOpen} badge={chatOpen ? 0 : unreadMessages} onClick={onToggleChat}>
           <ChatIcon />
@@ -369,19 +371,6 @@ export default function CallControlBar({
               );
             })}
 
-            {/* Backgrounds lose their own button under 640px — the row
-                overflows there — so on a phone this menu is the way in. */}
-            <div className="sm:hidden">
-              <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-              <button
-                type="button"
-                onClick={() => setMenu('effects')}
-                className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer"
-                style={{ color: '#e8eaed' }}
-              >
-                Background effects{effects.active ? ' — on' : ''}
-              </button>
-            </div>
           </div>
         </Popover>
       )}

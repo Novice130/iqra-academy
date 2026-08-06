@@ -14,6 +14,7 @@ import { useState } from "react";
 import MeetingNotificationBanner from "./MeetingNotificationBanner";
 import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
+import PushRegistrar from "./PushRegistrar";
 import { authClient } from "@/lib/auth-client";
 
 interface DashboardUser {
@@ -53,6 +54,7 @@ export default function DashboardChrome({
       style={{ background: "var(--bg-secondary)" }}
     >
       <IncomingCallOverlay />
+      <PushRegistrar />
 
       {/* Sidebar */}
       <aside

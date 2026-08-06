@@ -14,8 +14,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'google_sign_in_bridge.dart';
 import 'push.dart';
 
 class WebShell extends StatefulWidget {
@@ -31,6 +33,12 @@ class _WebShellState extends State<WebShell> {
   PullToRefreshController? _refresh;
   bool _offline = false;
   bool _firstLoadDone = false;
+  bool _signingIn = false;
+  bool _pipAllowed = false;
+
+  /// Talks to MainActivity, which is the only thing that can enter Android's
+  /// picture-in-picture mode.
+  static const _pipChannel = MethodChannel('novicetutor/pip');
   StreamSubscription<String>? _deepLinks;
 
   late final Uri _appOrigin = Uri.parse(widget.initialUrl);
@@ -57,6 +65,58 @@ class _WebShellState extends State<WebShell> {
   void _openPath(String path) {
     final url = _appOrigin.resolve(path);
     _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(url)));
+  }
+
+  /// Holds the Android camera and microphone permissions, asking once if we
+  /// don't have them yet.
+  ///
+  /// Asked lazily rather than at launch: a Quran app demanding the camera
+  /// before showing anything reads as spyware, and a student who only ever
+  /// listens never needs to be asked at all. The cost is that the very first
+  /// tap on the camera button raises the OS dialog — acceptable, and the same
+  /// thing every browser does.
+  Future<bool> _ensureMediaPermissions() async {
+    final statuses = await [Permission.camera, Permission.microphone].request();
+    return statuses.values.every((s) => s.isGranted);
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    final controller = _controller;
+    if (controller == null || _signingIn) return;
+
+    setState(() => _signingIn = true);
+    final outcome = await GoogleSignInBridge.instance.signIn(controller);
+    if (!mounted) return;
+    setState(() => _signingIn = false);
+
+    switch (outcome) {
+      case GoogleSignInOutcome.success:
+        // The session cookie now exists in the WebView, because the sign-in
+        // request was made by the page itself.
+        _openPath('/dashboard');
+        break;
+      case GoogleSignInOutcome.cancelled:
+        break;
+      case GoogleSignInOutcome.failed:
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Google sign-in didn't work. Try your email and password."),
+          ),
+        );
+        break;
+    }
+  }
+
+  /// Picture-in-picture is only wanted during a class. Leaving the app while
+  /// reading the dashboard should just leave the app.
+  void _updatePipEligibility(WebUri? url) {
+    final inCall = url != null && url.path.contains('/dashboard/session/');
+    if (inCall == _pipAllowed) return;
+    _pipAllowed = inCall;
+    _pipChannel.invokeMethod('setPipAllowed', {'allowed': inCall}).catchError((_) {
+      // Older Android, or the channel isn't up yet — PiP is a nicety.
+      return null;
+    });
   }
 
   /// True for URLs the WebView should keep. Everything else goes to the
@@ -121,15 +181,29 @@ class _WebShellState extends State<WebShell> {
           ),
           onWebViewCreated: (c) => _controller = c,
           onPermissionRequest: (controller, request) async {
-            // Camera/mic for the LiveKit call. The OS prompt has already been
-            // answered by this point; this is the WebView's own gate.
+            // Two separate gates, and this is only the second one. The WebView
+            // asks here; Android asks the user. Granting here without holding
+            // the OS permission makes getUserMedia fail silently — which is
+            // exactly what "students can't turn their camera on" looked like.
+            final granted = await _ensureMediaPermissions();
             return PermissionResponse(
               resources: request.resources,
-              action: PermissionResponseAction.GRANT,
+              action: granted
+                  ? PermissionResponseAction.GRANT
+                  : PermissionResponseAction.DENY,
             );
           },
           shouldOverrideUrlLoading: (controller, action) async {
             final url = action.request.url;
+
+            // Google's OAuth pages refuse to load in a WebView at all. Catch
+            // the navigation and run the native account picker instead, so
+            // "Continue with Google" works rather than dead-ending.
+            if (GoogleSignInBridge.isGoogleAuthUrl(url)) {
+              _handleGoogleSignIn();
+              return NavigationActionPolicy.CANCEL;
+            }
+
             if (_isInternal(url)) return NavigationActionPolicy.ALLOW;
             if (url != null) await _openExternally(url);
             return NavigationActionPolicy.CANCEL;
@@ -140,8 +214,12 @@ class _WebShellState extends State<WebShell> {
             if (url != null) await _openExternally(url);
             return false;
           },
+          onUpdateVisitedHistory: (controller, url, _) {
+            _updatePipEligibility(url);
+          },
           onLoadStop: (controller, url) async {
             _refresh?.endRefreshing();
+            _updatePipEligibility(url);
             if (!_firstLoadDone) {
               setState(() => _firstLoadDone = true);
               // A notification tapped while the app was terminated.
@@ -161,6 +239,11 @@ class _WebShellState extends State<WebShell> {
         if (!_firstLoadDone)
           const ColoredBox(
             color: Color(0xFF0A0A0A),
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        if (_signingIn)
+          const ColoredBox(
+            color: Color(0xCC0A0A0A),
             child: Center(child: CircularProgressIndicator()),
           ),
       ],

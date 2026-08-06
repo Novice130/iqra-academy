@@ -14,6 +14,7 @@ import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, ConflictError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
 import { sendCallEndedPush } from "@/lib/fcm";
+import { sendWebPushToUsers } from "@/lib/webpush";
 
 export async function POST(
   request: NextRequest,
@@ -40,6 +41,9 @@ export async function POST(
 
       // Answered here — every other device of theirs should stop ringing.
       await sendCallEndedPush([call.calleeId], id);
+      // Wakes the service worker, which sees no ringing call and closes the
+      // notification it posted.
+      await sendWebPushToUsers([call.calleeId]);
 
       return NextResponse.json({ success: true, sessionId: result[0].sessionId });
     } catch (error) {

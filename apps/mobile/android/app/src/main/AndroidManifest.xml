@@ -23,11 +23,16 @@
         android:label="Novice Tutor"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- supportsPictureInPicture: shrinks the class into a floating window
+             when the student switches apps mid-lesson, instead of leaving them
+             with audio and no picture. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
+            android:supportsPictureInPicture="true"
+            android:resizeableActivity="true"
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"

@@ -20,6 +20,7 @@ import { requireRole } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
 import { sendCallPush } from "@/lib/fcm";
+import { sendWebPushToUsers } from "@/lib/webpush";
 import { and, eq } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -123,6 +124,11 @@ export async function POST(request: NextRequest) {
         sessionId,
         callerName: teacher.name,
       });
+
+      // ...and the same student's laptop, whose tab may be closed. The
+      // service worker asks who is calling; nothing about the call travels
+      // through the push service itself.
+      await sendWebPushToUsers([studentProfile.userId]);
 
       return NextResponse.json({
         callId,

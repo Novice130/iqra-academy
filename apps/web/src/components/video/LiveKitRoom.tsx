@@ -110,6 +110,24 @@ export default function LiveKitRoom({
     router.push('/dashboard');
   }, [isHost, sessionId, router, onLeave]);
 
+  /**
+   * The handler above only runs on a clean disconnect. A teacher who closes
+   * the tab, or whose phone kills the browser, never reaches it — which is
+   * how a class sat IN_PROGRESS for five hours after everyone had gone home,
+   * with the LiveKit room open and billing.
+   *
+   * `pagehide` fires in the cases `beforeunload` misses on mobile, and
+   * sendBeacon survives the page being torn down mid-request.
+   */
+  useEffect(() => {
+    if (!isHost) return;
+    const endOnClose = () => {
+      navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`);
+    };
+    window.addEventListener('pagehide', endOnClose);
+    return () => window.removeEventListener('pagehide', endOnClose);
+  }, [isHost, sessionId]);
+
   return (
     <LKRoom
       serverUrl={url}

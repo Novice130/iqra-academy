@@ -20,6 +20,16 @@ dependencies:
   # Links that must not open inside the WebView (Google OAuth, Stripe)
   url_launcher: ^6.3.1
 
+  # Android runtime permissions. The WebView's own onPermissionRequest only
+  # answers the *web* prompt — without the OS grant behind it, getUserMedia
+  # fails and the call screen's camera and mic buttons do nothing at all.
+  permission_handler: ^11.3.1
+
+  # Native Google sign-in. Google refuses OAuth inside a WebView
+  # ("disallowed_useragent"), so the web page's Google button is intercepted
+  # and this runs instead. Pinned to 6.x — 7.0 rewrote the whole API.
+  google_sign_in: ^6.2.2
+
   # Push while the app is closed — the reason this app exists
   firebase_core: ^3.10.1
   firebase_messaging: ^15.2.1

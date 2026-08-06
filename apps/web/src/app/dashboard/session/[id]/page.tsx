@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 import LocalTime from '@/components/LocalTime';
@@ -18,7 +18,19 @@ interface Waiting {
 export default function SessionRoomPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const sessionId = params.id as string;
+
+  /**
+   * Answering a ringing call means "put me in the call" — the way it does on
+   * every phone. Making someone pick a microphone first is fine when they
+   * chose to open a class, and wrong when a teacher is already sitting there
+   * waiting for them.
+   *
+   * Devices are left at the browser default and both tracks start on; anything
+   * they want to change is one tap away on the control bar.
+   */
+  const autoJoin = searchParams.get('answer') === '1';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +179,20 @@ export default function SessionRoomPage() {
   }
 
   if (!token || !serverUrl) return null;
+
+  if (autoJoin && !choices) {
+    return (
+      <LiveKitRoom
+        token={token}
+        url={serverUrl}
+        sessionId={sessionId}
+        isModerator={isModerator}
+        isHost={isHost}
+        choices={{ videoEnabled: true, audioEnabled: true }}
+        teacherIdentity={teacherIdentity}
+      />
+    );
+  }
 
   if (choices) {
     return (

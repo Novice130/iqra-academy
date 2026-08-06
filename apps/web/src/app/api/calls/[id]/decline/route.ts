@@ -13,6 +13,7 @@ import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { and, eq } from "drizzle-orm";
 import { sendCallEndedPush } from "@/lib/fcm";
+import { sendWebPushToUsers } from "@/lib/webpush";
 
 export async function POST(
   request: NextRequest,
@@ -36,6 +37,9 @@ export async function POST(
 
       // Declining in the browser must also stop the phone in their pocket.
       await sendCallEndedPush([call.calleeId], id);
+      // Wakes the service worker, which sees no ringing call and closes the
+      // notification it posted.
+      await sendWebPushToUsers([call.calleeId]);
 
       return NextResponse.json({ success: true });
     } catch (error) {

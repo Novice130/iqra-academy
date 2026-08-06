@@ -93,7 +93,9 @@ class PushService {
           final callId = extra['callId'];
           final sessionId = extra['sessionId'];
           if (callId is String) await CallService.instance.accept(callId);
-          if (sessionId is String) _pendingPath = '/dashboard/session/$sessionId';
+          if (sessionId is String) {
+            _pendingPath = '/dashboard/session/$sessionId?answer=1';
+          }
         }
       }
     } catch (e) {
@@ -135,7 +137,11 @@ class PushService {
       switch (event.event) {
         case Event.actionCallAccept:
           if (callId != null) await CallService.instance.accept(callId);
-          if (sessionId != null) _deepLinkController.add('/dashboard/session/$sessionId');
+          // ?answer=1 — straight into the call, no device picker. Tapping
+          // Join on a ringing phone already said everything it needs to.
+          if (sessionId != null) {
+            _deepLinkController.add('/dashboard/session/$sessionId?answer=1');
+          }
           break;
         case Event.actionCallDecline:
         case Event.actionCallTimeout:

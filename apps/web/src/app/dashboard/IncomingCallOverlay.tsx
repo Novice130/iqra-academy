@@ -102,7 +102,10 @@ export default function IncomingCallOverlay() {
       const res = await fetch(`/api/calls/${call.id}/accept`, { method: "POST" });
       const data = await res.json();
       if (res.ok && data.sessionId) {
-        router.push(`/dashboard/session/${data.sessionId}`);
+        // ?answer=1 skips the device-picker screen. Someone who just tapped
+        // "Answer" has answered — a second setup step in front of a teacher
+        // who is already waiting reads as the call not connecting.
+        router.push(`/dashboard/session/${data.sessionId}?answer=1`);
         return;
       }
     } catch {
