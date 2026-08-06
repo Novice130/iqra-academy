@@ -19,6 +19,7 @@ import { bookings, notifications, sessions, studentProfiles, users } from "@/db/
 import { requireRole } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { sendPushToUsers } from "@/lib/fcm";
 import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -150,6 +151,7 @@ export async function POST(request: NextRequest) {
       // need to hear about it — this is what "the teacher started" looks like
       // from the dashboard.
       if (bookedUserIds.size > 0 && running?.id !== sessionId) {
+        const message = `${teacher.name} started the class. Join now.`;
         await db.insert(notifications).values(
           [...bookedUserIds].map((userId) => ({
             id: createId(),
@@ -157,9 +159,19 @@ export async function POST(request: NextRequest) {
             userId,
             type: "MEETING_STARTED" as const,
             sessionId,
-            message: `${teacher.name} started the class. Join now.`,
+            message,
           }))
         );
+
+        // The row above only reaches a student with the site open. This reaches
+        // the phone in their pocket. No-op unless FCM is configured and the
+        // student has the Android app installed.
+        await sendPushToUsers([...bookedUserIds], {
+          title: "Your class has started",
+          body: message,
+          path: `/dashboard/session/${sessionId}`,
+          sessionId,
+        });
       }
 
       // Generate token for the teacher

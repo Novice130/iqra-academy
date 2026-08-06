@@ -926,6 +926,31 @@ export const pushSubscriptions = pgTable(
   (t) => [index("push_subscriptions_user_idx").on(t.userId)]
 );
 
+/**
+ * DeviceToken — an FCM registration token from the mobile shell app.
+ *
+ * 📚 Separate from `push_subscriptions`: that table holds Web Push/VAPID
+ * material (endpoint + two keys), which has no counterpart here — FCM hands
+ * out a single opaque token per app install. One user can have several rows
+ * (phone and tablet); the token is the unique key, because reinstalling the
+ * app or restoring a backup can move a token between users, and the newest
+ * owner is the right one.
+ */
+export const deviceTokens = pgTable(
+  "device_tokens",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    userId: text("user_id").notNull().references(() => users.id),
+    token: text("token").notNull().unique(),
+    /** "android" | "ios". */
+    platform: text("platform").notNull().default("android"),
+    /** Bumped on every registration, so stale installs can be pruned. */
+    lastSeenAt: timestamp("last_seen_at").notNull().defaultNow(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("device_tokens_user_idx").on(t.userId)]
+);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // CRM SYNC
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1299,6 +1324,10 @@ export const couponRedemptionsRelations = relations(couponRedemptions, ({ one })
 
 export const pushSubscriptionsRelations = relations(pushSubscriptions, ({ one }) => ({
   user: one(users, { fields: [pushSubscriptions.userId], references: [users.id] }),
+}));
+
+export const deviceTokensRelations = relations(deviceTokens, ({ one }) => ({
+  user: one(users, { fields: [deviceTokens.userId], references: [users.id] }),
 }));
 
 export const crmSyncEventsRelations = relations(crmSyncEvents, ({ one }) => ({
