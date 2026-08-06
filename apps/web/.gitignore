@@ -41,3 +41,7 @@ yarn-error.log*
 next-env.d.ts
 
 /src/generated/prisma
+
+# Android APKs served at /app/download — build output, not source.
+# Rebuild per docs/mobile-app.md and copy into public/app/ before deploying.
+public/app/*.apk

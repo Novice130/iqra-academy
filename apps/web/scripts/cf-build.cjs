@@ -30,6 +30,20 @@ function patchStyledJsx() {
   return patched;
 }
 
+// The Android APKs are deliberately NOT in git — they are 33MB of build output
+// and would grow the repo by that much on every release. They live in
+// public/app/ and get picked up as static assets at build time. Warn loudly if
+// they are missing, because the failure mode otherwise is a 404 on
+// /app/novice-tutor.apk that nobody notices until a student tries to install.
+for (const apk of ["novice-tutor.apk", "novice-tutor-arm32.apk"]) {
+  if (!fs.existsSync(path.join(root, "public", "app", apk))) {
+    console.warn(
+      `⚠️  public/app/${apk} is missing — /app/download will 404 for it.\n` +
+        `   Rebuild it (see docs/mobile-app.md) and copy it there before deploying.`
+    );
+  }
+}
+
 // Step 1: Patch @noble/ciphers directly
 console.log("🔨 Patching @noble/ciphers to fix ESM subpath export bug...");
 try {

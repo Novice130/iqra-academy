@@ -87,6 +87,31 @@ run on Cloudflare Workers and Workers has no `crypto.createSign`. Dead tokens
 catches it, and runs as a plain WebView. That is intentional — the app builds
 and works before the Firebase project exists.
 
+## Handing it to a student
+
+`https://novicetutor.com/app/download` — a page on the site, not a store
+listing, so it also has to talk someone through Android's "unknown app"
+warning. Most people stop there otherwise.
+
+The APKs are static assets in `apps/web/public/app/`, **gitignored** (33MB of
+build output that would land in the repo on every release). After a release
+build:
+
+```sh
+cp apps/mobile/build/app/outputs/apk/release/app-arm64-v8a-release.apk \
+   apps/web/public/app/novice-tutor.apk
+cp apps/mobile/build/app/outputs/apk/release/app-armeabi-v7a-release.apk \
+   apps/web/public/app/novice-tutor-arm32.apk
+```
+
+`deploy:cf` warns if either is missing, because the alternative failure mode is
+a silent 404 that nobody sees until a student tries to install. Bump `VERSION`
+in `src/app/app/download/page.tsx` when the app version changes.
+
+If releases ever become frequent, move these to R2 rather than shipping them
+as Worker assets — 25MiB is the per-file asset ceiling and the arm64 build is
+already 18MB.
+
 ## Ringing the phone
 
 A teacher pressing "Ring" on a student is a phone call, not a notification.
