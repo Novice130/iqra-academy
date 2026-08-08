@@ -132,11 +132,13 @@ quran-lms/
 │               └── settings_screen.dart
 │
 ├── docs/                              # ── Integration Guides ──
+│   ├── architecture.md                # what runs where
+│   ├── worker-limits.md               # withDb vs withHttpDb, and the 1102 outages
 │   ├── integration-stripe.md
 │   ├── integration-calcom.md
 │   ├── integration-livekit.md
 │   ├── timezones.md
-│   ├── mobile-app.md
+│   ├── mobile-app.md                  # WebView shell, push, screen sharing
 │   └── test-accounts.md
 ├── .env.example                       # All env vars with setup instructions
 └── package.json

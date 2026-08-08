@@ -25,17 +25,24 @@ One Next.js app at `apps/web`, deployed to Cloudflare Workers with
 `@opennextjs/cloudflare` and Wrangler (`npm run deploy:cf`). There is no VPS,
 no Docker, and no container orchestration anywhere in the live system.
 
-- **Database** — Neon Postgres over the serverless driver. Every DB-touching
-  route or page must be wrapped in `withDb()` (`src/lib/db.ts`): Workers cannot
-  reuse a connection pool across requests.
+- **Database** — Neon Postgres. Every DB-touching route or page must be wrapped
+  in one of two entry points (`src/lib/db.ts`), because Workers cannot reuse a
+  connection pool across requests: **`withDb()`** for anything that opens a
+  transaction (WebSocket pool), **`withHttpDb()`** for handlers that only read
+  and write rows (one `fetch` per query, no pool). Getting this wrong is not a
+  type error — transactions throw at runtime under the HTTP driver. Choosing
+  the pool everywhere is what caused two outages: see `worker-limits.md`.
+- **Large files** — R2 (`novicetutor-app`), streamed by a route handler. A
+  Workers static asset is capped at 25 MiB, and the Worker has 128 MB of
+  memory, so nothing big may be buffered. See `worker-limits.md`.
 - **Auth** — Better Auth, cookie sessions. `session.user.role` is always
   undefined (no `additionalFields` configured) — read the role from the `users`
   table. Email verification and Google sign-in are wired but not enabled.
 - **Video** — LiveKit Cloud. See `integration-livekit.md`, which also covers
   what moving to a self-hosted SFU would involve.
 - **Payments** — Stripe. **Email** — Resend.
-- **Mobile** — `apps/mobile`, Flutter, currently a never-built draft. See
-  `mobile-app.md`.
+- **Mobile** — `apps/mobile`, Flutter: a WebView shell over the site, plus FCM
+  push and native screen capture. APKs are served from R2. See `mobile-app.md`.
 
 ## Schema
 

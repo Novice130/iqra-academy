@@ -93,24 +93,38 @@ and works before the Firebase project exists.
 listing, so it also has to talk someone through Android's "unknown app"
 warning. Most people stop there otherwise.
 
-The APKs are static assets in `apps/web/public/app/`, **gitignored** (33MB of
-build output that would land in the repo on every release). After a release
-build:
+**The APKs live in R2, not in `public/`.** They used to be Worker static
+assets, and that stopped being possible on 2026-08-08: screen sharing pulled
+in WebRTC's native libraries, the arm64 build went from 18.9MB to 32.1MB, and
+**a single Workers static asset is capped at 25 MiB**. Over that ceiling
+`deploy:cf` fails with `Error: Asset too large.` — the whole deploy, not just
+the file.
+
+Publishing a build is an upload, not a copy:
 
 ```sh
-cp apps/mobile/build/app/outputs/apk/release/app-arm64-v8a-release.apk \
-   apps/web/public/app/novice-tutor.apk
-cp apps/mobile/build/app/outputs/apk/release/app-armeabi-v7a-release.apk \
-   apps/web/public/app/novice-tutor-arm32.apk
+npx wrangler r2 object put novicetutor-app/novice-tutor.apk \
+  --file apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+  --content-type application/vnd.android.package-archive --remote
+
+npx wrangler r2 object put novicetutor-app/novice-tutor-arm32.apk \
+  --file apps/mobile/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+  --content-type application/vnd.android.package-archive --remote
 ```
 
-`deploy:cf` warns if either is missing, because the alternative failure mode is
-a silent 404 that nobody sees until a student tries to install. Bump `VERSION`
-in `src/app/app/download/page.tsx` when the app version changes.
+`--remote` is not optional. Without it wrangler writes to a local simulated
+bucket and cheerfully reports success.
 
-If releases ever become frequent, move these to R2 rather than shipping them
-as Worker assets — 25MiB is the per-file asset ceiling and the arm64 build is
-already 18MB.
+Serving is `apps/web/src/app/api/app-download/[file]/route.ts`, over the
+`APP_DOWNLOADS` binding in `wrangler.json`. It hands `object.body` straight to
+the `Response` and allow-lists the two filenames. **Never buffer the object** —
+the worker has 128MB of memory and reading a 32MB file in to send it is the
+same mistake that caused the August 1102 outages (`worker-limits.md`). For the
+same reason, do not "simplify" this by storing the APK in Postgres.
+
+`deploy:cf` warns if an `.apk` reappears in `public/app/`, because that is what
+silently breaks the next deploy. Bump `VERSION` and `SIZE` in
+`src/app/app/download/page.tsx` when the app version changes.
 
 ## Ringing the phone
 
@@ -182,15 +196,22 @@ flutter build apk --debug          # build/app/outputs/flutter-apk/app-debug.apk
 flutter run                        # onto a connected handset
 ```
 
-`flutter build apk --release` fails with a bare `25.0.2` from the Flutter tool
-wrapper. Gradle itself is fine — go around it, which also gives per-ABI APKs a
-tenth the size of the debug one:
+Release builds, per-ABI (the fat APK is 87MB and worth nobody's data):
 
 ```sh
-cd apps/mobile/android
-./gradlew :app:assembleRelease -Psplit-per-abi=true \
-  -Ptarget-platform=android-arm64,android-arm
-# build/app/outputs/apk/release/app-arm64-v8a-release.apk  (~18MB)
+flutter build apk --release --split-per-abi
+# build/app/outputs/flutter-apk/app-arm64-v8a-release.apk    (~32MB)
+# build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk  (~24MB)
+```
+
+**If `flutter build apk` dies with a bare `25.0.2`**, it has picked up Android
+Studio's bundled JBR — Java 25, which Gradle 8.12 cannot parse, and the
+`IllegalArgumentException` surfaces as just the version string. It is not
+your code: `cd android && ./gradlew assembleDebug` with `JAVA_HOME` set to the
+dev-tools JDK 17 succeeds on the same tree. Fixed permanently with:
+
+```sh
+flutter config --jdk-dir="$HOME/dev-tools/jdk-17.0.20+8/Contents/Home"
 ```
 
 Point it at something other than production with
@@ -215,8 +236,15 @@ Do not reach for the 6.2.0 betas to dodge this.
 
 ## Still to do
 
+- **Verify screen sharing on a real handset.** Nothing below has run on a
+  phone. Check in this order: the Share button appears on the call screen at
+  all (if not, the UA marker is wrong), Android's dialog offers no "single
+  app" option, the class actually sees the whole screen, the notification's
+  Stop ends the share *and* the publishing participant, and leaving the call
+  tears it down.
 - Release signing. The release build is currently signed with the debug key,
-  which is fine for sideloading and useless for the Play Store.
+  which is fine for sideloading and useless for the Play Store. Note this also
+  pins the Google sign-in SHA-1 — **back up `~/.android/debug.keystore`.**
 - Launcher icon: `flutter_launcher_icons` is configured in `pubspec.yaml`
   against `assets/images/logo.png`; run `dart run flutter_launcher_icons`.
 - Push, end to end on a real handset (see above).
@@ -225,9 +253,76 @@ Do not reach for the 6.2.0 betas to dodge this.
   manifest, and `NSCameraUsageDescription` / `NSMicrophoneUsageDescription`.
   `flutter create --platforms=ios .` when that day comes.
 
+## Screen sharing
+
+Added 2026-08-08. **Unverified on a physical device** — everything below
+compiles, the token is right, and the plumbing is wired, but no handset has
+run it.
+
+Android's WebView has **no `getDisplayMedia`**. Not blocked, not behind a
+permission — the API is absent, so the browser path the desktop call screen
+uses cannot work in the app whatever is granted. Zoom and Teams capture with
+MediaProjection, and so does this.
+
+The shell **joins the same LiveKit room a second time** and publishes the
+captured screen. Everyone else sees an ordinary screen share, because to
+LiveKit that is exactly what it is — no special client handling, and the
+existing "screen share wins the main view, cameras become floating tiles"
+layout in `CustomVideoConference.tsx` applies unchanged.
+
+```
+web  CallControlBar ──► nativeScreenShare.ts ──► GET /api/sessions/[id]/screen-token
+                                │                       (mints a publish-only token)
+                                ▼  callHandler('startScreenShare', {url, token})
+dart lib/shell/screen_share.dart
+       1. Helper.requestCapturePermission(fullScreenOnly: true)
+       2. MethodChannel -> ScreenShareService.start()   (foreground service)
+       3. Room.connect() + setScreenShareEnabled(true)
+```
+
+Things that are the way they are for a reason:
+
+- **The page mints the token, not Dart.** The Better Auth session cookie lives
+  in the WebView; Dart's HTTP client is a different cookie jar entirely.
+- **The token is publish-only** — `canSubscribe: false`, `canPublishData:
+  false`, `roomAdmin: false`. The WebView beside it is already receiving the
+  class, and decoding every participant twice on one phone is pure waste.
+  Identity is `email#screen-xxxx`; the random suffix matters, because a
+  teacher who stops and restarts must not collide with the connection LiveKit
+  has not finished tearing down.
+- **`fullScreenOnly: true`.** Android 14's capture dialog defaults to "Share
+  one app". A teacher taking the default shares the Novice Tutor window, so
+  the class watches the call screen they are already sitting in. This removes
+  the option.
+- **Ordering is Android's:** capture granted, *then* the foreground service,
+  *then* the projection. Doing the projection before the service throws on
+  Android 14+. The service (`ScreenShareService.kt`) is hand-written rather
+  than pulling in `flutter_background`, which exists to run background Dart
+  this app never needs.
+- **The capability is advertised in the user agent**
+  (`NoviceTutorApp/1.1 (screenshare)`), and the web button keys off that
+  string — *not* off the JS bridge existing. Every build of the shell has a
+  bridge, so an older install would otherwise show a button that silently did
+  nothing. **Bump this marker whenever the bridge handlers change.**
+
+Stopping works from four places, all of which converge on one shared store in
+`nativeScreenShare.ts`: the control bar button, the `Live · sharing your
+screen` pill over the call, the **Stop action on the ongoing notification**
+(the only one reachable while presenting another app), and Android's own cast
+control. The notification's Stop routes back through Dart rather than just
+killing the service — the service can end itself, but Dart holds the room that
+is publishing, and stopping one without the other leaves the class watching a
+frozen screen from a participant nobody can see.
+
 ## Things that are not bugs
 
-- **Screen sharing is absent on phones.** `getDisplayMedia` does not exist on
-  Android Chrome or iOS Safari; the button is correctly hidden.
 - **"Sign in with Google" opens the browser.** See above — a WebView is not
   allowed to show that page.
+- **Back from the dashboard closes the app.** Deliberate, as of 2026-08-08.
+  It used to go back to `/login`, which looked exactly like being signed out —
+  signing in navigates with `window.location.href`, so the login page stayed
+  in history. `/login` now redirects an authenticated visitor to the
+  dashboard, and the shell clears history once past the auth pages.
+- **Screen sharing is still absent on iOS**, and on phone *browsers*. It needs
+  a broadcast extension on iOS; `getDisplayMedia` is missing in mobile
+  browsers generally.

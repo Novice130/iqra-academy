@@ -198,6 +198,41 @@ attach to `useLocalParticipant().cameraTrack`, not `localParticipant` — keyed
 off the participant alone, a background chosen on the pre-join screen was
 remembered but never applied, because no track exists at mount.
 
+**Known quality gap, investigated 2026-08-08 and not fixed.** The edges are
+visibly grainier than Google Meet's. The cause is the segmentation model:
+`@livekit/track-processors` loads MediaPipe's `selfie_segmenter.tflite`, whose
+mask is **256×144**, upscaled to 720p video. Meet uses a higher-resolution
+model plus temporal smoothing between frames.
+
+The obvious fix does not work. Pointing `assetPaths.modelAssetPath` at
+`selfie_multiclass_256x256.tflite` **breaks it entirely**: the compositing
+shader thresholds the mask at `0.5`, and MediaPipe writes category *indices*
+into that texture. With two classes, person reads as 1.0; with six, categories
+land at 0.004–0.02, all below the threshold, so everything is classified as
+background and the blur lands on the person instead of behind them.
+
+There is no higher-resolution two-class model in that family, and 0.7.2 is the
+latest release. A real fix means a custom `VideoTransformer`: a better model
+with corrected mask handling, plus frame-to-frame smoothing. It needs a browser
+and a face in front of the camera to tune — it cannot be verified headlessly.
+Meanwhile, "Slight blur" (radius 5) hides mask errors far better than radius
+15 does.
+
+### Screen sharing
+
+Desktop browsers use `getDisplayMedia` through `useTrackToggle`, as normal.
+
+**Android has no `getDisplayMedia` at all**, so the app publishes a screen
+track from native code as a second participant in the same room. The web side
+of that is `nativeScreenShare.ts` + `/api/sessions/[id]/screen-token`; the
+capture is in `apps/mobile`. Full write-up in `mobile-app.md`.
+
+Nothing in the call UI special-cases it, and nothing should: the screen
+publisher is a participant with one `screenShareVideo` track and no camera, so
+the existing rules already do the right thing. It never appears in the People
+roster (that list is built from camera tracks), and the screen becomes the
+focused view with every camera dropping to floating tiles.
+
 ## Ending a call, and the billing leak
 
 `POST /api/sessions/[id]/end` updates the DB **and** calls
