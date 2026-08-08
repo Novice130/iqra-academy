@@ -64,6 +64,16 @@ class _WebShellState extends State<WebShell> {
   static const _pipChannel = MethodChannel('novicetutor/pip');
   StreamSubscription<String>? _deepLinks;
 
+  /// Watches for a load that starts and then goes nowhere.
+  ///
+  /// A failed load calls onReceivedError and lands on the offline screen. A
+  /// *stalled* one calls nothing at all — the connection is opened and never
+  /// answers — and the shell would sit on its spinner indefinitely with no
+  /// Retry and no explanation. Seen on the iOS simulator against a live site
+  /// that Safari loaded fine seconds later, so it is not hypothetical.
+  Timer? _stall;
+  static const _stallTimeout = Duration(seconds: 20);
+
   late final Uri _appOrigin = Uri.parse(widget.initialUrl);
 
   @override
@@ -81,10 +91,22 @@ class _WebShellState extends State<WebShell> {
 
   @override
   void dispose() {
+    _stall?.cancel();
     _deepLinks?.cancel();
     ScreenShareService.instance.onEnded = null;
     ScreenShareService.instance.stop();
     super.dispose();
+  }
+
+  void _startStallTimer() {
+    _stall?.cancel();
+    _stall = Timer(_stallTimeout, () {
+      // Only while the page has never appeared. A stall after the app is up
+      // is the page's own problem to show, not a reason to replace a working
+      // screen — mid-class especially.
+      if (!mounted || _firstLoadDone) return;
+      setState(() => _offline = true);
+    });
   }
 
   void _openPath(String path) {
@@ -308,6 +330,12 @@ class _WebShellState extends State<WebShell> {
             _controller = c;
             _registerScreenShareHandlers(c);
           },
+          onLoadStart: (controller, url) => _startStallTimer(),
+          // Any progress at all means the connection is alive, so the stall
+          // timer starts again from here rather than counting the whole load.
+          onProgressChanged: (controller, progress) {
+            if (progress < 100) _startStallTimer();
+          },
           onPermissionRequest: (controller, request) async {
             // Two separate gates, and this is only the second one. The WebView
             // asks here; Android asks the user. Granting here without holding
@@ -355,6 +383,7 @@ class _WebShellState extends State<WebShell> {
             _updatePipEligibility(url);
           },
           onLoadStop: (controller, url) async {
+            _stall?.cancel();
             _refresh?.endRefreshing();
             _updatePipEligibility(url);
             await _dropAuthHistory(controller, url);
@@ -368,6 +397,7 @@ class _WebShellState extends State<WebShell> {
             await PushService.instance.syncToken(controller);
           },
           onReceivedError: (controller, request, error) {
+            _stall?.cancel();
             _refresh?.endRefreshing();
             if (request.isForMainFrame ?? false) {
               setState(() => _offline = true);
