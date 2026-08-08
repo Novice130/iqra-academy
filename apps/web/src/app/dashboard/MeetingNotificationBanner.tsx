@@ -11,6 +11,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { desktopNotify } from "@/lib/desktop";
 
 const POLL_INTERVAL_MS = 20000;
 
@@ -25,6 +26,12 @@ export default function MeetingNotificationBanner() {
   const [notification, setNotification] = useState<NotificationItem | null>(null);
   const router = useRouter();
   const dismissedIds = useRef<Set<string>>(new Set());
+  /**
+   * Notifications already sent to the OS. The poll returns the same unread
+   * row every 20s until it is acted on, and a desktop toast per poll is how
+   * an app gets muted for good.
+   */
+  const announcedIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -42,6 +49,21 @@ export default function MeetingNotificationBanner() {
             !dismissedIds.current.has(n.id)
         );
         setNotification(next || null);
+
+        // In the desktop app the banner is often behind another window, or in
+        // the tray with no window at all. A native toast is the only version
+        // of this the user will actually see, and it survives the app being
+        // minimised — which "your class has started" has to.
+        if (next && !announcedIds.current.has(next.id)) {
+          announcedIds.current.add(next.id);
+          desktopNotify(
+            next.type === "MEETING_STARTED" ? "Your class has started" : "New message",
+            next.message,
+            next.type === "MEETING_STARTED" && next.sessionId
+              ? `/dashboard/session/${next.sessionId}`
+              : "/dashboard/chat"
+          );
+        }
       } catch {
         // Silent — this is a best-effort background poll, not critical path.
       }

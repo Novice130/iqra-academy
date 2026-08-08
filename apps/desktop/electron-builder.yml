@@ -1,0 +1,48 @@
+appId: com.novicetutor.desktop
+productName: Novice Tutor
+copyright: Novice Tutor
+
+directories:
+  output: release
+  buildResources: resources
+
+# Only what the app actually runs. Without this the whole monorepo's
+# node_modules gets swept in and the installer triples in size.
+files:
+  - dist/**/*
+  - resources/**/*
+  - package.json
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+  # Unsigned. Windows SmartScreen will warn on first run until there is a
+  # code-signing certificate — expected for sideloading, and the same position
+  # the Android APK is in with its debug key.
+  signAndEditExecutable: true
+
+nsis:
+  # A real installer with a directory choice, not a one-click that drops the
+  # app somewhere unexpected. Per-user so it needs no admin prompt.
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Novice Tutor
+  # Leaves the login-item registration alone on upgrade, so an app the user
+  # set to start with Windows keeps doing that after an update.
+  deleteAppDataOnUninstall: false
+
+mac:
+  target:
+    - target: dir
+      arch: [arm64]
+  icon: resources/icon.png
+  category: public.app-category.education
+
+# Nothing publishes itself. Builds are uploaded by hand, the same way the APKs
+# are — see docs/desktop-app.md.
+publish: null

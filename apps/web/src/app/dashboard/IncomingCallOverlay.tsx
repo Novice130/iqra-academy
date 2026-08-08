@@ -10,6 +10,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { desktopCallHandled } from "@/lib/desktop";
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -108,6 +109,10 @@ export default function IncomingCallOverlay() {
     if (!call) return;
     setResponding(true);
     stopRingtone();
+    // The desktop app rings too, from the main process, so that a window in
+    // the tray still rings. Both are looking at the same invite, so whichever
+    // one the user answers has to silence the other.
+    desktopCallHandled(call.id);
     try {
       const res = await fetch(`/api/calls/${call.id}/accept`, { method: "POST" });
       const data = await res.json();
@@ -129,6 +134,7 @@ export default function IncomingCallOverlay() {
     if (!call) return;
     setResponding(true);
     stopRingtone();
+    desktopCallHandled(call.id);
     fetch(`/api/calls/${call.id}/decline`, { method: "POST" }).catch(() => {});
     setCall(null);
     setResponding(false);

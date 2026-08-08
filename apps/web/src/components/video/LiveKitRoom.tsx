@@ -8,6 +8,7 @@ import {
 } from '@livekit/components-react';
 import '@livekit/components-styles';
 import CustomVideoConference from './CustomVideoConference';
+import { setDesktopCallActive } from '@/lib/desktop';
 import type { JoinChoices } from './PreJoinScreen';
 
 /**
@@ -32,6 +33,15 @@ function ApplyAudioOutput({ deviceId }: { deviceId?: string }) {
  * background, so it has to be re-acquired on visibilitychange.
  */
 function useWakeLock() {
+  // The desktop app blocks display sleep from its main process for as long as
+  // this component is mounted. That is the half a browser cannot do: the
+  // Screen Wake Lock below is released the moment the window is backgrounded,
+  // and a class minimised to the tray is still a class.
+  useEffect(() => {
+    setDesktopCallActive(true);
+    return () => setDesktopCallActive(false);
+  }, []);
+
   useEffect(() => {
     if (!('wakeLock' in navigator)) return;
 

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self'" />
+    <title>Incoming call</title>
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        height: 100vh;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+        background: linear-gradient(160deg, #14161a, #0c0d10);
+        color: #e8eaed;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 12px;
+        /* The window is frameless, so the whole background is the drag handle
+           and only the controls opt back out. */
+        -webkit-app-region: drag;
+        user-select: none;
+        overflow: hidden;
+      }
+      .avatar {
+        width: 84px;
+        height: 84px;
+        border-radius: 50%;
+        background: #2a2d33;
+        display: grid;
+        place-items: center;
+        font-size: 30px;
+        font-weight: 600;
+        color: #8ab4f8;
+      }
+      /* Two rings, offset, so there is always one mid-flight. */
+      .pulse, .pulse::after {
+        position: absolute;
+        width: 84px;
+        height: 84px;
+        border-radius: 50%;
+        border: 2px solid rgba(138, 180, 248, 0.5);
+        animation: pulse 1.8s ease-out infinite;
+      }
+      .pulse::after { content: ''; inset: -2px; animation-delay: 0.9s; }
+      @keyframes pulse {
+        from { transform: scale(1); opacity: 0.7; }
+        to { transform: scale(1.7); opacity: 0; }
+      }
+      .avatar-wrap { position: relative; display: grid; place-items: center; }
+      .caller { font-size: 19px; font-weight: 600; text-align: center; }
+      .sub { font-size: 13px; color: rgba(232, 234, 237, 0.55); margin-top: -10px; }
+      .actions { display: flex; gap: 14px; margin-top: 6px; -webkit-app-region: no-drag; }
+      button {
+        appearance: none;
+        border: 0;
+        font: inherit;
+        font-size: 14px;
+        font-weight: 600;
+        color: #fff;
+        border-radius: 999px;
+        padding: 12px 26px;
+        cursor: pointer;
+      }
+      .accept { background: #1e8e3e; }
+      .accept:hover { background: #23a349; }
+      .decline { background: #d93025; }
+      .decline:hover { background: #e8483c; }
+      @media (prefers-reduced-motion: reduce) {
+        .pulse, .pulse::after { animation: none; opacity: 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="avatar-wrap">
+      <div class="pulse"></div>
+      <div class="avatar" id="initial">?</div>
+    </div>
+    <div class="caller" id="caller">Incoming call</div>
+    <div class="sub">Novice Tutor</div>
+    <div class="actions">
+      <button class="decline" id="decline">Decline</button>
+      <button class="accept" id="accept">Join</button>
+    </div>
+    <script src="ring.js"></script>
+  </body>
+</html>

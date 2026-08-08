@@ -17,6 +17,10 @@
 │  Flutter (Dart) → iOS + Android                             │
 │  Riverpod state · Dio HTTP · LiveKit WebView                │
 ├─────────────────────────────────────────────────────────────┤
+│                    DESKTOP APP (WINDOWS)                    │
+│  Electron shell → tray, screen picker, ring while minimised │
+│  apps/desktop · docs/desktop-app.md                         │
+├─────────────────────────────────────────────────────────────┤
 │                  API LAYER (23+ routes)                      │
 │  ├─ /api/auth/[...all]  → Better Auth + Google OAuth        │
 │  ├─ /api/students/*     → Profiles, Bookings, Progress     │
