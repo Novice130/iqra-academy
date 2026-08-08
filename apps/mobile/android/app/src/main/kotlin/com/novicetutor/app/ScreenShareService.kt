@@ -30,6 +30,14 @@ class ScreenShareService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // The Stop button on the notification. This is the only control the
+        // teacher can reach while they are in another app — which is the whole
+        // point of presenting, so it cannot be the one place without one.
+        if (intent?.action == ACTION_STOP) {
+            onStopRequested?.invoke()
+            return START_NOT_STICKY
+        }
+
         createChannel()
 
         // Tapping it comes back to the class rather than launching a second
@@ -49,12 +57,20 @@ class ScreenShareService : Service() {
             Notification.Builder(this)
         }
 
+        val stop = PendingIntent.getService(
+            this,
+            1,
+            Intent(this, ScreenShareService::class.java).setAction(ACTION_STOP),
+            PendingIntent.FLAG_IMMUTABLE
+        )
+
         val notification: Notification = builder
-            .setContentTitle("Sharing your screen")
-            .setContentText("Novice Tutor is presenting your screen to the class.")
+            .setContentTitle("● Live — sharing your screen")
+            .setContentText("Everyone in the class can see your screen.")
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .setContentIntent(open)
             .setOngoing(true)
+            .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Stop sharing", stop)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -92,6 +108,15 @@ class ScreenShareService : Service() {
     companion object {
         private const val CHANNEL_ID = "novice_tutor_screen_share"
         private const val NOTIFICATION_ID = 4201
+        private const val ACTION_STOP = "com.novicetutor.app.STOP_SCREEN_SHARE"
+
+        /**
+         * Set by MainActivity while the engine is alive. The service can stop
+         * itself, but only Dart holds the LiveKit room that is publishing —
+         * killing the service alone would leave the class watching a frozen
+         * screen from a participant nobody can see.
+         */
+        var onStopRequested: (() -> Unit)? = null
 
         fun start(context: Context) {
             val intent = Intent(context, ScreenShareService::class.java)

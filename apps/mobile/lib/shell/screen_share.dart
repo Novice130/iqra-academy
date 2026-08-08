@@ -24,7 +24,14 @@ import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 import 'package:livekit_client/livekit_client.dart';
 
 class ScreenShareService {
-  ScreenShareService._();
+  ScreenShareService._() {
+    // "Stop sharing" on the ongoing notification. Native can end the service
+    // but not the room, so the request comes back here to be done properly.
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'stopRequested') await stop();
+      return null;
+    });
+  }
   static final ScreenShareService instance = ScreenShareService._();
 
   static const _channel = MethodChannel('novicetutor/screenshare');
@@ -50,7 +57,14 @@ class ScreenShareService {
 
     // The system dialog. Declining here is the common case for a teacher who
     // tapped the button to see what it did.
-    final granted = await webrtc.Helper.requestCapturePermission();
+    //
+    // `fullScreenOnly` removes Android 14's "Share one app" option from that
+    // dialog. It is the default choice there, and a teacher who takes it
+    // shares only the Novice Tutor window — so the class watches the call
+    // screen they are already in, and nothing the teacher opens afterwards.
+    // Presenting means the whole screen; the point is showing the students
+    // something that isn't this app.
+    final granted = await webrtc.Helper.requestCapturePermission(fullScreenOnly: true);
     if (!granted) return false;
 
     await _channel.invokeMethod('startService');

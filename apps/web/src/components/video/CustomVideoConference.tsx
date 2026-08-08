@@ -17,6 +17,7 @@ import CallControlBar, { type ViewMode } from './CallControlBar';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
+import ScreenSharePill from './ScreenSharePill';
 import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
@@ -536,6 +537,8 @@ export default function CustomVideoConference({
               );
             })}
           </div>
+
+          <ScreenSharePill />
 
           {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
 

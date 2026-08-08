@@ -30,10 +30,13 @@ import {
 } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import {
+  getNativeSharing,
   isNativeShell,
   sessionIdFromRoom,
+  setNativeSharing,
   startNativeScreenShare,
   stopNativeScreenShare,
+  subscribeNativeSharing,
 } from './nativeScreenShare';
 import {
   CameraIcon,
@@ -246,8 +249,13 @@ export default function CallControlBar({
   // (see nativeScreenShare.ts). That's the branch below.
   const [canScreenShare, setCanScreenShare] = useState(false);
   const [nativeShell, setNativeShell] = useState(false);
-  const [nativeSharing, setNativeSharing] = useState(false);
+  const [nativeSharing, setSharingState] = useState(getNativeSharing);
   const [nativePending, setNativePending] = useState(false);
+
+  // The share can end from outside this component entirely — the Stop action
+  // on the Android notification, or the system cast control — so the button
+  // follows the shared store rather than owning the state itself.
+  useEffect(() => subscribeNativeSharing(setSharingState), []);
 
   useEffect(() => {
     const native = isNativeShell();

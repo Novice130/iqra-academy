@@ -80,3 +80,33 @@ export async function stopNativeScreenShare(): Promise<void> {
   if (!isNativeShell()) return;
   await window.flutter_inappwebview!.callHandler('stopScreenShare');
 }
+
+/**
+ * Whether a native share is running, shared between the control bar's button
+ * and the "Live" pill over the video.
+ *
+ * A module-level store rather than React state passed around: the share can
+ * also end from outside the page entirely — the Stop action on the Android
+ * notification, or the system's own cast control — and both pieces of UI have
+ * to follow that, not just the one that started it.
+ */
+type Listener = (sharing: boolean) => void;
+const listeners = new Set<Listener>();
+let sharing = false;
+
+export function setNativeSharing(next: boolean) {
+  if (sharing === next) return;
+  sharing = next;
+  listeners.forEach((l) => l(next));
+}
+
+export function subscribeNativeSharing(listener: Listener): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function getNativeSharing(): boolean {
+  return sharing;
+}

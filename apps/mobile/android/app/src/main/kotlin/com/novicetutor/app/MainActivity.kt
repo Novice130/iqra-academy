@@ -38,20 +38,32 @@ class MainActivity : FlutterActivity() {
         // Screen capture needs a foreground service running before Android
         // will grant a MediaProjection at all. Dart drives the order: service
         // up, then capture, then publish. See lib/shell/screen_share.dart.
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_SHARE_CHANNEL)
-            .setMethodCallHandler { call, result ->
-                when (call.method) {
-                    "startService" -> {
-                        ScreenShareService.start(this)
-                        result.success(true)
-                    }
-                    "stopService" -> {
-                        ScreenShareService.stop(this)
-                        result.success(true)
-                    }
-                    else -> result.notImplemented()
+        val screenShare = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_SHARE_CHANNEL)
+        screenShare.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "startService" -> {
+                    ScreenShareService.start(this)
+                    result.success(true)
                 }
+                "stopService" -> {
+                    ScreenShareService.stop(this)
+                    result.success(true)
+                }
+                else -> result.notImplemented()
             }
+        }
+
+        // Stop from the notification. The service can't end the share on its
+        // own — Dart owns the room that is publishing — so it comes back
+        // through here and Dart tears the whole thing down, service included.
+        ScreenShareService.onStopRequested = {
+            runOnUiThread { screenShare.invokeMethod("stopRequested", null) }
+        }
+    }
+
+    override fun onDestroy() {
+        ScreenShareService.onStopRequested = null
+        super.onDestroy()
     }
 
     override fun onUserLeaveHint() {
