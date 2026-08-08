@@ -108,7 +108,10 @@ export default async function BillingPage() {
         )}
       </section>
 
-      {/* Plan options */}
+      {/* Plan options. Hidden entirely when the org has none configured —
+          otherwise the heading sits above nothing, which reads as a page that
+          failed to load rather than one with nothing to show. */}
+      {availablePlans.length > 0 && (
       <section className="mb-8">
         <h2 className="text-sm font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-tertiary)" }}>
           Available Plans
@@ -160,6 +163,7 @@ export default async function BillingPage() {
           })}
         </div>
       </section>
+      )}
 
       {/* Payment history */}
       <section className="card">

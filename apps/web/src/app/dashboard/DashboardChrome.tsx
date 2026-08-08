@@ -25,9 +25,11 @@ interface DashboardUser {
 
 export default function DashboardChrome({
   user,
+  nativeApp = false,
   children,
 }: {
   user: DashboardUser;
+  nativeApp?: boolean;
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
@@ -42,6 +44,17 @@ export default function DashboardChrome({
 
   if (isCallRoute) {
     return <>{children}</>;
+  }
+
+  // Inside the app, phones get app chrome instead of website chrome: a title
+  // bar and a bottom tab bar, no hamburger. The desktop sidebar still applies
+  // at lg and above, because the same build runs in the parked desktop shell.
+  if (nativeApp) {
+    return (
+      <AppChrome user={user} onSignOut={signOut} pathname={pathname ?? ""}>
+        {children}
+      </AppChrome>
+    );
   }
 
   const initials = (user.name || "U").charAt(0).toUpperCase();
@@ -290,6 +303,207 @@ export default function DashboardChrome({
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
     </div>
+  );
+}
+
+/**
+ * The in-app frame: a title bar, the page, and a bottom tab bar.
+ *
+ * Five destinations at most, which is the constraint every phone platform
+ * imposes for the same reason — a sixth is unreachable by thumb and nobody
+ * finds it. Everything that does not earn a tab lives under More.
+ */
+function AppChrome({
+  user,
+  onSignOut,
+  pathname,
+  children,
+}: {
+  user: DashboardUser;
+  onSignOut: () => void;
+  pathname: string;
+  children: React.ReactNode;
+}) {
+  const [moreOpen, setMoreOpen] = useState(false);
+  const isTeachingRole = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "");
+  const isAdminRole = user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN";
+
+  const tabs = isTeachingRole
+    ? [
+        { href: "/dashboard/teacher", label: "Home", icon: HomeIcon },
+        { href: "/dashboard/schedule", label: "Schedule", icon: CalendarIcon },
+        { href: "/dashboard/teacher/students", label: "Students", icon: PeopleIcon },
+        { href: "/dashboard/teacher/messages", label: "Messages", icon: ChatIcon },
+      ]
+    : [
+        { href: "/dashboard", label: "Home", icon: HomeIcon },
+        { href: "/dashboard/booking", label: "Book", icon: CalendarIcon },
+        { href: "/dashboard/progress", label: "Progress", icon: ChartIcon },
+        { href: "/dashboard/chat", label: "Messages", icon: ChatIcon },
+      ];
+
+  const title = titleFor(pathname, isTeachingRole);
+  const isHome = pathname === "/dashboard" || pathname === "/dashboard/teacher";
+
+  return (
+    <div className="app-shell" style={{ background: "var(--bg-secondary)" }}>
+      <IncomingCallOverlay />
+      <PushRegistrar />
+
+      {/* Title bar. Text-only and centred, the way a phone app labels where
+          you are — no logo, because you already know whose app you opened. */}
+      <header className="app-titlebar">
+        <span className="app-title">{title}</span>
+        <button
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          className="app-avatar"
+          aria-label="Account"
+        >
+          {(user.name || "U").charAt(0).toUpperCase()}
+        </button>
+      </header>
+
+      {!isTeachingRole && <LiveClassRibbon />}
+      <MeetingNotificationBanner />
+
+      {/* is-home keeps the greeting ("Assalamu Alaikum, …"), which is not a
+          page title and is not repeated in the bar. Every other page's <h1>
+          says exactly what the bar above it already says. */}
+      <main className={`app-scroll${isHome ? " is-home" : ""}`}>{children}</main>
+
+      <nav className="app-tabbar" aria-label="Main">
+        {tabs.map((tab) => {
+          const active =
+            tab.href === "/dashboard" || tab.href === "/dashboard/teacher"
+              ? pathname === tab.href
+              : pathname.startsWith(tab.href);
+          return (
+            <Link key={tab.href} href={tab.href} className={`app-tab${active ? " is-active" : ""}`}>
+              <tab.icon filled={active} />
+              <span>{tab.label}</span>
+            </Link>
+          );
+        })}
+        <button type="button" onClick={() => setMoreOpen(true)} className="app-tab">
+          <MoreIcon />
+          <span>More</span>
+        </button>
+      </nav>
+
+      {/* More opens as a sheet from the bottom — the phone idiom for a
+          secondary menu, and reachable by the thumb that opened it. */}
+      {moreOpen && (
+        <>
+          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
+          <div className="app-sheet-scrim" onClick={() => setMoreOpen(false)} />
+          <div className="app-sheet" role="dialog" aria-label="More">
+            <div className="app-sheet-grip" />
+            <div className="app-sheet-head">
+              <div className="app-avatar app-avatar-lg">{(user.name || "U").charAt(0).toUpperCase()}</div>
+              <div style={{ minWidth: 0 }}>
+                <div className="app-sheet-name">{user.name || "User"}</div>
+                <div className="app-sheet-email">{user.email}</div>
+              </div>
+            </div>
+            <div className="app-sheet-list">
+              {!isTeachingRole && <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={() => setMoreOpen(false)} />}
+              <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
+              <SheetLink href="/dashboard/billing" label="Billing" onNavigate={() => setMoreOpen(false)} />
+              {isTeachingRole && (
+                <>
+                  <SheetLink href="/dashboard/progress" label="Progress" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMoreOpen(false)} />
+                </>
+              )}
+              {isAdminRole && <SheetLink href="/admin" label="Admin Panel" onNavigate={() => setMoreOpen(false)} />}
+            </div>
+            <button onClick={onSignOut} className="app-sheet-signout">
+              Sign Out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function titleFor(pathname: string, isTeachingRole: boolean): string {
+  const map: Record<string, string> = {
+    "/dashboard": "Home",
+    "/dashboard/booking": "Book a Class",
+    "/dashboard/progress": "Progress",
+    "/dashboard/chat": "Messages",
+    "/dashboard/schedule": "Schedule",
+    "/dashboard/settings": "Settings",
+    "/dashboard/billing": "Billing",
+    "/dashboard/teacher": "Home",
+    "/dashboard/teacher/messages": "Messages",
+    "/dashboard/teacher/students": "My Students",
+    "/dashboard/teacher/availability": "Availability",
+  };
+  return map[pathname] ?? (isTeachingRole ? "Teaching" : "Novice Tutor");
+}
+
+function SheetLink({ href, label, onNavigate }: { href: string; label: string; onNavigate: () => void }) {
+  return (
+    <Link href={href} onClick={onNavigate} className="app-sheet-link">
+      {label}
+    </Link>
+  );
+}
+
+/* Icons are inline paths rather than an icon package: five glyphs do not
+   justify a dependency, and these ship with the markup instead of arriving a
+   frame later. Filled when active, outlined when not — the standard way a tab
+   bar shows where you are without relying on colour alone. */
+function HomeIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function CalendarIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <rect x="3" y="5" width="18" height="16" rx="2.5" />
+      <path d="M3 10h18M8 3v4M16 3v4" strokeLinecap="round" />
+    </svg>
+  );
+}
+function ChartIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <rect x="4" y="12" width="4" height="8" rx="1.2" />
+      <rect x="10" y="7" width="4" height="13" rx="1.2" />
+      <rect x="16" y="3" width="4" height="17" rx="1.2" />
+    </svg>
+  );
+}
+function ChatIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-5.5A8 8 0 1 1 21 12z" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function MoreIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+      <circle cx="5" cy="12" r="1.9" />
+      <circle cx="12" cy="12" r="1.9" />
+      <circle cx="19" cy="12" r="1.9" />
+    </svg>
+  );
+}
+function PeopleIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <circle cx="9" cy="8" r="3.4" />
+      <path d="M3 20c0-3.3 2.7-5.5 6-5.5s6 2.2 6 5.5" strokeLinecap="round" />
+      <path d="M16 11.2A3.2 3.2 0 1 0 16 5M17.5 19.8h3.4c0-2.5-1.5-4.3-3.7-4.9" strokeLinecap="round" />
+    </svg>
   );
 }
 

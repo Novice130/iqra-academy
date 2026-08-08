@@ -22,7 +22,13 @@ export function shouldHidePricing(role: string | null | undefined): boolean {
   return !role || !STAFF_ROLES.has(role);
 }
 
-/** The only billing state a family is shown. */
+/**
+ * The only billing state a family is shown.
+ *
+ * One word each, deliberately: "Not subscribed" wraps onto two lines in the
+ * dashboard's stat tile at phone width, and a wrapped status reads as an
+ * error message.
+ */
 export function subscriptionLabel(isSubscribed: boolean): string {
-  return isSubscribed ? "Subscribed" : "Not subscribed";
+  return isSubscribed ? "Subscribed" : "Unsubscribed";
 }

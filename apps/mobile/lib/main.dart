@@ -51,7 +51,12 @@ class NoviceTutorApp extends StatelessWidget {
         ),
         scaffoldBackgroundColor: const Color(0xFF0A0A0A),
       ),
-      home: const WebShell(initialUrl: appUrl),
+      // Straight to the dashboard, never the marketing site. Someone who
+      // installed the app has already been sold to, and "Trusted by 200+
+      // families" with a Free Trial button is the single loudest signal that
+      // they are looking at a web page. Signed out, /dashboard redirects to
+      // /login, so this is also the shortest path to signing in.
+      home: const WebShell(initialUrl: '$appUrl/dashboard'),
     );
   }
 }

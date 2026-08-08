@@ -198,3 +198,294 @@ body {
     --call-bar-height: 60px;
   }
 }
+
+/* ── Inside the app (html.native-app), suppress the handful of browser
+   behaviours that tell a user they are looking at a web page. Scoped to the
+   class so the public website is untouched. ── */
+
+/* Long-pressing an app's UI should not offer to copy it or pop a magnifier.
+   Inputs and genuine prose are exempted below — selecting a message you were
+   sent is normal, selecting a nav label is not. */
+.native-app,
+.native-app button,
+.native-app a,
+.native-app nav,
+.native-app header {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+.native-app input,
+.native-app textarea,
+.native-app [contenteditable="true"],
+.native-app .selectable {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* The grey flash on tap is a browser affordance; apps use their own pressed
+   states. */
+.native-app * {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Rubber-banding the whole page past its end reveals the "canvas" behind the
+   document and looks like a web view. Scroll containers inside still bounce,
+   which is what iOS users expect of a list. */
+.native-app,
+.native-app body {
+  overscroll-behavior-y: none;
+}
+
+/* No safe-area padding here on purpose: the Flutter shell already wraps the
+   WebView in a SafeArea, so the viewport starts below the notch and every
+   env(safe-area-inset-*) inside it is 0. Padding again would just add dead
+   space. If the shell ever draws under the status bar, this is where it gets
+   handled. */
+
+/* ── App chrome: title bar, scrolling page, bottom tab bar. Only rendered
+   inside the app (DashboardChrome decides), so these are unprefixed. ── */
+
+.app-shell {
+  /* dvh, not vh: on iOS vh is the *largest* viewport, so a 100vh column sits
+     partly behind the browser furniture and the tab bar ends up off-screen. */
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.app-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  height: 52px;
+  flex: none;
+  padding: 0 12px;
+  background: var(--bg-elevated);
+  border-bottom: 1px solid var(--border);
+}
+.app-title {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+}
+.app-avatar {
+  position: absolute;
+  right: 12px;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+.app-avatar-lg {
+  position: static;
+  width: 44px;
+  height: 44px;
+  font-size: 17px;
+}
+
+/* The only scrolling element. Momentum inside, and room at the bottom so the
+   last row is not parked under the tab bar. */
+.app-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 8px;
+}
+
+.app-tabbar {
+  flex: none;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  /* Sits above the home indicator rather than under it. */
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.app-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  /* 52px + the label keeps every tab over the 44px minimum target. */
+  min-height: 52px;
+  padding: 7px 0 6px;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  text-decoration: none;
+}
+.app-tab svg {
+  width: 24px;
+  height: 24px;
+}
+.app-tab.is-active {
+  color: var(--accent);
+}
+
+/* ── The More sheet ── */
+.app-sheet-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(0, 0, 0, 0.4);
+}
+.app-sheet {
+  position: fixed;
+  z-index: 61;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--bg-elevated);
+  border-radius: 16px 16px 0 0;
+  padding: 8px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25);
+  animation: app-sheet-up 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+}
+@keyframes app-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-sheet { animation: none; }
+}
+.app-sheet-grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+  margin: 0 auto 12px;
+}
+.app-sheet-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+.app-sheet-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-sheet-email {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-sheet-list {
+  padding: 8px 0;
+  max-height: 45vh;
+  overflow-y: auto;
+}
+.app-sheet-link {
+  display: block;
+  padding: 13px 4px;
+  font-size: 15px;
+  color: var(--text-primary);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border);
+}
+.app-sheet-link:last-child {
+  border-bottom: 0;
+}
+.app-sheet-signout {
+  width: 100%;
+  margin-top: 8px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  color: #dc2626;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ── In-app screen density.
+   The dashboard pages were laid out for a browser window: 24–40px page
+   padding, a 30px greeting, 16px gaps. On a 393px phone that reads as a
+   website someone shrank. These override the utility classes by specificity
+   alone — no !important, and nothing changes outside the app. ── */
+
+.native-app main.app-scroll > div {
+  padding: 16px;
+  max-width: none;
+}
+
+/* Section rhythm: less air between blocks than a page wants. */
+.native-app .app-scroll .mb-10 { margin-bottom: 20px; }
+.native-app .app-scroll .mb-8 { margin-bottom: 16px; }
+.native-app .app-scroll .gap-4 { gap: 10px; }
+
+/* The greeting is a heading, not a hero. */
+.native-app .app-scroll h1 {
+  font-size: 22px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.native-app .app-scroll h1 + p { font-size: 13px; }
+
+/* Cards: a phone reads them as grouped rows, so they want a softer corner,
+   no drop shadow, and less internal padding than a desktop card. */
+.native-app .app-scroll .card {
+  border-radius: 14px;
+  box-shadow: none;
+}
+.native-app .app-scroll .card.p-5 { padding: 14px; }
+
+/* Section labels — smaller, wider tracking, closer to what they label. */
+.native-app .app-scroll .uppercase.tracking-widest {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+}
+.native-app .app-scroll .mb-4 { margin-bottom: 10px; }
+
+/* Anything tappable gets a real pressed state, since there is no hover on a
+   phone and without one a tap feels like nothing happened. */
+.native-app .app-scroll a.card:active,
+.native-app .app-scroll button:active,
+.native-app .app-tab:active,
+.native-app .app-sheet-link:active {
+  opacity: 0.6;
+}
+
+/* The title bar already names the page, so a page-level <h1> saying the same
+   word again is wasted vertical space on a phone. Home is exempt: its heading
+   is a greeting, not a title. :has() is used to catch only the header block —
+   the wrapper that actually contains the h1 — and it is supported everywhere
+   this app runs (iOS 16.4+, Chrome 105+). */
+.native-app .app-scroll:not(.is-home) > div > div:first-child:has(> h1) {
+  display: none;
+}
+
+/* The floating WhatsApp bubble is how a website offers help. Inside the app
+   support lives in Messages, and a green circle floating over the tab bar
+   looks like something that escaped. */
+.native-app a[aria-label="Chat on WhatsApp"] {
+  display: none;
+}

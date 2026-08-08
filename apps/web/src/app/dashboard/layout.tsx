@@ -13,6 +13,7 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import DashboardChrome from "./DashboardChrome";
 import { ViewerTimeZoneProvider } from "@/components/LocalTime";
+import { isNativeAppUserAgent } from "@/lib/native-app";
 
 export default async function DashboardLayout({
   children,
@@ -34,12 +35,17 @@ export default async function DashboardLayout({
 
     const user = { ...session.user, role: dbUser?.role || "STUDENT" } as { name?: string; email?: string; role?: string };
 
+    // The same headers the session came from — no second read needed. Decided
+    // here rather than in the root layout so the marketing pages stay static;
+    // this route is dynamic anyway because it reads the session.
+    const nativeApp = isNativeAppUserAgent(headersList.get("user-agent"));
+
     // Every time on every dashboard page renders through this. Without it the
     // browser's zone is the only signal, and a device set to the wrong country
     // silently shows the wrong hour for the class.
     return (
       <ViewerTimeZoneProvider timeZone={dbUser?.timezone ?? null}>
-        <DashboardChrome user={user}>{children}</DashboardChrome>
+        <DashboardChrome user={user} nativeApp={nativeApp}>{children}</DashboardChrome>
       </ViewerTimeZoneProvider>
     );
   });
