@@ -13,6 +13,12 @@
  * is why this file does the assertion dance by hand rather than pulling in
  * firebase-admin, which does not run on Workers at all.
  *
+ * Android and iOS do not take the same message. Android is told to wake the
+ * app with a data-only push and draw the call screen itself; iOS cannot be
+ * woken that way and gets an alert instead (the reasoning is at sendCallPush).
+ * `device_tokens.platform` is what decides, which is why POST /api/devices
+ * records it.
+ *
  * Configuration (all optional — with none of it set, every send is a no-op and
  * the caller carries on):
  *   FCM_PROJECT_ID    — Firebase project id
@@ -47,6 +53,14 @@ export interface CallPayload {
   sessionId: string;
   callerName: string;
 }
+
+/** One registered handset. `platform` decides the shape of the message. */
+interface Device {
+  token: string;
+  platform: string;
+}
+
+const isIos = (device: Device) => device.platform === "ios";
 
 function config() {
   const projectId = process.env.FCM_PROJECT_ID;
@@ -150,7 +164,7 @@ async function getAccessToken(): Promise<string | null> {
  */
 async function sendToDevices(
   userIds: string[],
-  build: (token: string) => Record<string, unknown>
+  build: (device: Device) => Record<string, unknown>
 ): Promise<number> {
   if (userIds.length === 0 || !isPushConfigured()) return 0;
 
@@ -161,7 +175,7 @@ async function sendToDevices(
 
     const devices = await db.query.deviceTokens.findMany({
       where: inArray(deviceTokens.userId, userIds),
-      columns: { token: true, userId: true },
+      columns: { token: true, userId: true, platform: true },
     });
     if (devices.length === 0) return 0;
 
@@ -171,7 +185,7 @@ async function sendToDevices(
 
     await Promise.all(
       devices.map(async (device) => {
-        const message = { message: build(device.token) };
+        const message = { message: build(device) };
 
         const res = await fetch(url, {
           method: "POST",
@@ -216,8 +230,8 @@ export async function sendPushToUsers(
   userIds: string[],
   payload: PushPayload
 ): Promise<number> {
-  return sendToDevices(userIds, (token) => ({
-    token,
+  return sendToDevices(userIds, (device) => ({
+    token: device.token,
     notification: { title: payload.title, body: payload.body },
     // Data travels alongside the notification so the app knows where to go
     // when it is tapped — see PushService._pathOf.
@@ -229,6 +243,18 @@ export async function sendPushToUsers(
       priority: "HIGH",
       notification: { channelId: "novice_tutor_default" },
     },
+    // FCM turns the `notification` block above into an APNs alert on its own;
+    // what it will not do is make a sound or interrupt, and a class starting
+    // is worth interrupting for. `time-sensitive` is the level Apple intends
+    // for exactly this and it needs no entitlement beyond push itself.
+    ...(isIos(device)
+      ? {
+          apns: {
+            headers: { "apns-priority": "10", "apns-push-type": "alert" },
+            payload: { aps: { sound: "default", "interruption-level": "time-sensitive" } },
+          },
+        }
+      : {}),
   }));
 }
 
@@ -241,21 +267,59 @@ export async function sendPushToUsers(
  * between a phone that rings and a phone with an unread badge.
  */
 export async function sendCallPush(userIds: string[], payload: CallPayload): Promise<number> {
-  return sendToDevices(userIds, (token) => ({
-    token,
-    data: {
+  return sendToDevices(userIds, (device) => {
+    const data = {
       type: "INCOMING_CALL",
       callId: payload.callId,
       sessionId: payload.sessionId,
       callerName: payload.callerName,
-    },
-    android: {
-      priority: "HIGH",
-      // A ring is worthless late. If the phone was off, the teacher has long
-      // since given up — better it never arrives than arrives at midnight.
-      ttl: "45s",
-    },
-  }));
+    };
+
+    // iOS cannot be rung this way and no amount of payload tuning changes it.
+    // A ringing phone means CallKit, CallKit means a PushKit VoIP push, and
+    // FCM cannot send VoIP pushes at all — they go to APNs directly with their
+    // own certificate. A silent data-only push is not a substitute either:
+    // iOS throttles background pushes and will not deliver one to a terminated
+    // app on any schedule a ringing teacher would accept.
+    //
+    // So iOS gets the honest degraded version: a loud, time-sensitive alert
+    // saying who is calling, which opens straight into the call when tapped
+    // (`?answer=1`, same as Accept on Android). The data rides along, so the
+    // day PushKit is wired up the app already knows what to do with it.
+    if (isIos(device)) {
+      return {
+        token: device.token,
+        notification: {
+          title: `${payload.callerName} is calling`,
+          body: "Tap to join your Quran class",
+        },
+        data: { ...data, path: `/dashboard/session/${payload.sessionId}?answer=1` },
+        apns: {
+          headers: {
+            "apns-priority": "10",
+            "apns-push-type": "alert",
+            // Same 45s as Android: a ring that arrives after the teacher gave
+            // up is worse than one that never arrives.
+            "apns-expiration": String(Math.floor(Date.now() / 1000) + 45),
+          },
+          payload: {
+            aps: { sound: "default", "interruption-level": "time-sensitive" },
+          },
+        },
+      };
+    }
+
+    return {
+      token: device.token,
+      data,
+      android: {
+        priority: "HIGH",
+        // A ring is worthless late. If the phone was off, the teacher has long
+        // since given up — better it never arrives than arrives at midnight.
+        ttl: "45s",
+      },
+    };
+  });
 }
 
 /**
@@ -264,11 +328,30 @@ export async function sendCallPush(userIds: string[], payload: CallPayload): Pro
  * call that no longer exists.
  */
 export async function sendCallEndedPush(userIds: string[], callId: string): Promise<number> {
-  return sendToDevices(userIds, (token) => ({
-    token,
-    data: { type: "CALL_ENDED", callId },
-    android: { priority: "HIGH", ttl: "60s" },
-  }));
+  return sendToDevices(userIds, (device) => {
+    const data = { type: "CALL_ENDED", callId };
+
+    // On iOS there is no ring to cancel — the call arrived as an ordinary
+    // alert — so this is a background push whose only job is to clear the
+    // notification if the app happens to be alive. It must stay silent:
+    // a second banner saying nothing, seconds after the first, is noise.
+    if (isIos(device)) {
+      return {
+        token: device.token,
+        data,
+        apns: {
+          headers: { "apns-priority": "5", "apns-push-type": "background" },
+          payload: { aps: { "content-available": 1 } },
+        },
+      };
+    }
+
+    return {
+      token: device.token,
+      data,
+      android: { priority: "HIGH", ttl: "60s" },
+    };
+  });
 }
 
 /** Remove one device (sign-out on that handset). */

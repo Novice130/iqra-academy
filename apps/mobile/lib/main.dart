@@ -26,7 +26,8 @@ void main() async {
   // service needs to know which origin the session cookie belongs to.
   CallService.instance.appOrigin = Uri.parse(appUrl);
 
-  // Firebase is optional at this stage: without android/app/google-services.json
+  // Firebase is optional at this stage: without
+  // android/app/google-services.json — or ios/Runner/GoogleService-Info.plist —
   // initialization throws, and an app that cannot push is still an app that
   // works. See docs/mobile-app.md § Push.
   await PushService.instance.init();

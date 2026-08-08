@@ -12,6 +12,8 @@
 /// Signing in over Dart's HTTP stack would authenticate nobody.
 library;
 
+import 'dart:io' show Platform;
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -25,13 +27,39 @@ const googleServerClientId = String.fromEnvironment(
       '854951835011-mo0grfu4gbq54acc77laj6cp3e8a52b2.apps.googleusercontent.com',
 );
 
+/// The **iOS** OAuth client. Unlike Android — where Google identifies the app
+/// by its signing certificate and the plugin needs no client id at all — iOS
+/// has to be told which client it is, and the same value has to appear in
+/// Info.plist as a `CFBundleURLTypes` scheme (the reversed client id) for the
+/// callback to come back to the app.
+///
+/// Empty by default because no iOS client exists in the Google Cloud project
+/// yet. While it is empty [isAvailable] is false on iOS and the shell leaves
+/// Google's pages alone rather than starting a flow that cannot finish.
+/// Pass it with
+/// `--dart-define=GOOGLE_IOS_CLIENT_ID=...apps.googleusercontent.com` (and add
+/// the URL scheme) to turn this on.
+const googleIosClientId = String.fromEnvironment('GOOGLE_IOS_CLIENT_ID');
+
 enum GoogleSignInOutcome { success, cancelled, failed }
 
 class GoogleSignInBridge {
   GoogleSignInBridge._();
   static final GoogleSignInBridge instance = GoogleSignInBridge._();
 
+  /// Whether native Google sign-in can actually run on this platform.
+  ///
+  /// Google refuses OAuth in an embedded browser on iOS exactly as it does on
+  /// Android, so there is no fallback to "let the WebView try": the choice is
+  /// the native picker or telling the user to use their password. Intercepting
+  /// without a client id configured would swap Google's error page for a
+  /// spinner that never resolves, which is worse.
+  static bool get isAvailable => Platform.isAndroid || googleIosClientId.isNotEmpty;
+
   final GoogleSignIn _google = GoogleSignIn(
+    // Android infers this; iOS must be told, and passing a non-null clientId
+    // on Android makes the plugin throw.
+    clientId: Platform.isIOS && googleIosClientId.isNotEmpty ? googleIosClientId : null,
     serverClientId: googleServerClientId,
     scopes: const ['email', 'profile'],
   );

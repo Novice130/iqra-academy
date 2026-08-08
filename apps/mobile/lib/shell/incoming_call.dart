@@ -6,6 +6,11 @@
 /// case — is reached by a data-only FCM message, which Android hands to this
 /// code even from a killed process.
 ///
+/// iOS reaches the same screen (CallKit) but not by the same route: a data-only
+/// push cannot wake a terminated app there, so the ring needs a PushKit VoIP
+/// push, which needs a paid Apple Developer account. Until then the code below
+/// is reachable on iOS only while the app is running.
+///
 /// Accepting and declining both have to work when no WebView is on screen, so
 /// the session cookie is read straight out of the WebView's `CookieManager`
 /// (which is process-wide, not per-widget) and attached to a plain HTTP
@@ -74,6 +79,27 @@ class CallService {
         actionColor: '#10B981',
         // Draws over the lock screen — the whole point.
         isShowFullLockedScreen: true,
+      ),
+      // iOS draws the system call screen itself, so there is nothing to style;
+      // what matters here is the audio session. `configureAudioSession: false`
+      // is deliberate: WebRTC inside the WebView configures the session for
+      // the call, and letting CallKit reconfigure it underneath is how a call
+      // ends up connected with no sound.
+      //
+      // This only fires at all once VoIP pushes exist. iOS requires the ring
+      // to come from a PushKit push — an ordinary FCM message cannot wake a
+      // terminated app to report a call, and reporting late is a crash, not a
+      // warning. See docs/mobile-app.md § iOS.
+      ios: const IOSParams(
+        handleType: 'generic',
+        supportsVideo: true,
+        maximumCallGroups: 1,
+        maximumCallsPerCallGroup: 1,
+        configureAudioSession: false,
+        supportsDTMF: false,
+        supportsHolding: false,
+        supportsGrouping: false,
+        supportsUngrouping: false,
       ),
     );
     await FlutterCallkitIncoming.showCallkitIncoming(params);

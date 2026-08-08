@@ -355,15 +355,105 @@ frozen screen from a participant nobody can see.
   a broadcast extension on iOS; `getDisplayMedia` is missing in mobile
   browsers generally.
 
-## iOS — not started
+## iOS — scaffolded, not yet built
 
-Agreed as the next piece of work on 2026-08-08. **There is no `ios/` directory
-in `apps/mobile`**; it has never been generated, even though `pubspec.yaml`
-says "Android and iOS" and `flutter_launcher_icons` has `ios: true`.
+**Started 2026-08-08.** `apps/mobile/ios` now exists, generated with
+`flutter create --platforms=ios --org com.novicetutor .` and then adjusted; the
+bundle identifier is **`com.novicetutor.app`**, matching the Android
+`applicationId` so the same Firebase project and OAuth clients can be used.
 
 The shape is not an open question. Same as Android: one WKWebView over
 novicetutor.com plus push, for the same three reasons given at the top of this
-document. `lib/shell/web_shell.dart` is ordinary cross-platform Dart.
+document. `lib/shell/web_shell.dart` is ordinary cross-platform Dart, and the
+platform differences it does have are now in it:
+
+| Concern | Android | iOS |
+| --- | --- | --- |
+| User agent | `NoviceTutorApp/1.2 (screenshare)` | `NoviceTutorApp/1.2` |
+| Screen sharing | native MediaProjection capture | not offered at all |
+| Picture-in-picture | `MainActivity` over a method channel | none |
+| Google sign-in | native picker | disabled until an iOS OAuth client exists |
+| Camera/mic prompt | runtime permissions | same, plus Info.plist usage strings |
+| Cookies | process-wide by default | `sharedCookiesEnabled: true`, or Accept/Decline sees no session |
+
+The user-agent row is the important one. The call page decides whether to show
+the Present button by matching `NoviceTutorApp/<ver> (screenshare)`
+(`apps/web/src/components/video/nativeScreenShare.ts`), so an iOS build that
+claimed the marker would render a button that cannot work. It omits it, and the
+JS handlers are not registered there either.
+
+### It does not build yet, and the reason is not the code
+
+Two separate blockers, both measured on 2026-08-08:
+
+1. **CocoaPods is not installed** — `flutter build ios` ends with
+   `Warning: CocoaPods not installed. Skipping pod install.` and then
+   `CocoaPods not installed or not in valid state.` Nothing else in
+   `flutter doctor` fails. This is unavoidable rather than a preference:
+   **`flutter_inappwebview_ios` and `flutter_callkit_incoming` have no
+   `Package.swift`**, so Swift Package Manager cannot cover the plugin set no
+   matter what, and `flutter_inappwebview` *is* the app.
+2. **Swift Package Manager is switched off deliberately** —
+   `flutter config --no-enable-swift-package-manager`. With it on, resolution
+   dies before CocoaPods is even reached:
+
+   ```
+   main/Package.swift:77: Fatal error: Failed to load configuration:
+   fileNotFound(... /Quran%2520learning/... pubspec.yaml ...)
+   ```
+
+   That is `firebase_core`'s SwiftPM shim URL-encoding the repository path
+   twice, because the checkout lives under `.../Phet/Quran learning/...` and
+   **the path contains a space**. Moving the repository somewhere without a
+   space would also fix it, but with two plugins lacking SwiftPM support there
+   is nothing to gain by chasing it.
+
+So: install CocoaPods and the build should proceed. Everything on the Dart and
+Xcode side is in place.
+
+### What was set up, and why each bit is there
+
+- **Info.plist** — `NSCameraUsageDescription` and
+  `NSMicrophoneUsageDescription` (iOS *terminates* an app that reaches
+  AVCaptureDevice without them; it does not merely deny). `UIBackgroundModes`
+  = `audio`, `remote-notification`, `voip` so a lesson survives a locked
+  screen. `ITSAppUsesNonExemptEncryption = false` to skip the export
+  questionnaire on every upload.
+- **Podfile** — `platform :ios, '13.0'`, which is a floor and not a taste:
+  `livekit_client`, `flutter_webrtc` and `firebase_core` all declare
+  `ios.deployment_target 13.0`. The `post_install` hook also switches
+  `permission_handler`'s permissions down to camera, microphone and
+  notifications; it compiles all of them by default, and each one it compiles
+  is a usage string App Review will ask about.
+- **Icons** — `dart run flutter_launcher_icons` with `remove_alpha_ios: true`
+  and `background_color_ios: "#0A0A0A"`. iOS icons may not carry an alpha
+  channel; App Store Connect rejects the *upload*, not the review. Note that
+  the tool always regenerates Android icons too, and the version now in use
+  produces different output from the one that made the shipped ones — revert
+  the `android/app/src/main/res` churn unless you mean it.
+- **`analysis_options.yaml`** — `build/**` excluded. iOS builds check plugin
+  sources out under `build/ios/SourcePackages`, examples included, and
+  `flutter analyze` was reporting 50 errors from LiveKit's example app.
+
+### Server side: iOS takes a different message
+
+`src/lib/fcm.ts` now branches on `device_tokens.platform`, which is why the app
+registers itself as `ios` (`PushService.syncToken`).
+
+The ring is the interesting case. **iOS cannot be rung the Android way.** A
+ringing phone means CallKit, CallKit means a PushKit VoIP push, and FCM cannot
+send VoIP pushes at all — they go to APNs directly, with their own certificate.
+A silent data-only push is not a substitute: iOS throttles background pushes
+and will not deliver one to a terminated app on any schedule a waiting teacher
+would accept. So iOS gets the honest degraded version — a loud
+`time-sensitive` alert naming the caller, which opens straight into the call
+when tapped (`?answer=1`, the same place Accept lands on Android) — and the
+call data rides along so that wiring PushKit later changes the transport and
+nothing else. `sendCallEndedPush` on iOS is a silent `background` push whose
+only job is to clear the notification if the app happens to be running.
+
+None of this can be tested until there is an APNs key, which needs the paid
+account.
 
 ### How far you get without paying Apple
 
@@ -403,24 +493,46 @@ Homebrew and then `brew install cocoapods` (it brings its own Ruby); the
 `sudo gem install` route needs `activesupport` pinned to 6.1.7.6 first.
 `flutter doctor` flags this and nothing else.
 
+Then, from `apps/mobile`:
+
+```sh
+export PATH="$HOME/dev-tools/flutter/bin:$PATH"
+flutter build ios --simulator --no-codesign   # first run does pod install
+open -a Simulator
+flutter run -d <simulator id>
+```
+
 ### Order of work
 
 Free things first, so the app can be seen working before the account is bought.
 
-1. CocoaPods, then `flutter create --platforms=ios .`, then
-   `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in Info.plist.
+1. ~~`flutter create --platforms=ios .`, Info.plist usage strings.~~ **Done
+   2026-08-08** — see above. Still needs CocoaPods before it will compile.
 2. Simulator: shell, login, layout, audio, joining a class.
 3. A real iPhone on a free Personal Team: the full call screen, camera,
    background effects. Re-sign weekly.
 4. **Apple Developer Program, $99/year** — everything below needs it.
 5. **Push.** An APNs key plus an iOS app in the Firebase project
-   (`fir-auth-d4f03`). Nothing on the Android device side carries over, though
-   the server (`src/lib/fcm.ts`) does not care which transport it feeds.
-6. **The incoming-call ring.** `flutter_callkit_incoming` on iOS means CallKit
-   plus **PushKit VoIP pushes** — a separate certificate, and Apple requires
-   that a VoIP push actually reports a call. Stricter than Android's
-   full-screen intent.
-7. **Screen sharing.** WKWebView has no `getDisplayMedia`, same as Android, and
+   (`fir-auth-d4f03`), which yields `GoogleService-Info.plist` (gitignored,
+   like `google-services.json`). Nothing on the Android device side carries
+   over; the server payloads are already iOS-shaped — see above.
+6. **The incoming-call ring.** Optional, and only if the alert fallback proves
+   too weak: `flutter_callkit_incoming` on iOS means CallKit plus **PushKit
+   VoIP pushes**, which FCM cannot send, so it means talking to APNs directly
+   as well as a separate certificate. Apple also enforces that a VoIP push
+   actually reports a call. Stricter than Android's full-screen intent.
+   The Dart side already passes `IOSParams`.
+7. **Google sign-in.** Needs an **iOS OAuth client** in the Google Cloud
+   project (free — it is not an Apple capability, so it can be done at any
+   point). Two things then have to agree: build with
+   `--dart-define=GOOGLE_IOS_CLIENT_ID=<client id>`, and add the *reversed*
+   client id to Info.plist as a `CFBundleURLTypes` scheme, or the callback
+   never reaches the app. Until both exist the shell does not intercept
+   Google's pages at all and tells the user to sign in with a password —
+   intercepting without a client id would replace Google's error page with a
+   spinner that never resolves. The audience of the ID token stays the *web*
+   client, as on Android.
+8. **Screen sharing.** WKWebView has no `getDisplayMedia`, same as Android, and
    iOS has no MediaProjection to fall back on. It needs a **Broadcast Upload
    Extension**: a second binary in the bundle, talking to the app through an
    App Group — **which is paid-only, so it cannot be prototyped for free**.

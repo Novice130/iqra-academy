@@ -1,9 +1,18 @@
-/// Firebase Cloud Messaging — the one thing the web app cannot do on Android.
+/// Firebase Cloud Messaging — the one thing the web app cannot do from a
+/// browser tab.
 ///
 /// Everything here degrades quietly. Without `android/app/google-services.json`
-/// Firebase fails to initialize, `enabled` stays false, and the shell runs as a
-/// plain WebView. That keeps the app buildable before the Firebase project
-/// exists.
+/// (or `ios/Runner/GoogleService-Info.plist`) Firebase fails to initialize,
+/// `enabled` stays false, and the shell runs as a plain WebView. That keeps the
+/// app buildable before the Firebase project exists.
+///
+/// **On iOS this is inert for now, by circumstance rather than by choice.**
+/// `getToken()` cannot return anything without an APNs key and the Push
+/// Notifications capability, and that capability needs the paid Apple
+/// Developer Program — a free Personal Team cannot enable it. The calls below
+/// are all wrapped, so an iOS build simply runs with `enabled = true` and no
+/// token, which registers nothing and pushes nothing. See docs/mobile-app.md
+/// § iOS.
 ///
 /// The token is registered by running `fetch()` *inside* the WebView rather
 /// than from Dart: the page already holds the Better Auth session cookie, so
@@ -12,6 +21,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -170,7 +180,12 @@ class PushService {
     final token = _token;
     if (!enabled || token == null || token == _registeredToken) return;
 
-    final body = jsonEncode({'token': token, 'platform': 'android'});
+    // The server stores the platform (device_tokens.platform) and will need it
+    // to send an APNs-shaped payload rather than an Android one.
+    final body = jsonEncode({
+      'token': token,
+      'platform': Platform.isIOS ? 'ios' : 'android',
+    });
     try {
       final result = await controller.evaluateJavascript(source: '''
         (async () => {

@@ -10,6 +10,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +21,25 @@ import 'package:url_launcher/url_launcher.dart';
 import 'google_sign_in_bridge.dart';
 import 'push.dart';
 import 'screen_share.dart';
+
+/// What the shell tells the server, and — for the `screenshare` marker — what
+/// the call page keys its Present button off
+/// (`apps/web/src/components/video/nativeScreenShare.ts`).
+///
+/// The marker is claimed per platform, not per build, because iOS genuinely
+/// cannot do it: WKWebView has no `getDisplayMedia` and iOS has no
+/// MediaProjection, so presenting needs a Broadcast Upload Extension talking
+/// over an App Group — a paid capability that does not exist yet. Claiming it
+/// on iOS would put a button on screen that does nothing, which is exactly
+/// what the marker was introduced to prevent.
+///
+/// The version stays 1.2 — the handlers themselves have not changed, and the
+/// page matches any version. Bump it only when they do.
+String get shellUserAgent =>
+    Platform.isIOS ? 'NoviceTutorApp/1.2' : 'NoviceTutorApp/1.2 (screenshare)';
+
+/// Screen sharing is native capture, and only Android has the pieces for it.
+bool get nativeScreenShareSupported => Platform.isAndroid;
 
 class WebShell extends StatefulWidget {
   final String initialUrl;
@@ -38,7 +58,9 @@ class _WebShellState extends State<WebShell> {
   bool _pipAllowed = false;
 
   /// Talks to MainActivity, which is the only thing that can enter Android's
-  /// picture-in-picture mode.
+  /// picture-in-picture mode. There is no iOS counterpart: iOS only gives
+  /// picture-in-picture to AVPlayer and to WebRTC through a native video view,
+  /// neither of which a WKWebView-hosted call page is.
   static const _pipChannel = MethodChannel('novicetutor/pip');
   StreamSubscription<String>? _deepLinks;
 
@@ -70,8 +92,11 @@ class _WebShellState extends State<WebShell> {
     _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(url)));
   }
 
-  /// Holds the Android camera and microphone permissions, asking once if we
-  /// don't have them yet.
+  /// Holds the OS camera and microphone permissions, asking once if we don't
+  /// have them yet. Both platforms need this — on iOS the strings shown in the
+  /// prompt come from `NSCameraUsageDescription` /
+  /// `NSMicrophoneUsageDescription` in Info.plist, and an app that reaches
+  /// AVCaptureDevice without them is killed rather than denied.
   ///
   /// Asked lazily rather than at launch: a Quran app demanding the camera
   /// before showing anything reads as spyware, and a student who only ever
@@ -88,6 +113,10 @@ class _WebShellState extends State<WebShell> {
   /// screen-only LiveKit token (it has the session cookie) and hands it over;
   /// capture and publishing happen natively. See screen_share.dart.
   void _registerScreenShareHandlers(InAppWebViewController c) {
+    // Not registered on iOS. The user agent there omits the `screenshare`
+    // marker, so the page never offers the button and never calls these.
+    if (!nativeScreenShareSupported) return;
+
     ScreenShareService.instance.onEnded = () {
       // Stopping from the system cast chip has to put the page's button back.
       _controller?.evaluateJavascript(
@@ -114,6 +143,18 @@ class _WebShellState extends State<WebShell> {
         await ScreenShareService.instance.stop();
         return true;
       },
+    );
+  }
+
+  void _showGoogleUnavailable() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          "Google sign-in isn't available in the app yet. Please sign in with your email and password.",
+        ),
+        duration: Duration(seconds: 5),
+      ),
     );
   }
 
@@ -147,6 +188,7 @@ class _WebShellState extends State<WebShell> {
   /// Picture-in-picture is only wanted during a class. Leaving the app while
   /// reading the dashboard should just leave the app.
   void _updatePipEligibility(WebUri? url) {
+    if (!Platform.isAndroid) return;
     final inCall = url != null && url.path.contains('/dashboard/session/');
     if (inCall == _pipAllowed) return;
     _pipAllowed = inCall;
@@ -238,7 +280,16 @@ class _WebShellState extends State<WebShell> {
             thirdPartyCookiesEnabled: true,
             // The call page publishes camera and mic without a tap first.
             mediaPlaybackRequiresUserGesture: false,
+            // iOS-only, and not cosmetic: without it WKWebView hands every
+            // video to the native fullscreen player, so the call page's own
+            // grid of participants is replaced by one tile at a time.
             allowsInlineMediaPlayback: true,
+            // iOS-only. WKWebView keeps cookies in its own per-webview store
+            // unless told to use the shared one, and the shared one is what
+            // answering a call reads when no WebView exists at all
+            // (incoming_call.dart goes through CookieManager). Without this
+            // the session is invisible to Accept/Decline on iOS.
+            sharedCookiesEnabled: true,
             useShouldOverrideUrlLoading: true,
             supportZoom: false,
             transparentBackground: true,
@@ -250,8 +301,8 @@ class _WebShellState extends State<WebShell> {
             // button. Every build of the app has a JS bridge, so the bridge
             // existing proves nothing — an app installed before screen
             // sharing shipped would show the button and do nothing when it
-            // was tapped. Only bump this when the handlers below change.
-            applicationNameForUserAgent: 'NoviceTutorApp/1.2 (screenshare)',
+            // was tapped. iOS never claims it — see shellUserAgent.
+            applicationNameForUserAgent: shellUserAgent,
           ),
           onWebViewCreated: (c) {
             _controller = c;
@@ -277,7 +328,16 @@ class _WebShellState extends State<WebShell> {
             // the navigation and run the native account picker instead, so
             // "Continue with Google" works rather than dead-ending.
             if (GoogleSignInBridge.isGoogleAuthUrl(url)) {
-              _handleGoogleSignIn();
+              if (GoogleSignInBridge.isAvailable) {
+                _handleGoogleSignIn();
+              } else {
+                // iOS with no OAuth client configured yet. Signing in through
+                // the system browser is not an option either: the cookie would
+                // land in Safari, not in this WebView, so the user would still
+                // be signed out here. Say so instead of loading Google's
+                // `disallowed_useragent` page.
+                _showGoogleUnavailable();
+              }
               return NavigationActionPolicy.CANCEL;
             }
 

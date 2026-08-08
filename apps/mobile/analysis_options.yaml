@@ -15,6 +15,10 @@ analyzer:
     # call shapes in it), never compiled, ~240 analyzer errors. Not part of the
     # build — see docs/mobile-app.md.
     - legacy/**
+    # Build output. iOS builds check plugin sources out under
+    # build/ios/SourcePackages, examples and all, and analysing someone else's
+    # example app buries our own errors under dozens of theirs.
+    - build/**
 
 linter:
   # The lint rules applied to this project can be customized in the

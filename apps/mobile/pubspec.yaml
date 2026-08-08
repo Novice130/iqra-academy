@@ -66,5 +66,10 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: assets/images/logo.png
+  # iOS icons may not have an alpha channel — App Store Connect rejects the
+  # upload outright, not at review. The logo is transparent, so flatten it
+  # onto the same near-black the app uses everywhere else.
+  remove_alpha_ios: true
+  background_color_ios: "#0A0A0A"
   adaptive_icon_background: "#0A0A0A"
   adaptive_icon_foreground: assets/images/logo.png
