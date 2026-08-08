@@ -133,6 +133,11 @@ class CallService {
   /// Opens the system screen where the permission above is granted. It cannot
   /// be granted from inside the app — Android only offers the Settings page.
   Future<void> requestFullScreen() async {
+    // Android-only plugin method. Nothing should reach here on iOS, since
+    // canUseFullScreen answers true there and the prompt never appears — but a
+    // button that silently does nothing is a miserable thing to debug, so the
+    // guard is explicit rather than implied.
+    if (!Platform.isAndroid) return;
     try {
       await FlutterCallkitIncoming.requestFullIntentPermission();
     } catch (e) {
