@@ -355,7 +355,7 @@ frozen screen from a participant nobody can see.
   a broadcast extension on iOS; `getDisplayMedia` is missing in mobile
   browsers generally.
 
-## iOS — scaffolded, not yet built
+## iOS — runs in the simulator
 
 **Started 2026-08-08.** `apps/mobile/ios` now exists, generated with
 `flutter create --platforms=ios --org com.novicetutor .` and then adjusted; the
@@ -382,18 +382,33 @@ the Present button by matching `NoviceTutorApp/<ver> (screenshare)`
 claimed the marker would render a button that cannot work. It omits it, and the
 JS handlers are not registered there either.
 
-### It does not build yet, and the reason is not the code
+### Getting it to build took three things, none of them code
 
-Two separate blockers, both measured on 2026-08-08:
+All measured on 2026-08-08, in the order they blocked the build:
 
-1. **CocoaPods is not installed** — `flutter build ios` ends with
-   `Warning: CocoaPods not installed. Skipping pod install.` and then
-   `CocoaPods not installed or not in valid state.` Nothing else in
-   `flutter doctor` fails. This is unavoidable rather than a preference:
+1. **CocoaPods was not installed** — `flutter build ios` ended with
+   `CocoaPods not installed or not in valid state.` Installed via Homebrew
+   (`brew install cocoapods`, 1.17.0; it brings its own Ruby, which matters
+   because system Ruby is Apple's deprecated 2.6.10). Note that Homebrew's
+   installer never added itself to the PATH — there was no `~/.zprofile` at
+   all — so `brew` appeared "not found" while sitting in `/opt/homebrew/bin`.
+   This step is unavoidable rather than a preference:
    **`flutter_inappwebview_ios` and `flutter_callkit_incoming` have no
    `Package.swift`**, so Swift Package Manager cannot cover the plugin set no
    matter what, and `flutter_inappwebview` *is* the app.
-2. **Swift Package Manager is switched off deliberately** —
+2. **`xcode-select` pointed at CommandLineTools**, so `xcodebuild` refused to
+   run and Flutter could not read the bundle id — which it reports as the
+   thoroughly misleading `Application not configured for iOS`. Fixed with
+   `sudo xcode-select -s /Applications/Xcode.app/Contents/Developer`.
+3. **The iOS 26.5 platform was missing.** Xcode 26.6 builds against SDK 26.5
+   but the only simulator runtime present was 26.4, left over from an older
+   Xcode, and Xcode then offers *no* eligible destination at all — not even a
+   booted iPhone (`iOS 26.5 is not installed`). `xcodebuild -downloadPlatform
+   iOS` fetched it: 8.52 GB.
+
+And one setting that stays off:
+
+- **Swift Package Manager is switched off deliberately** —
    `flutter config --no-enable-swift-package-manager`. With it on, resolution
    dies before CocoaPods is even reached:
 
@@ -408,8 +423,31 @@ Two separate blockers, both measured on 2026-08-08:
    space would also fix it, but with two plugins lacking SwiftPM support there
    is nothing to gain by chasing it.
 
-So: install CocoaPods and the build should proceed. Everything on the Dart and
-Xcode side is in place.
+With all three done, `flutter build ios --simulator --no-codesign` succeeds
+(~8 min cold, ~40s after that) and the app runs.
+
+### What it does on a simulator, as of 2026-08-08
+
+Verified, not assumed: the app installs, launches, and **renders
+novicetutor.com inside the WebView** — right layout, no browser chrome, safe
+areas respected. `Push disabled (no Firebase config)` is logged and the shell
+carries on as a plain WebView, which is the degradation path working.
+
+One thing to know before debugging a hang here. On the very first cold run the
+page never appeared: `onLoadStart` fired and then **nothing** — no progress, no
+error, no `onLoadStop`. It was not the app. The same build loaded normally on
+the next run, Safari on the same simulator loaded the site throughout, and the
+origin answered every user agent with a 200 in under 0.4s; WebKit's log showed
+a connection stalling (`flow stall timeout - connection not complete in
+2000ms`) after trying QUIC. A transient stall, in other words — but it exposed
+a real gap, since a *stalled* load calls no callback at all while a *failed*
+one lands on the offline screen. `web_shell.dart` now runs a 20s stall timer
+for exactly that case.
+
+Not testable here, and waiting on a device or on Apple: own-camera video and
+the background effects (**the simulator has a microphone but no camera** —
+probed: zero `videoinput`, and bare `{video: true}` fails
+`OverconstrainedError`), push, the incoming-call ring, and screen sharing.
 
 ### What was set up, and why each bit is there
 
@@ -507,8 +545,9 @@ flutter run -d <simulator id>
 Free things first, so the app can be seen working before the account is bought.
 
 1. ~~`flutter create --platforms=ios .`, Info.plist usage strings.~~ **Done
-   2026-08-08** — see above. Still needs CocoaPods before it will compile.
-2. Simulator: shell, login, layout, audio, joining a class.
+   2026-08-08.**
+2. ~~Simulator: shell loads, layout is right.~~ **Done 2026-08-08.** Still to
+   do on the simulator: sign in, then join a class and confirm audio.
 3. A real iPhone on a free Personal Team: the full call screen, camera,
    background effects. Re-sign weekly.
 4. **Apple Developer Program, $99/year** — everything below needs it.
