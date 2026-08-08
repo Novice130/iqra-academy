@@ -43,6 +43,33 @@ Two rules that are not optional:
 
 ---
 
+## Building Windows on the Mac instead
+
+Possible as of 2026-08-09, and worth knowing what it costs first:
+
+```sh
+brew install --cask wine-stable          # Intel binary
+softwareupdate --install-rosetta --agree-to-license
+xattr -dr com.apple.quarantine "/Applications/Wine Stable.app"
+```
+
+All three are needed, and the third one is the trap. Homebrew 6 **removed the
+`--no-quarantine` flag**, so the cask now installs quarantined and macOS
+refuses to run it — the dialog says "Apple could not verify Wine Stable is free
+of malware" and offers only *Move to Trash* or *Done*. Wine itself fails first
+with a misleading `wine: __wine_main function not found in ntdll.so` and
+`Virtual memory exhausted`, which looks like a broken build and is not.
+Clearing the attribute fixes both; `wine --version` should then print `wine-11.0`.
+
+Rosetta is unavoidable regardless of Wine's own architecture. Wine translates
+Windows *API calls*, not CPU instructions — the name is literally "Wine Is Not
+an Emulator" — and the installer build runs x86 Windows tools (`makensis.exe`,
+`rcedit.exe`). A native arm64 Wine would still need Rosetta for those. Note
+also that Rosetta is, in Apple's own words, very difficult to remove.
+
+Then `npm run dist:win` from `apps/desktop` as below, and upload with the same
+wrangler command.
+
 ## Windows — from the Windows machine
 
 Everything below runs on the Windows laptop, in PowerShell, from the repo root.
