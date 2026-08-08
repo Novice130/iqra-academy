@@ -365,38 +365,68 @@ The shape is not an open question. Same as Android: one WKWebView over
 novicetutor.com plus push, for the same three reasons given at the top of this
 document. `lib/shell/web_shell.dart` is ordinary cross-platform Dart.
 
+### How far you get without paying Apple
+
+The plan is to test at home first and buy the developer account later — the
+same order Android went in. That works, and most of the app is reachable for
+free. Measured on the build Mac, not assumed:
+
+**The simulator has a microphone and no camera.** A probe page calling
+`enumerateDevices()` in Simulator Safari (iPhone 17, Xcode 26.6) reports one
+device — `audioinput` — and **zero video inputs**; a bare `{video: true}` fails
+with `OverconstrainedError`, so this is an absent camera rather than a
+constraint that could be relaxed. iOS did prompt for the microphone, so the
+Mac's mic passes through. The simulator therefore covers the shell, login,
+layout, navigation, audio, and joining a class — but not your own video, and so
+not the background effects.
+
+**A real iPhone on a free Apple ID covers the rest.** Xcode will sign with a
+"Personal Team" at no cost, and camera and microphone both work, so the whole
+call screen can be exercised. Two limits: the provisioning profile **expires
+after 7 days**, and Push Notifications, App Groups and Associated Domains are
+paid-only capabilities.
+
+So before spending anything you can test everything except push, the
+incoming-call ring (needs VoIP push), screen sharing (its broadcast extension
+needs an App Group), and universal links.
+
+One thing that is *not* a testing route, despite sounding like one: Apple
+Silicon Macs can run iPhone apps, but only App Store builds whose developer
+opted in. It needs a published app, so it is no help here.
+
 ### Toolchain on the build Mac, checked 2026-08-08
 
-Xcode 26.6 and simulators are ready. **CocoaPods is not installed and there is
-no Homebrew**, so Flutter cannot build iOS plugins — `sudo gem install
-cocoapods`, and it needs the user's password. `flutter doctor` flags exactly
-this and nothing else.
+Xcode 26.6 and the simulators work. **CocoaPods is not installed and there is
+no Homebrew**, so Flutter cannot build iOS plugins yet — and system Ruby is
+Apple's deprecated 2.6.10, which newer CocoaPods dependencies refuse. Install
+Homebrew and then `brew install cocoapods` (it brings its own Ruby); the
+`sudo gem install` route needs `activesupport` pinned to 6.1.7.6 first.
+`flutter doctor` flags this and nothing else.
 
 ### Order of work
 
-1. `flutter create --platforms=ios .`, then `NSCameraUsageDescription` and
-   `NSMicrophoneUsageDescription` in Info.plist. This much runs in the
-   simulator with no Apple account — but **the simulator has no camera**, so it
-   proves the shell loads and navigates, not that a call works.
-2. **Apple Developer Program, $99/year.** Blocks every item below and any run
-   on real hardware. The keychain on the build Mac currently holds only a free
-   *Apple Development* certificate, which is not distributable.
-3. **Push.** An APNs key plus an iOS app in the Firebase project
+Free things first, so the app can be seen working before the account is bought.
+
+1. CocoaPods, then `flutter create --platforms=ios .`, then
+   `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` in Info.plist.
+2. Simulator: shell, login, layout, audio, joining a class.
+3. A real iPhone on a free Personal Team: the full call screen, camera,
+   background effects. Re-sign weekly.
+4. **Apple Developer Program, $99/year** — everything below needs it.
+5. **Push.** An APNs key plus an iOS app in the Firebase project
    (`fir-auth-d4f03`). Nothing on the Android device side carries over, though
-   the server (`src/lib/fcm.ts`) does not care which transport it is feeding.
-4. **The incoming-call ring.** `flutter_callkit_incoming` on iOS means CallKit
+   the server (`src/lib/fcm.ts`) does not care which transport it feeds.
+6. **The incoming-call ring.** `flutter_callkit_incoming` on iOS means CallKit
    plus **PushKit VoIP pushes** — a separate certificate, and Apple requires
    that a VoIP push actually reports a call. Stricter than Android's
    full-screen intent.
-5. **Screen sharing.** WKWebView has no `getDisplayMedia`, same as Android, and
+7. **Screen sharing.** WKWebView has no `getDisplayMedia`, same as Android, and
    iOS has no MediaProjection to fall back on. It needs a **Broadcast Upload
    Extension**: a second binary in the bundle, talking to the app through an
-   App Group. `livekit_client` supports it —
-   `ScreenShareCaptureOptions(useiOSBroadcastExtension: true)`. Expect this to
-   be larger than the Android equivalent, which took two sessions.
-
-Items 1 and 5 are the engineering; 2–4 are account and certificate work that
-can be prepared but not finished without the Apple account.
+   App Group — **which is paid-only, so it cannot be prototyped for free**.
+   `livekit_client` supports it via
+   `ScreenShareCaptureOptions(useiOSBroadcastExtension: true)`. Expect it to be
+   larger than the Android equivalent, which took two sessions.
 
 ### Carry these over from Android
 
