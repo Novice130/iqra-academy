@@ -55,25 +55,55 @@ export function sessionIdFromRoom(roomName: string | undefined): string | null {
 }
 
 /**
- * Starts the native share. Resolves true once the shell reports the screen
- * track is publishing — which is *after* the Android system dialog, so the
- * button must show a pending state until this returns rather than flipping
- * to "on" the moment it is tapped.
+ * Why a share didn't start, in words the teacher can act on.
+ *
+ * `declined` deliberately has no message: saying "you declined" to someone who
+ * just declined is noise. Everything else does, because a Present button that
+ * quietly stays off looks like the app is broken.
  */
-export async function startNativeScreenShare(sessionId: string): Promise<boolean> {
-  if (!isNativeShell()) return false;
+const FAILURE_MESSAGES: Record<string, string | null> = {
+  declined: null,
+  serviceBlocked: "Android wouldn't allow screen capture. Open the app from the class and try again.",
+  connectFailed: "Couldn't connect the screen to the class. Check your connection and try again.",
+};
+
+export interface NativeShareResult {
+  started: boolean;
+  /** Null when there is nothing worth saying — including on success. */
+  message: string | null;
+}
+
+/**
+ * Starts the native share. Resolves once the shell reports the screen track is
+ * publishing — which is *after* the Android system dialog, so the button must
+ * show a pending state until this returns rather than flipping to "on" the
+ * moment it is tapped.
+ */
+export async function startNativeScreenShare(sessionId: string): Promise<NativeShareResult> {
+  const failed = (message: string | null): NativeShareResult => ({ started: false, message });
+  if (!isNativeShell()) return failed(null);
 
   const res = await fetch(`/api/sessions/${sessionId}/screen-token`);
-  if (!res.ok) return false;
+  if (!res.ok) return failed("Couldn't get permission to share into this class.");
   const { token, url, roomName } = await res.json();
-  if (!token || !url) return false;
+  if (!token || !url) return failed("Couldn't get permission to share into this class.");
 
-  const ok = await window.flutter_inappwebview!.callHandler('startScreenShare', {
+  const reply = await window.flutter_inappwebview!.callHandler('startScreenShare', {
     url,
     token,
     roomName,
   });
-  return ok === true;
+
+  // Shells before 1.2 answer a bare `true`/`false` with no reason attached.
+  if (reply === true) return { started: true, message: null };
+  if (reply === false || reply == null) return failed(null);
+
+  const { ok, reason } = reply as { ok?: boolean; reason?: string };
+  if (ok) return { started: true, message: null };
+  return failed(
+    (reason && reason in FAILURE_MESSAGES ? FAILURE_MESSAGES[reason] : undefined) ??
+      "Couldn't start sharing your screen."
+  );
 }
 
 export async function stopNativeScreenShare(): Promise<void> {

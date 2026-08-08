@@ -186,11 +186,11 @@ the teacher's `createRoom` ran, and never clobbers a spotlight set by hand.
 
 ### Backgrounds
 
-`@livekit/track-processors` (client-side MediaPipe), available to everyone:
-none / two blur levels / eleven hand-written SVG wallpapers in
-`public/backgrounds`. Those SVGs need explicit `width`/`height`, not just a
-`viewBox` — they're loaded through `new Image()` + `createImageBitmap`, which
-has no intrinsic size to work from otherwise.
+Client-side MediaPipe segmentation, available to everyone: none / two blur
+levels / eleven hand-written SVG wallpapers in `public/backgrounds`. Those SVGs
+need explicit `width`/`height`, not just a `viewBox` — they're loaded through
+`new Image()` + `createImageBitmap`, which has no intrinsic size to work from
+otherwise.
 
 The choice persists in `localStorage` (`nt.background-effect`), per browser
 rather than per account: a phone and a desk want different setups. Effects
@@ -198,25 +198,47 @@ attach to `useLocalParticipant().cameraTrack`, not `localParticipant` — keyed
 off the participant alone, a background chosen on the pre-join screen was
 remembered but never applied, because no track exists at mount.
 
-**Known quality gap, investigated 2026-08-08 and not fixed.** The edges are
-visibly grainier than Google Meet's. The cause is the segmentation model:
-`@livekit/track-processors` loads MediaPipe's `selfie_segmenter.tflite`, whose
-mask is **256×144**, upscaled to 720p video. Meet uses a higher-resolution
-model plus temporal smoothing between frames.
+**The pipeline is ours, not `@livekit/track-processors`' (2026-08-08).** Its
+`BackgroundProcessor` is still the dependency we get `ProcessorWrapper` and
+`VideoTransformer` from, but the compositing is in
+`src/components/video/segmentation/`. The grain that made this look worse than
+Meet was never the model's resolution, which is what the first investigation
+concluded. It was two things upstream does to the mask:
 
-The obvious fix does not work. Pointing `assetPaths.modelAssetPath` at
-`selfie_multiclass_256x256.tflite` **breaks it entirely**: the compositing
-shader thresholds the mask at `0.5`, and MediaPipe writes category *indices*
-into that texture. With two classes, person reads as 1.0; with six, categories
-land at 0.004–0.02, all below the threshold, so everything is classified as
-background and the blur lands on the person instead of behind them.
+- it asks for a **category** mask — one bit per pixel — so the only edge
+  softness available is whatever a box blur can invent from a staircase;
+- it segments every frame in **complete ignorance of the previous one**, so
+  every pixel the model is unsure about flips at 30Hz. That flicker is what
+  reads as grain. A still screenshot of the old output looks far better than
+  the live picture did, which is why this took a while to pin down.
 
-There is no higher-resolution two-class model in that family, and 0.7.2 is the
-latest release. A real fix means a custom `VideoTransformer`: a better model
-with corrected mask handling, plus frame-to-frame smoothing. It needs a browser
-and a face in front of the camera to tune — it cannot be verified headlessly.
-Meanwhile, "Slight blur" (radius 5) hides mask errors far better than radius
-15 does.
+So `glPipeline.ts` asks for **confidence** masks, blends each into the previous
+frame's (an exponential moving average, `temporalBlend`), feathers the result,
+and composites with a narrow smoothstep plus a light wrap — a little background
+colour bled onto the rim, which is most of what stops a cut-out looking pasted
+on. Everything runs at mask resolution until the final pass, so it costs a
+handful of extra 256×144 draws over the old pipeline.
+
+Two model gotchas, both of which produced a *working-looking* wrong result:
+
+- `selfie_segmenter.tflite` (two classes) returns **one** confidence mask and
+  it is the foreground. `selfie_multiclass_256x256.tflite` returns **six** and
+  the first is the background. Invert one and you replace the person with the
+  wallpaper. `transform()` decides from `confidenceMasks.length`, not from
+  which model it thinks it loaded.
+- The multiclass model is the default's runner-up, not the default. Its edges
+  are indistinguishable on a real frame, it costs ~3× per frame, and its sixth
+  category ("others") takes in whatever is on the desk — a teacher at a laptop
+  keeps a slab of laptop lid floating in front of their wallpaper.
+
+**`/debug/segmentation` is the bench**: your camera raw beside the processed
+output, every tuning knob on a slider, `?model=detailed` to compare. No auth,
+no database. The numbers in `DEFAULT_SETTINGS` came from there, and changing
+them without going back to it is guessing. To drive it headlessly, Chrome will
+take a still image as a camera:
+`--use-file-for-fake-video-capture=<file.y4m>` — `public/teacher.png` converted
+to y4m makes a realistic subject, which the built-in fake camera (a flat
+colour) very much is not.
 
 ### Screen sharing
 

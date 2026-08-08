@@ -184,17 +184,17 @@ body {
    offset — the two must agree or the chat sheet sits over the buttons.
    A phone held sideways is only ~390px tall, where a 76px bar is a quarter
    of the screen, so it shrinks. ── */
+:root {
+  --call-bar-height: 76px;
+}
 .call-surface {
-  --lk-control-bar-height: 76px;
+  --lk-control-bar-height: var(--call-bar-height);
 }
 .call-control-bar {
-  height: 76px;
+  height: var(--call-bar-height);
 }
 @media (max-height: 480px) {
-  .call-surface {
-    --lk-control-bar-height: 60px;
-  }
-  .call-control-bar {
-    height: 60px;
+  :root {
+    --call-bar-height: 60px;
   }
 }

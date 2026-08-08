@@ -23,6 +23,38 @@ import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
 import 'package:livekit_client/livekit_client.dart';
 
+/// Why a share didn't start. The page turns this into something a teacher can
+/// act on — a button that silently refuses to light up is the worst outcome,
+/// and "you declined the prompt" and "your phone wouldn't allow capture" call
+/// for completely different responses.
+enum ScreenShareFailure {
+  /// The teacher said no to Android's capture prompt. Not an error.
+  declined,
+
+  /// Android refused the foreground service the projection depends on.
+  serviceBlocked,
+
+  /// Token, network, or LiveKit refused the connection.
+  connectFailed,
+}
+
+class ScreenShareStartResult {
+  const ScreenShareStartResult.ok()
+      : started = true,
+        failure = null;
+  const ScreenShareStartResult.failed(this.failure) : started = false;
+
+  final bool started;
+  final ScreenShareFailure? failure;
+
+  /// The shape the page reads. Older builds of the shell answered a bare bool,
+  /// so the web side accepts both.
+  Map<String, dynamic> toJson() => {
+        'ok': started,
+        if (failure != null) 'reason': failure!.name,
+      };
+}
+
 class ScreenShareService {
   ScreenShareService._() {
     // "Stop sharing" on the ongoing notification. Native can end the service
@@ -46,14 +78,20 @@ class ScreenShareService {
 
   bool get isSharing => _room != null;
 
-  /// Starts sharing. Returns false — without having changed anything — if the
-  /// user declines the capture prompt, which is a completely normal outcome
-  /// and must not look like a failure.
-  Future<bool> start({
+  /// Starts sharing.
+  ///
+  /// Declining the capture prompt is a completely normal outcome and comes
+  /// back as [ScreenShareFailure.declined], not as an error.
+  Future<ScreenShareStartResult> start({
     required String url,
     required String token,
   }) async {
-    if (_room != null) return true;
+    // Not "already sharing, nothing to do". A projection can die under us
+    // without anything telling us — the teacher stops it from the system's own
+    // cast chip, and flutter_webrtc's capturer has no callback for that, so the
+    // track stays published and the class watches a frozen screen. Tapping
+    // Present again is then the only way out, and it has to actually restart.
+    if (_room != null) await _teardown(notify: false);
 
     // The system dialog. Declining here is the common case for a teacher who
     // tapped the button to see what it did.
@@ -65,9 +103,14 @@ class ScreenShareService {
     // Presenting means the whole screen; the point is showing the students
     // something that isn't this app.
     final granted = await webrtc.Helper.requestCapturePermission(fullScreenOnly: true);
-    if (!granted) return false;
+    if (!granted) return const ScreenShareStartResult.failed(ScreenShareFailure.declined);
 
-    await _channel.invokeMethod('startService');
+    // Waits for the service to actually be in the foreground, not merely for
+    // the request to be queued: the projection below is illegal until it is.
+    final serviceUp = await _channel.invokeMethod<bool>('startService') ?? false;
+    if (!serviceUp) {
+      return const ScreenShareStartResult.failed(ScreenShareFailure.serviceBlocked);
+    }
 
     final room = Room(
       roomOptions: const RoomOptions(
@@ -76,6 +119,13 @@ class ScreenShareService {
         // participant's video a second time on the same phone.
         adaptiveStream: false,
         dynacast: true,
+        // Spelled out rather than left to the default, because this is the
+        // knob that decides whether a student can read what is on the screen:
+        // a shared screen is mostly still text, so resolution is worth far
+        // more than frame rate. 15fps is what Meet and Zoom present at too.
+        defaultScreenShareCaptureOptions: ScreenShareCaptureOptions(
+          params: VideoParametersPresets.screenShareH1080FPS15,
+        ),
       ),
     );
 
@@ -91,7 +141,7 @@ class ScreenShareService {
       try {
         await _channel.invokeMethod('stopService');
       } catch (_) {}
-      return false;
+      return const ScreenShareStartResult.failed(ScreenShareFailure.connectFailed);
     }
 
     _room = room;
@@ -104,14 +154,17 @@ class ScreenShareService {
       ..on<LocalTrackUnpublishedEvent>((_) => _teardown())
       ..on<RoomDisconnectedEvent>((_) => _teardown());
 
-    return true;
+    return const ScreenShareStartResult.ok();
   }
 
   Future<void> stop() async {
     await _teardown();
   }
 
-  Future<void> _teardown() async {
+  /// [notify] is false only when a restart is about to put a new share in
+  /// place: telling the page the share ended, milliseconds before it starts
+  /// again, leaves the button dark over a share that is genuinely running.
+  Future<void> _teardown({bool notify = true}) async {
     final room = _room;
     _room = null;
     if (room == null) return;
@@ -133,6 +186,6 @@ class ScreenShareService {
       await _channel.invokeMethod('stopService');
     } catch (_) {}
 
-    onEnded?.call();
+    if (notify) onEnded?.call();
   }
 }

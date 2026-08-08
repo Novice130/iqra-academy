@@ -99,11 +99,12 @@ class _WebShellState extends State<WebShell> {
       handlerName: 'startScreenShare',
       callback: (args) async {
         final arg = args.isNotEmpty ? args.first : null;
-        if (arg is! Map) return false;
+        if (arg is! Map) return const {'ok': false};
         final url = arg['url'];
         final token = arg['token'];
-        if (url is! String || token is! String) return false;
-        return ScreenShareService.instance.start(url: url, token: token);
+        if (url is! String || token is! String) return const {'ok': false};
+        final result = await ScreenShareService.instance.start(url: url, token: token);
+        return result.toJson();
       },
     );
 
@@ -250,7 +251,7 @@ class _WebShellState extends State<WebShell> {
             // existing proves nothing — an app installed before screen
             // sharing shipped would show the button and do nothing when it
             // was tapped. Only bump this when the handlers below change.
-            applicationNameForUserAgent: 'NoviceTutorApp/1.1 (screenshare)',
+            applicationNameForUserAgent: 'NoviceTutorApp/1.2 (screenshare)',
           ),
           onWebViewCreated: (c) {
             _controller = c;

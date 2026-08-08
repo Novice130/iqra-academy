@@ -3,8 +3,10 @@
 /**
  * Background effects — blur and virtual wallpapers for your own camera.
  *
- * Runs entirely client-side on @livekit/track-processors (MediaPipe
- * segmentation), so nothing is uploaded and no server work is involved.
+ * Runs entirely client-side on MediaPipe segmentation, so nothing is uploaded
+ * and no server work is involved. The pipeline is ours rather than
+ * `@livekit/track-processors`' — see `segmentation/glPipeline.ts` for what
+ * theirs does to the mask and why the edges looked the way they did.
  *
  * Split into a hook + a content component on purpose: the hook owns the
  * processor and lives in the control bar, which stays mounted for the whole
@@ -16,10 +18,9 @@ import { Track, type LocalVideoTrack } from 'livekit-client';
 import { useLocalParticipant } from '@livekit/components-react';
 import {
   BackgroundProcessor,
-  supportsBackgroundProcessors,
-  type BackgroundProcessorWrapper,
-  type SwitchBackgroundProcessorOptions,
-} from '@livekit/track-processors';
+  supportsBackgroundEffects,
+  type BackgroundEffectOptions,
+} from './segmentation';
 
 export interface Wallpaper {
   id: string;
@@ -91,7 +92,7 @@ function saveEffect(selection: EffectSelection) {
 }
 
 /** Turns a selection into the processor options the track expects. */
-export function toProcessorOptions(next: EffectSelection): SwitchBackgroundProcessorOptions {
+export function toProcessorOptions(next: EffectSelection): BackgroundEffectOptions {
   if (next.kind === 'none') return { mode: 'disabled' };
   if (next.kind === 'blur') return { mode: 'background-blur', blurRadius: next.radius };
   return {
@@ -115,10 +116,10 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
   );
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);
-  const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
+  const processorRef = useRef<BackgroundProcessor | null>(null);
 
   useEffect(() => {
-    setSupported(supportsBackgroundProcessors());
+    setSupported(supportsBackgroundEffects());
   }, []);
 
   // Keeps the effect attached to whatever camera track is currently live.
@@ -133,7 +134,7 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
     if (!track) return;
 
     if (!processorRef.current) {
-      const processor = BackgroundProcessor(toProcessorOptions(selection) as never);
+      const processor = new BackgroundProcessor(toProcessorOptions(selection));
       processorRef.current = processor;
       track.setProcessor(processor).catch(() => {});
       return;
@@ -168,7 +169,7 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
           if (processorRef.current) {
             await processorRef.current.switchTo(target);
           } else {
-            const processor = BackgroundProcessor(target);
+            const processor = new BackgroundProcessor(target);
             await track.setProcessor(processor);
             processorRef.current = processor;
           }
@@ -202,10 +203,10 @@ export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): Back
   const [selection, setSelection] = useState<EffectSelection>(() => loadSavedEffect() ?? { kind: 'none' });
   const [supported, setSupported] = useState(true);
   const [busy, setBusy] = useState(false);
-  const processorRef = useRef<BackgroundProcessorWrapper | null>(null);
+  const processorRef = useRef<BackgroundProcessor | null>(null);
 
   useEffect(() => {
-    setSupported(supportsBackgroundProcessors());
+    setSupported(supportsBackgroundEffects());
   }, []);
 
   // The preview track is recreated whenever the camera or device changes, so
@@ -213,7 +214,7 @@ export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): Back
   useEffect(() => {
     processorRef.current = null;
     if (!track || selection.kind === 'none') return;
-    const processor = BackgroundProcessor(toProcessorOptions(selection) as never);
+    const processor = new BackgroundProcessor(toProcessorOptions(selection));
     processorRef.current = processor;
     track.setProcessor(processor).catch(() => {});
     // Only re-run for a genuinely new track; selection changes go through select().
@@ -237,7 +238,7 @@ export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): Back
           if (processorRef.current) {
             await processorRef.current.switchTo(target);
           } else {
-            const processor = BackgroundProcessor(target);
+            const processor = new BackgroundProcessor(target);
             await track.setProcessor(processor);
             processorRef.current = processor;
           }

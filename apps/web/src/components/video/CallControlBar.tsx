@@ -251,6 +251,7 @@ export default function CallControlBar({
   const [nativeShell, setNativeShell] = useState(false);
   const [nativeSharing, setSharingState] = useState(getNativeSharing);
   const [nativePending, setNativePending] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   // The share can end from outside this component entirely — the Stop action
   // on the Android notification, or the system cast control — so the button
@@ -291,19 +292,47 @@ export default function CallControlBar({
     // Pending until Android's own "start recording?" dialog is answered —
     // which the user may simply decline, so this cannot assume success.
     setNativePending(true);
+    setShareError(null);
     try {
-      setNativeSharing(await startNativeScreenShare(sessionId));
+      const result = await startNativeScreenShare(sessionId);
+      setNativeSharing(result.started);
+      setShareError(result.message);
     } catch {
       setNativeSharing(false);
+      setShareError("Couldn't start sharing your screen.");
     } finally {
       setNativePending(false);
     }
   };
 
+  // Clears itself: an error about a share the teacher has since started is
+  // worse than no error, and there is no room on a call screen for something
+  // that has to be dismissed by hand.
+  useEffect(() => {
+    if (!shareError) return;
+    const timer = setTimeout(() => setShareError(null), 6000);
+    return () => clearTimeout(timer);
+  }, [shareError]);
+
   const toggleMenu = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
 
   return (
     <>
+      {shareError && (
+        <div
+          role="status"
+          className="fixed inset-x-0 flex justify-center px-4 pointer-events-none"
+          style={{ bottom: 'calc(var(--call-bar-height, 72px) + 12px)', zIndex: 60 }}
+        >
+          <div
+            className="max-w-sm rounded-lg px-3 py-2 text-sm text-center"
+            style={{ background: 'rgba(32,33,36,0.95)', color: '#f28b82', border: '1px solid rgba(242,139,130,0.35)' }}
+          >
+            {shareError}
+          </div>
+        </div>
+      )}
+
       {/* Every control stays on the bar, including on a phone. Hiding one to
           make room is how "the app has no background button" happens — the
           row scrolls sideways instead if it genuinely cannot fit, which on a

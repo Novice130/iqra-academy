@@ -83,6 +83,14 @@ class ScreenShareService : Service() {
             startForeground(NOTIFICATION_ID, notification)
         }
 
+        // Only now is it legal to create a MediaProjection. `startForegroundService`
+        // returns the moment the intent is queued, not when this method has run, so
+        // Dart cannot simply carry on after asking for the service — on Android 14+
+        // creating the projection first throws SecurityException and the share dies
+        // with a dialog the teacher already agreed to. Nothing before this line is
+        // slow; the gap is the process hop, and it is enough to lose the race.
+        onStarted?.invoke()
+
         // Not sticky: if the system kills this, the projection is gone with it
         // and silently restarting a service that captures the screen — with no
         // one having asked for it — is exactly the wrong behaviour.
@@ -117,6 +125,13 @@ class ScreenShareService : Service() {
          * screen from a participant nobody can see.
          */
         var onStopRequested: (() -> Unit)? = null
+
+        /**
+         * Fired once `startForeground` has actually run. MainActivity holds the
+         * Dart call open until then, because the whole ordering rule is that the
+         * projection is created *after* this service is foreground.
+         */
+        var onStarted: (() -> Unit)? = null
 
         fun start(context: Context) {
             val intent = Intent(context, ScreenShareService::class.java)

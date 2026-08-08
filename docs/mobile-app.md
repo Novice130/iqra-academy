@@ -236,12 +236,12 @@ Do not reach for the 6.2.0 betas to dodge this.
 
 ## Still to do
 
-- **Verify screen sharing on a real handset.** Nothing below has run on a
-  phone. Check in this order: the Share button appears on the call screen at
-  all (if not, the UA marker is wrong), Android's dialog offers no "single
-  app" option, the class actually sees the whole screen, the notification's
-  Stop ends the share *and* the publishing participant, and leaving the call
-  tears it down.
+- **Re-verify screen sharing on the 1.2 build.** It *has* run on a handset —
+  that is where "it only shares the app, not the screen" came from. What is
+  unverified is the fix. Check in this order: Android's dialog offers no
+  "single app" option, the class sees the whole screen including other apps,
+  the notification's Stop ends the share *and* the publishing participant, and
+  leaving the call tears it down.
 - Release signing. The release build is currently signed with the debug key,
   which is fine for sideloading and useless for the Play Store. Note this also
   pins the Google sign-in SHA-1 — **back up `~/.android/debug.keystore`.**
@@ -255,9 +255,15 @@ Do not reach for the 6.2.0 betas to dodge this.
 
 ## Screen sharing
 
-Added 2026-08-08. **Unverified on a physical device** — everything below
-compiles, the token is right, and the plumbing is wired, but no handset has
-run it.
+Added 2026-08-08, and run on a real handset the same day.
+
+**What the handset showed: it shared the app, not the screen.** The first build
+(`bd85e6a`) called `requestCapturePermission()` with no arguments, so Android
+14's dialog offered "Share one app" — which is the default selection there —
+and taking it captures only the Novice Tutor window. The class then watches the
+call screen they are already sitting in. `fullScreenOnly: true` landed in
+`535cccd` and removes that option; anyone still seeing app-only capture is on a
+build older than 1.2.
 
 Android's WebView has **no `getDisplayMedia`**. Not blocked, not behind a
 permission — the API is absent, so the browser path the desktop call screen
@@ -299,11 +305,35 @@ Things that are the way they are for a reason:
   Android 14+. The service (`ScreenShareService.kt`) is hand-written rather
   than pulling in `flutter_background`, which exists to run background Dart
   this app never needs.
+- **And Dart waits for the service to actually be foreground.**
+  `startForegroundService` returns as soon as the intent is queued, so the
+  first version carried straight on to create the projection and could lose
+  that race — a SecurityException, and a share that dies after the teacher has
+  already agreed to the dialog. `ScreenShareService.onStarted` fires at the end
+  of `startForeground`, MainActivity holds the method call open until then, and
+  answers `false` after 4s (an Activity in the background cannot start a
+  foreground service at all, and nothing reports that).
+- **Picture-in-picture is suppressed while presenting.** Leaving the app is
+  both the PiP trigger and the entire point of presenting. Shrinking the class
+  into a floating window puts that window *in the capture*, so the students
+  would watch a thumbnail of themselves pinned over the thing they were
+  supposed to be looking at.
+- **Tapping Present while already sharing restarts it.** Android's own cast
+  chip can kill the projection with no callback flutter_webrtc listens for —
+  the track stays published and the class watches a frozen screen. Treating a
+  second tap as "already sharing, nothing to do" left no way out of that.
+- **Failures come back with a reason** (`declined` / `serviceBlocked` /
+  `connectFailed`), and the call screen shows a message above the control bar
+  for the last two. Declining the prompt says nothing, because the teacher who
+  declined it already knows.
 - **The capability is advertised in the user agent**
-  (`NoviceTutorApp/1.1 (screenshare)`), and the web button keys off that
+  (`NoviceTutorApp/1.2 (screenshare)`), and the web button keys off that
   string — *not* off the JS bridge existing. Every build of the shell has a
   bridge, so an older install would otherwise show a button that silently did
-  nothing. **Bump this marker whenever the bridge handlers change.**
+  nothing. **Bump this marker whenever the bridge handlers change.** 1.2 is
+  where `startScreenShare` began answering `{ok, reason}` instead of a bare
+  bool; `nativeScreenShare.ts` still accepts the bool, so a 1.1 install keeps
+  working.
 
 Stopping works from four places, all of which converge on one shared store in
 `nativeScreenShare.ts`: the control bar button, the `Live · sharing your
