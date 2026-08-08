@@ -143,40 +143,210 @@ export default function IncomingCallOverlay() {
   if (!call) return null;
 
   return (
-    <div
-      className="fixed inset-0 z-[100] flex flex-col items-center justify-center gap-6 p-6"
-      style={{ background: "rgba(10, 12, 16, 0.92)", backdropFilter: "blur(6px)" }}
-    >
-      <div
-        className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-bold text-white animate-pulse"
-        style={{ background: "var(--accent)" }}
-      >
-        {call.callerName.charAt(0).toUpperCase()}
-      </div>
-      <div className="text-center">
-        <div className="text-lg font-semibold text-white">{call.callerName}</div>
-        <div className="text-sm text-slate-400 mt-1">is calling you…</div>
-      </div>
-      <div className="flex items-center gap-4 mt-4">
-        <button
-          onClick={decline}
-          disabled={responding}
-          className="w-14 h-14 rounded-full flex items-center justify-center text-white cursor-pointer disabled:opacity-50"
-          style={{ background: "#ef4444" }}
-          aria-label="Decline"
-        >
-          ✕
-        </button>
-        <button
-          onClick={accept}
-          disabled={responding}
-          className="w-14 h-14 rounded-full flex items-center justify-center text-white cursor-pointer disabled:opacity-50"
-          style={{ background: "#22c55e" }}
-          aria-label="Accept"
-        >
-          ✓
-        </button>
+    <div style={styles.screen}>
+      <style>{keyframes}</style>
+
+      {/* The column is capped and centred rather than filling the viewport.
+          Full-bleed is right on a phone and wrong on a 27" monitor, where it
+          strands the buttons half a screen away from the name. */}
+      <div style={styles.panel}>
+        {/* Caller block sits in the upper half, as it does on a phone: the
+            bottom belongs to the buttons, and a thumb should never have to
+            travel past the name to reach them. */}
+        <div style={styles.callerBlock}>
+          <div style={styles.avatar}>{call.callerName.charAt(0).toUpperCase()}</div>
+          <div style={styles.name}>{call.callerName}</div>
+          <div style={styles.subtitle}>Novice Tutor video…</div>
+        </div>
+
+        <div style={styles.actions}>
+          <CallButton
+            onClick={decline}
+            disabled={responding}
+            label="Decline"
+            color="#FF3B30"
+            icon={<EndCallIcon />}
+          />
+          <CallButton
+            onClick={accept}
+            disabled={responding}
+            label="Accept"
+            color="#34C759"
+            icon={<CallIcon />}
+            nudge
+          />
+        </div>
       </div>
     </div>
   );
 }
+
+/**
+ * One of the two round buttons, with its label underneath.
+ *
+ * The label is not decoration. A bare red circle and a bare green circle rely
+ * entirely on colour to say which is which, which fails for the ~8% of men
+ * with red-green colour blindness — and on a ringing phone there is no time to
+ * work it out.
+ */
+function CallButton({
+  onClick,
+  disabled,
+  label,
+  color,
+  icon,
+  nudge = false,
+}: {
+  onClick: () => void;
+  disabled: boolean;
+  label: string;
+  color: string;
+  icon: React.ReactNode;
+  nudge?: boolean;
+}) {
+  return (
+    <div style={styles.action}>
+      <button
+        onClick={onClick}
+        disabled={disabled}
+        aria-label={label}
+        className={nudge ? "nt-ring-nudge" : undefined}
+        style={{
+          ...styles.button,
+          background: color,
+          opacity: disabled ? 0.5 : 1,
+        }}
+      >
+        {icon}
+      </button>
+      <span style={styles.actionLabel}>{label}</span>
+    </div>
+  );
+}
+
+function CallIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+    </svg>
+  );
+}
+
+/** The same handset, rotated — how every phone has drawn "hang up" for years. */
+function EndCallIcon() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+    </svg>
+  );
+}
+
+/* Answer hops every couple of seconds — the same cue a phone gives that the
+   call is live and waiting, and the thing that tells the two buttons apart at
+   a glance without reading either of them. */
+const keyframes = `
+@keyframes nt-ring-nudge {
+  0%, 62%, 100% { transform: translateY(0); }
+  70% { transform: translateY(-7px); }
+  82% { transform: translateY(0); }
+  90% { transform: translateY(-3px); }
+}
+.nt-ring-nudge { animation: nt-ring-nudge 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .nt-ring-nudge { animation: none; }
+}
+`;
+
+/**
+ * Inline styles rather than utility classes throughout: this screen has to
+ * render correctly the first time on a phone that is ringing, and a class that
+ * fails to apply here is a call nobody can answer.
+ */
+const styles: Record<string, React.CSSProperties> = {
+  screen: {
+    position: "fixed",
+    inset: 0,
+    zIndex: 100,
+    display: "flex",
+    justifyContent: "center",
+    background: "linear-gradient(180deg, #1c1f26 0%, #0a0c10 100%)",
+    // Keeps the buttons clear of the home indicator and the notch.
+    padding: "calc(env(safe-area-inset-top, 0px) + 12vh) 24px calc(env(safe-area-inset-bottom, 0px) + 48px)",
+    userSelect: "none",
+  },
+  panel: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "space-between",
+    width: "100%",
+    maxWidth: 420,
+    // On a phone this is simply the screen. On a desktop it stops the two
+    // halves drifting apart.
+    maxHeight: 460,
+    height: "100%",
+    margin: "auto 0",
+  },
+  callerBlock: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    textAlign: "center",
+  },
+  avatar: {
+    width: 112,
+    height: 112,
+    borderRadius: "50%",
+    background: "rgba(255, 255, 255, 0.14)",
+    display: "grid",
+    placeItems: "center",
+    fontSize: 44,
+    fontWeight: 300,
+    color: "rgba(255, 255, 255, 0.92)",
+    marginBottom: 28,
+  },
+  name: {
+    // Big and light, the way a phone announces a caller — the name is the one
+    // thing that has to be readable at arm's length.
+    fontSize: 34,
+    lineHeight: 1.15,
+    fontWeight: 400,
+    color: "#fff",
+    letterSpacing: "-0.01em",
+  },
+  subtitle: {
+    fontSize: 17,
+    marginTop: 8,
+    color: "rgba(255, 255, 255, 0.6)",
+  },
+  actions: {
+    display: "flex",
+    // Pushed apart rather than sat side by side, so Decline is never a
+    // mis-tap away from Accept.
+    justifyContent: "space-between",
+    width: "100%",
+    maxWidth: 340,
+  },
+  action: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 10,
+  },
+  button: {
+    width: 76,
+    height: 76,
+    borderRadius: "50%",
+    border: 0,
+    display: "grid",
+    placeItems: "center",
+    color: "#fff",
+    cursor: "pointer",
+    padding: 0,
+    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
+  },
+  actionLabel: {
+    fontSize: 14,
+    color: "rgba(255, 255, 255, 0.85)",
+  },
+};

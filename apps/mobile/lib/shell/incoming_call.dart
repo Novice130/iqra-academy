@@ -76,7 +76,10 @@ class CallService {
         isShowLogo: false,
         ringtonePath: 'system_ringtone_default',
         backgroundColor: '#0A0A0A',
-        actionColor: '#10B981',
+        // The call colours, not the brand's emerald: this screen is competing
+        // with every other phone call the student has ever answered, and the
+        // web and desktop ring screens now use the same two.
+        actionColor: '#34C759',
         // Draws over the lock screen — the whole point.
         isShowFullLockedScreen: true,
       ),

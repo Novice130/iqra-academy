@@ -27,23 +27,25 @@
         overflow: hidden;
       }
       .avatar {
-        width: 84px;
-        height: 84px;
+        width: 96px;
+        height: 96px;
         border-radius: 50%;
-        background: #2a2d33;
+        background: rgba(255, 255, 255, 0.14);
         display: grid;
         place-items: center;
-        font-size: 30px;
-        font-weight: 600;
-        color: #8ab4f8;
+        font-size: 38px;
+        /* Light, like a phone's own call screen — a bold initial in a small
+           circle reads as a badge, not as a person. */
+        font-weight: 300;
+        color: rgba(255, 255, 255, 0.92);
       }
       /* Two rings, offset, so there is always one mid-flight. */
       .pulse, .pulse::after {
         position: absolute;
-        width: 84px;
-        height: 84px;
+        width: 96px;
+        height: 96px;
         border-radius: 50%;
-        border: 2px solid rgba(138, 180, 248, 0.5);
+        border: 2px solid rgba(255, 255, 255, 0.28);
         animation: pulse 1.8s ease-out infinite;
       }
       .pulse::after { content: ''; inset: -2px; animation-delay: 0.9s; }
@@ -52,26 +54,50 @@
         to { transform: scale(1.7); opacity: 0; }
       }
       .avatar-wrap { position: relative; display: grid; place-items: center; }
-      .caller { font-size: 19px; font-weight: 600; text-align: center; }
-      .sub { font-size: 13px; color: rgba(232, 234, 237, 0.55); margin-top: -10px; }
-      .actions { display: flex; gap: 14px; margin-top: 6px; -webkit-app-region: no-drag; }
+      .caller { font-size: 26px; font-weight: 400; text-align: center; letter-spacing: -0.01em; }
+      .sub { font-size: 14px; color: rgba(232, 234, 237, 0.6); margin-top: -12px; }
+      .actions {
+        display: flex;
+        /* Apart, not adjacent: Decline should never be a slipped click away
+           from Accept. */
+        justify-content: space-between;
+        width: 100%;
+        max-width: 260px;
+        margin-top: 4px;
+        -webkit-app-region: no-drag;
+      }
+      .action { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+      .action span { font-size: 13px; color: rgba(232, 234, 237, 0.85); }
       button {
         appearance: none;
         border: 0;
         font: inherit;
-        font-size: 14px;
-        font-weight: 600;
         color: #fff;
-        border-radius: 999px;
-        padding: 12px 26px;
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
+        display: grid;
+        place-items: center;
+        padding: 0;
         cursor: pointer;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        transition: filter 0.15s ease;
       }
-      .accept { background: #1e8e3e; }
-      .accept:hover { background: #23a349; }
-      .decline { background: #d93025; }
-      .decline:hover { background: #e8483c; }
+      button:hover { filter: brightness(1.12); }
+      button svg { width: 28px; height: 28px; fill: currentColor; }
+      /* Apple's own call colours — the two everyone already reads without
+         thinking. */
+      .accept { background: #34c759; animation: nudge 1.6s ease-in-out infinite; }
+      .decline { background: #ff3b30; }
+      @keyframes nudge {
+        0%, 62%, 100% { transform: translateY(0); }
+        70% { transform: translateY(-6px); }
+        82% { transform: translateY(0); }
+        90% { transform: translateY(-3px); }
+      }
       @media (prefers-reduced-motion: reduce) {
         .pulse, .pulse::after { animation: none; opacity: 0; }
+        .accept { animation: none; }
       }
     </style>
   </head>
@@ -83,8 +109,22 @@
     <div class="caller" id="caller">Incoming call</div>
     <div class="sub">Novice Tutor</div>
     <div class="actions">
-      <button class="decline" id="decline">Decline</button>
-      <button class="accept" id="accept">Join</button>
+      <div class="action">
+        <button class="decline" id="decline" aria-label="Decline">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 9c-1.6 0-3.15.25-4.6.72v3.1c0 .39-.23.74-.56.9-.98.49-1.87 1.12-2.66 1.85-.18.18-.43.28-.7.28-.28 0-.53-.11-.71-.29L.29 13.08c-.18-.17-.29-.42-.29-.7 0-.28.11-.53.29-.71C3.34 8.78 7.46 7 12 7s8.66 1.78 11.71 4.67c.18.18.29.43.29.71 0 .28-.11.53-.29.71l-2.48 2.48c-.18.18-.43.29-.71.29-.27 0-.52-.11-.7-.28-.79-.74-1.69-1.36-2.67-1.85-.33-.16-.56-.51-.56-.9v-3.1C15.15 9.25 13.6 9 12 9z" />
+          </svg>
+        </button>
+        <span>Decline</span>
+      </div>
+      <div class="action">
+        <button class="accept" id="accept" aria-label="Join">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
+          </svg>
+        </button>
+        <span>Join</span>
+      </div>
     </div>
     <script src="ring.js"></script>
   </body>
