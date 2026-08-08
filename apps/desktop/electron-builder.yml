@@ -18,10 +18,20 @@ win:
     - target: nsis
       arch: [x64]
   icon: resources/icon.png
-  # Unsigned. Windows SmartScreen will warn on first run until there is a
-  # code-signing certificate — expected for sideloading, and the same position
-  # the Android APK is in with its debug key.
   signAndEditExecutable: true
+  # Signing is opt-in through the environment so an unsigned build still works
+  # for sideloading. With nothing set, electron-builder skips signing and
+  # SmartScreen shows its "Windows protected your PC" page on first run.
+  #
+  # Two supported routes, both documented in docs/desktop-app.md:
+  #   - Azure Trusted Signing: set AZURE_* and uncomment azureSignOptions.
+  #   - A certificate on a hardware token: CSC_LINK + CSC_KEY_PASSWORD.
+  # A plain .pfx on disk is no longer an option for a publicly trusted cert —
+  # since June 2023 the private key has to live on FIPS 140-2 Level 2 hardware.
+  # azureSignOptions:
+  #   endpoint: https://weu.codesigning.azure.net
+  #   certificateProfileName: novicetutor
+  #   codeSigningAccountName: novicetutor
 
 nsis:
   # A real installer with a directory choice, not a one-click that drops the
@@ -38,10 +48,38 @@ nsis:
 
 mac:
   target:
-    - target: dir
-      arch: [arm64]
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
   icon: resources/icon.png
   category: public.app-category.education
+  # Required by Apple's notary service, and required for the entitlements
+  # below to mean anything. Without it notarisation is rejected outright.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: entitlements.mac.plist
+  entitlementsInherit: entitlements.mac.plist
+  extendInfo:
+    # macOS refuses camera and microphone access to an app that has not said
+    # why it wants them — the request fails with no prompt, which on the call
+    # screen looks like the buttons doing nothing.
+    NSCameraUsageDescription: Novice Tutor uses your camera so your teacher and classmates can see you during a class.
+    NSMicrophoneUsageDescription: Novice Tutor uses your microphone so you can be heard during a class.
+    # Screen capture cannot be granted by an entitlement — the user allows it
+    # once in System Settings — but the string is what the prompt shows.
+    NSScreenCaptureUsageDescription: Novice Tutor shares your screen with your class when you choose to present.
+
+dmg:
+  # The drag-to-Applications window everyone recognises.
+  contents:
+    - x: 140
+      y: 190
+      type: file
+    - x: 400
+      y: 190
+      type: link
+      path: /Applications
 
 # Nothing publishes itself. Builds are uploaded by hand, the same way the APKs
 # are — see docs/desktop-app.md.

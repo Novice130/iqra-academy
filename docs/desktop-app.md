@@ -1,8 +1,15 @@
-# Desktop app (Windows)
+# Desktop app (Windows and macOS)
 
 Added 2026-08-08. `apps/desktop` — an Electron shell around novicetutor.com,
 the same bet as the Android app: the web app already has every screen, and the
 shell only does what a browser tab cannot.
+
+One codebase, both platforms. The macOS build is a universal binary (Intel and
+Apple Silicon in one bundle) shipped as a `.dmg`; Windows is an NSIS installer.
+The platform differences are small and all of them are marked in the code:
+system audio on screen share is Windows-only, the tray's start-at-login entry
+is hidden on macOS (login items belong in System Settings), and screen
+recording needs a permission on macOS that Windows does not have.
 
 ## Why Electron and not Tauri
 
@@ -53,6 +60,8 @@ apps/desktop/
   src/preload/             contextBridge APIs (index / picker / ring)
   src/renderer/            picker.html and ring.html, plain HTML+JS
   resources/               icons, rendered from apps/web/public/logo.svg
+  entitlements.mac.plist   hardened-runtime entitlements, for notarising
+  electron-builder.yml     packaging for both platforms
 ```
 
 ## What the shell adds
@@ -101,24 +110,98 @@ The user agent carries `NoviceTutorDesktop/1.0`. As with the Android shell,
 **features key off the version marker, not off the bridge existing** — every
 build has a bridge, and that is how you ship a button that does nothing.
 
-## Building the installer
+## Building
 
-Requires a Windows machine; there is no wine on the Mac this was written on.
+Each platform builds on itself. Cross-building the Windows installer from
+macOS needs wine, which is not installed here.
 
 ```sh
 cd apps/desktop
 npm install
-npm run dist:win     # -> apps/desktop/release/Novice Tutor Setup <version>.exe
+
+npm run dist:win     # -> release/Novice Tutor Setup <version>.exe   (on Windows)
+npm run dist:mac     # -> release/Novice Tutor-<version>-universal.dmg
+npm run dist:dir     # unpackaged, for a quick check
 ```
 
-NSIS, per-user (no admin prompt), with a directory choice. **Unsigned** —
-SmartScreen will warn on first run until there is a code-signing certificate,
-the same position the Android APK is in with its debug key.
+Windows is NSIS, per-user (no admin prompt), with a directory choice. macOS is
+a universal `.dmg` plus a `.zip`.
 
-`npm run dist:dir` packages without an installer, for a quick check.
 **`electron` must be pinned to an exact version** in `package.json`:
-electron-builder resolves the binary itself and refuses a range, which in this
-hoisted monorepo it cannot resolve from `node_modules` either.
+electron-builder resolves the binary itself, refuses a range, and in this
+hoisted monorepo cannot fall back to reading `node_modules` either.
+
+`dist:mac` and `dist:dir` force `CSC_IDENTITY_AUTO_DISCOVERY=false`. Without
+it electron-builder finds whatever identity is in the local keychain and signs
+with it — on this machine an *Apple Development* certificate, which is for
+running on your own hardware and is not distributable. An unsigned build is
+the honest artefact for testing.
+
+## Signing, and the warning users see
+
+Neither platform trusts an unsigned app, and each complains differently.
+
+### Windows — the blue "Windows protected your PC" page
+
+That is **SmartScreen**, not a blue screen of death; the app is fine, Windows
+just has no idea who published it. It goes away by signing the installer with
+an Authenticode certificate — and, importantly, by that certificate building
+up reputation.
+
+Since June 2023 the private key for any publicly trusted code-signing
+certificate must live on FIPS 140-2 Level 2 hardware. **A `.pfx` file on disk
+is no longer an option.** Three routes, cheapest first:
+
+- **Azure Trusted Signing** — Microsoft's own service, roughly $10/month, no
+  hardware token to post around because the key lives in their HSM. Identity
+  has to be validated, and organisations have historically needed to have
+  existed for three years; individual accounts also exist. electron-builder
+  supports it directly — uncomment `win.azureSignOptions` in
+  `electron-builder.yml` and set the `AZURE_*` credentials. This is the route
+  to try first.
+- **An OV certificate** (Sectigo, Certum, SSL.com), roughly $200–400/year on a
+  USB token or cloud HSM. Signs fine, but SmartScreen reputation is earned per
+  certificate over downloads and time, so **early users still see the warning**.
+- **An EV certificate**, roughly $400–700/year. The one that buys immediate
+  SmartScreen reputation — no warning from the first download. If the warning
+  is the actual problem, this is what solves it outright.
+
+With a token or HSM configured, set `CSC_LINK` and `CSC_KEY_PASSWORD` and
+electron-builder signs during `dist:win`.
+
+Verify the numbers before buying: prices and the identity rules move.
+
+### macOS — "Apple could not verify this app is free of malware"
+
+Gatekeeper. The fix is two steps, not one, and both need an **Apple Developer
+Program membership at $99/year**:
+
+1. **Sign** with a *Developer ID Application* certificate. Note this is not the
+   *Apple Development* certificate that comes free with an Apple ID — that one
+   only runs on your own machines, and it is what the local keychain here
+   already holds.
+2. **Notarise**: upload the signed app to Apple's notary service, which scans
+   it and issues a ticket, then staple the ticket to the `.dmg` so it validates
+   offline.
+
+Once the certificate is in the keychain:
+
+```sh
+export APPLE_ID="you@example.com"
+export APPLE_APP_SPECIFIC_PASSWORD="xxxx-xxxx-xxxx-xxxx"   # appleid.apple.com
+export APPLE_TEAM_ID="XXXXXXXXXX"
+npm run dist:mac:signed
+```
+
+The app is already prepared for this and it is the part that is easy to get
+wrong: `hardenedRuntime` is on (notarisation rejects builds without it), and
+`entitlements.mac.plist` asks back for the camera, the microphone, and
+V8's JIT. Miss the JIT entitlements and a signed build crashes on launch;
+miss the media ones and the call screen's buttons look dead, because the
+permission request fails without ever prompting.
+
+Until it is signed, users can still open it — right-click the app, choose
+Open, then Open again — but nobody should be told to do that routinely.
 
 ## Running it locally
 
@@ -142,9 +225,10 @@ port and report no windows.
 
 - **Auto-update.** electron-updater against a generic feed would work, and R2
   already serves the APKs, so the hosting is solved. Updating is manual today.
-- **Code signing**, hence the SmartScreen warning.
-- **macOS as a shipped target.** The build config produces an unpackaged `.app`
-  for testing only; it is signed with a local development identity and not
-  notarised, so it will not open cleanly on anyone else's Mac.
+- **Code signing on either platform** — see above for what it costs and which
+  certificate actually removes the SmartScreen warning.
+- **Screen recording permission on macOS is prompted for but not testable
+  here.** The app detects the refusal and opens the right settings pane; it
+  has not been exercised on a Mac that had the permission switched off.
 - **A custom title bar.** The OS frame is kept — the web app has its own header
   and a frameless window would mean rebuilding window controls.

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Hardened Runtime entitlements.
+
+  The hardened runtime is required for notarisation, and it switches off a
+  handful of things by default — including the camera and the microphone. An
+  app that does not ask for them back gets no permission prompt at all: the
+  request simply fails, which on the call screen looks like the buttons being
+  dead rather than like a permissions problem.
+
+  Everything here is the minimum the call screen needs. Nothing is added "just
+  in case" — each entitlement is something Apple asks about, and an unused one
+  is a question with no good answer.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+
+    <!--
+      Electron's own requirement. V8 generates and executes machine code at
+      runtime, which the hardened runtime forbids by default; without this the
+      app crashes on launch once signed.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!--
+      Screen sharing is NOT granted here. macOS has no entitlement for screen
+      recording — the user allows it once in System Settings > Privacy &
+      Security, and the app can only detect the refusal and point them there
+      (see screenShare.ts).
+    -->
+  </dict>
+</plist>

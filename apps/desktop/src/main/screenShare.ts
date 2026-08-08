@@ -13,7 +13,16 @@
  * screen-sharing mistake nobody recovers from gracefully.
  */
 
-import { BrowserWindow, desktopCapturer, ipcMain, session, screen } from 'electron';
+import {
+  BrowserWindow,
+  desktopCapturer,
+  dialog,
+  ipcMain,
+  screen,
+  session,
+  shell,
+  systemPreferences,
+} from 'electron';
 import path from 'node:path';
 
 interface PickerSource {
@@ -32,6 +41,11 @@ export function registerScreenShare() {
   session.defaultSession.setDisplayMediaRequestHandler(
     async (request, callback) => {
       try {
+        if (!(await ensureScreenAccess())) {
+          callback({});
+          return;
+        }
+
         const choice = await openPicker();
         if (!choice) {
           // Electron has no "user cancelled" signal; an empty callback is it,
@@ -72,6 +86,39 @@ export function registerScreenShare() {
   ipcMain.on('screen-share:choose', (_event, choice: { id: string; withAudio: boolean } | null) => {
     resolvePicker(choice);
   });
+}
+
+/**
+ * macOS only: screen recording is a system permission with no API to request.
+ *
+ * There is no entitlement for it and no prompt we can raise — `getSources`
+ * just returns a list with nothing usable in it, so the picker opens empty and
+ * the teacher concludes the feature is broken. Better to say what is wrong and
+ * open the right settings pane. Windows needs none of this.
+ *
+ * The permission is read at process start, so it does not take effect until
+ * the app is relaunched — hence the wording.
+ */
+async function ensureScreenAccess(): Promise<boolean> {
+  if (process.platform !== 'darwin') return true;
+  if (systemPreferences.getMediaAccessStatus('screen') === 'granted') return true;
+
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Open Settings', 'Not now'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'Novice Tutor needs permission to share your screen',
+    detail:
+      'macOS asks for this once, in Privacy & Security. Turn on Screen Recording for Novice Tutor, then quit and reopen the app.',
+  });
+
+  if (response === 0) {
+    shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+    );
+  }
+  return false;
 }
 
 /** Thumbnails big enough to recognise a window by, small enough to send over IPC. */

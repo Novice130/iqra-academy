@@ -2,7 +2,7 @@
   "name": "desktop",
   "productName": "Novice Tutor",
   "version": "1.0.0",
-  "description": "Novice Tutor for Windows",
+  "description": "Novice Tutor for Windows and macOS",
   "private": true,
   "main": "dist/main/index.js",
   "author": "Novice Tutor",
@@ -11,8 +11,10 @@
     "start": "npm run build && electron .",
     "dev": "npm run build && cross-env NT_APP_URL=http://localhost:3005 electron .",
     "dist:win": "npm run build && electron-builder --win --publish never",
-    "dist:dir": "npm run build && electron-builder --dir --publish never",
-    "lint": "tsc -p tsconfig.json --noEmit"
+    "dist:dir": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --dir --publish never",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "dist:mac": "npm run build && cross-env CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --publish never",
+    "dist:mac:signed": "npm run build && electron-builder --mac -c.mac.notarize=true --publish never"
   },
   "devDependencies": {
     "@types/node": "^25.2.3",
