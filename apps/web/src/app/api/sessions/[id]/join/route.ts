@@ -181,6 +181,47 @@ export async function GET(
       const isAttending = isOwningTeacher || isStudent;
       const shouldMarkStarted = isAttending && session.status === "SCHEDULED";
 
+      /**
+       * Close this person's previous connection before handing out a new one.
+       *
+       * Identities are `email#random` (see lib/livekit.ts), unique per
+       * connection, so LiveKit's own duplicate-identity eviction never fires
+       * and the same human can end up in the room twice. That is not
+       * hypothetical: a student got the "class has started" notification,
+       * tapped it, then the teacher rang them, and tapping Join put a second
+       * copy of him in the class. Two tiles, two microphones in one room —
+       * which is also an echo.
+       *
+       * The likeliest cause is not two live windows but one: navigating the
+       * WebView from the notification's page to the call's page tears the old
+       * page down without LiveKit always getting a clean leave, and the ghost
+       * lingers until the server times it out.
+       *
+       * The screen publisher is deliberately spared. It shares the same email
+       * prefix but is a separate, intentional connection — removing it here
+       * would mean a teacher who rejoins kills their own screen share.
+       */
+      const dropStaleConnections = async () => {
+        const email = user?.email;
+        if (!email) return;
+        try {
+          const svc = getRoomServiceClient();
+          const participants = await svc.listParticipants(roomName);
+          await Promise.all(
+            participants
+              .filter((p) => p.identity.startsWith(`${email}#`) && !p.identity.includes("#screen-"))
+              .map((p) => svc.removeParticipant(roomName, p.identity).catch(() => {}))
+          );
+        } catch {
+          // Best-effort. A duplicate tile is worse than this failing, but not
+          // worse than refusing to let someone into their own class.
+        }
+      };
+
+      // Before the token, not alongside it: the removal has to land before
+      // the client reconnects, or it races and can evict the new connection.
+      if (isAttending) await dropStaleConnections();
+
       const [token] = await Promise.all([
         generateLiveKitToken({
           roomName,

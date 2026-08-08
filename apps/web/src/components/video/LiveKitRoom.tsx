@@ -26,6 +26,37 @@ function ApplyAudioOutput({ deviceId }: { deviceId?: string }) {
 }
 
 /**
+ * Hands the connection back when the page goes away.
+ *
+ * Without this the page just vanishes and the server keeps the participant
+ * until it times them out. That ghost is how one student ended up in a class
+ * twice: he tapped the "class has started" notification, the teacher then
+ * rang him, and tapping Join navigated the same WebView to the call — the
+ * first connection was still counted, so the room showed two of him, with two
+ * live microphones in one room.
+ *
+ * Identities are unique per connection (`email#random`, see lib/livekit.ts),
+ * so LiveKit's own duplicate eviction cannot catch this. The join API sweeps
+ * up stale connections as a backstop; this stops most of them existing.
+ *
+ * `pagehide` rather than `beforeunload`: mobile Safari and Android WebViews
+ * frequently skip the latter.
+ */
+function LeaveOnPageHide() {
+  const room = useRoomContext();
+  useEffect(() => {
+    const leave = () => {
+      // stopTracks so the camera light goes out immediately rather than
+      // whenever the torn-down page is finally collected.
+      room.disconnect(true).catch(() => {});
+    };
+    window.addEventListener('pagehide', leave);
+    return () => window.removeEventListener('pagehide', leave);
+  }, [room]);
+  return null;
+}
+
+/**
  * Keeps the screen awake for the duration of the call — otherwise the OS's
  * normal auto-lock timeout kills the screen mid-class, unlike Zoom/Meet/
  * WhatsApp which all hold a wake lock while a call is active. The lock is
@@ -157,6 +188,7 @@ export default function LiveKitRoom({
       onDisconnected={handleDisconnected}
     >
       <ApplyAudioOutput deviceId={choices.audioOutputDeviceId} />
+      <LeaveOnPageHide />
       <CustomVideoConference
         isModerator={isModerator}
         sessionId={sessionId}
