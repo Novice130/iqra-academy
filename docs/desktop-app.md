@@ -135,6 +135,12 @@ npm run dist:dir     # unpackaged, for a quick check
 Windows is NSIS, per-user (no admin prompt), with a directory choice. macOS is
 a universal `.dmg` plus a `.zip`.
 
+**Getting a build to users is a separate step, and none of it is in git** —
+see [publishing-builds.md](publishing-builds.md) for the exact commands,
+including the Windows one that has to be run on the Windows machine. The
+short version: the installers go to the R2 bucket `novicetutor-app`, and the
+download page picks them up with no deploy.
+
 **`electron` must be pinned to an exact version** in `package.json`:
 electron-builder resolves the binary itself, refuses a range, and in this
 hoisted monorepo cannot fall back to reading `node_modules` either.

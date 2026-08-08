@@ -115,6 +115,10 @@ npx wrangler r2 object put novicetutor-app/novice-tutor-arm32.apk \
 `--remote` is not optional. Without it wrangler writes to a local simulated
 bucket and cheerfully reports success.
 
+The same bucket now holds the desktop installers, and the download page lists
+every platform. Full runbook, including the Windows build that has to be made
+and uploaded from the Windows machine: [publishing-builds.md](publishing-builds.md).
+
 Serving is `apps/web/src/app/api/app-download/[file]/route.ts`, over the
 `APP_DOWNLOADS` binding in `wrangler.json`. It hands `object.body` straight to
 the `Response` and allow-lists the two filenames. **Never buffer the object** —
