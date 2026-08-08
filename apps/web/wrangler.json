@@ -8,6 +8,17 @@
     "binding": "ASSETS",
     "directory": ".open-next/assets"
   },
+  // The Android APKs. They cannot live in `assets/` — a single static asset
+  // is capped at 25 MiB and the arm64 build passed that the moment screen
+  // sharing added WebRTC's native libraries. They are streamed out of R2 by
+  // /api/app-download/[file] instead, so the download URLs stay on the app's
+  // own domain and the bucket stays private.
+  "r2_buckets": [
+    {
+      "binding": "APP_DOWNLOADS",
+      "bucket_name": "novicetutor-app"
+    }
+  ],
   // Workers Logs. Without this an "exceeded resource limits" (1102) burst
   // leaves nothing behind but request counts in analytics — the August 6/7
   // outages had to be traced by guessing at paths. Sampling stays at 1 so a

@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 };
 
 const VERSION = "1.0.0";
-const SIZE = "18 MB";
+const SIZE = "32 MB";
 
 export default function AppDownloadPage() {
   return (
@@ -50,7 +50,7 @@ export default function AppDownloadPage() {
         </p>
 
         <a
-          href="/app/novice-tutor.apk"
+          href="/api/app-download/novice-tutor.apk"
           download
           className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 rounded-full font-semibold text-white transition-opacity hover:opacity-90"
           style={{ background: "var(--color-charcoal)" }}
@@ -107,7 +107,7 @@ export default function AppDownloadPage() {
             </h2>
             <p className="text-[var(--color-gray)] leading-relaxed">
               Very old phones need a different build. Try the{" "}
-              <a href="/app/novice-tutor-arm32.apk" download className="underline">
+              <a href="/api/app-download/novice-tutor-arm32.apk" download className="underline">
                 32-bit version
               </a>{" "}
               instead. If neither works, message us and keep using the website

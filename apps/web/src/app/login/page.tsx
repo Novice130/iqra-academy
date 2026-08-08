@@ -5,7 +5,7 @@
  * Email + password, Google Sign-In, minimal visual noise.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
@@ -16,6 +16,26 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Someone who is already signed in has no business seeing this form. They
+  // reach it by pressing Back after logging in — this page stays in history
+  // because the sign-in above navigates with `window.location.href` — and a
+  // login form appearing is indistinguishable from having been logged out.
+  // In the Android app, where Back is a hardware button, it read as the app
+  // signing people out on its own. `replace`, not `push`: putting the login
+  // page back on the stack is the whole problem.
+  useEffect(() => {
+    let cancelled = false;
+    authClient.getSession().then(({ data }) => {
+      if (!cancelled && data?.session) router.replace("/dashboard");
+    }).catch(() => {
+      // Offline or the session endpoint is unhappy — show the form. Being
+      // asked to log in again is a far better failure than a blank page.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();

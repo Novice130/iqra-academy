@@ -30,17 +30,31 @@ function patchStyledJsx() {
   return patched;
 }
 
-// The Android APKs are deliberately NOT in git — they are 33MB of build output
-// and would grow the repo by that much on every release. They live in
-// public/app/ and get picked up as static assets at build time. Warn loudly if
-// they are missing, because the failure mode otherwise is a 404 on
-// /app/novice-tutor.apk that nobody notices until a student tries to install.
-for (const apk of ["novice-tutor.apk", "novice-tutor-arm32.apk"]) {
-  if (!fs.existsSync(path.join(root, "public", "app", apk))) {
-    console.warn(
-      `⚠️  public/app/${apk} is missing — /app/download will 404 for it.\n` +
-        `   Rebuild it (see docs/mobile-app.md) and copy it there before deploying.`
-    );
+// The Android APKs used to live in public/app/ and ship as static assets.
+// They don't any more: a single static asset is capped at 25 MiB, and the
+// arm64 build passed that when screen sharing pulled in WebRTC's native
+// libraries (18.9 MB -> 32.1 MB). Leaving them there failed the whole deploy
+// with `Error: Asset too large.`
+//
+// They live in the `novicetutor-app` R2 bucket now and are streamed by
+// /api/app-download/[file]. Publishing a new build is an upload, not a copy:
+//
+//   npx wrangler r2 object put novicetutor-app/novice-tutor.apk \
+//     --file apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+//     --content-type application/vnd.android.package-archive --remote
+//
+// A stale copy left behind in public/app/ would break the deploy exactly the
+// way it did before, so say so rather than letting the build get that far.
+{
+  const staleDir = path.join(root, "public", "app");
+  if (fs.existsSync(staleDir)) {
+    const stale = fs.readdirSync(staleDir).filter((f) => f.endsWith(".apk"));
+    if (stale.length) {
+      console.warn(
+        `⚠️  public/app/ still holds ${stale.join(", ")} — APKs are served from R2 now.\n` +
+          `   Delete them, or a build over 25 MiB will fail the deploy with "Asset too large".`
+      );
+    }
   }
 }
 

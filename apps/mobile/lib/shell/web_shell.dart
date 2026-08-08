@@ -175,6 +175,31 @@ class _WebShellState extends State<WebShell> {
     await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
+  static bool _isAuthPath(String path) =>
+      path == '/login' || path == '/register' || path.startsWith('/reset-password');
+
+  /// Drops the login page out of the WebView's history once the user is past
+  /// it.
+  ///
+  /// Signing in navigates with `window.location.href`, so `/login` stays on
+  /// the stack. Pressing Back then put the login form back on screen, which
+  /// is indistinguishable from having been signed out — and with Back being
+  /// a hardware button, it looked like the app logging people out by itself.
+  ///
+  /// Clearing history means Back from the dashboard leaves the app, which is
+  /// what every other Android app does from its home screen.
+  Future<void> _dropAuthHistory(InAppWebViewController c, WebUri? url) async {
+    if (url == null || _isAuthPath(url.path)) return;
+
+    final history = await c.getCopyBackForwardList();
+    final entries = history?.list ?? [];
+    final hasAuthBehind = entries.any((e) {
+      final p = e.url?.path;
+      return p != null && _isAuthPath(p);
+    });
+    if (hasAuthBehind) await c.clearHistory();
+  }
+
   Future<bool> _handleBack() async {
     final c = _controller;
     if (c != null && await c.canGoBack()) {
@@ -271,6 +296,7 @@ class _WebShellState extends State<WebShell> {
           onLoadStop: (controller, url) async {
             _refresh?.endRefreshing();
             _updatePipEligibility(url);
+            await _dropAuthHistory(controller, url);
             if (!_firstLoadDone) {
               setState(() => _firstLoadDone = true);
               // A notification tapped while the app was terminated.

@@ -10,9 +10,11 @@
 
 import { useEffect, useState } from 'react';
 
-// 6s, not 4: a knock at the door tolerates a couple of seconds, and this is
-// the one poll that runs continuously for every host for a whole class.
-const POLL_INTERVAL_MS = 6000;
+// 10s, not 4: this is the one poll that runs continuously for every host for
+// the whole length of a class, and it was the top source of the requests that
+// put the worker over its memory limit. A guest waiting ten seconds at the
+// door is a fair trade for the class not going down.
+const POLL_INTERVAL_MS = 10000;
 
 interface WaitingGuest {
   id: string;
