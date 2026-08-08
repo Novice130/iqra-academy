@@ -249,9 +249,7 @@ Do not reach for the 6.2.0 betas to dodge this.
   against `assets/images/logo.png`; run `dart run flutter_launcher_icons`.
 - Push, end to end on a real handset (see above).
 - Google sign-in inside the app (Custom Tabs), if it turns out to matter.
-- iOS: same codebase, but it needs a developer account, signing, a privacy
-  manifest, and `NSCameraUsageDescription` / `NSMicrophoneUsageDescription`.
-  `flutter create --platforms=ios .` when that day comes.
+- **iOS — see the section at the bottom.** It is the next piece of work.
 
 ## Screen sharing
 
@@ -356,3 +354,55 @@ frozen screen from a participant nobody can see.
 - **Screen sharing is still absent on iOS**, and on phone *browsers*. It needs
   a broadcast extension on iOS; `getDisplayMedia` is missing in mobile
   browsers generally.
+
+## iOS — not started
+
+Agreed as the next piece of work on 2026-08-08. **There is no `ios/` directory
+in `apps/mobile`**; it has never been generated, even though `pubspec.yaml`
+says "Android and iOS" and `flutter_launcher_icons` has `ios: true`.
+
+The shape is not an open question. Same as Android: one WKWebView over
+novicetutor.com plus push, for the same three reasons given at the top of this
+document. `lib/shell/web_shell.dart` is ordinary cross-platform Dart.
+
+### Toolchain on the build Mac, checked 2026-08-08
+
+Xcode 26.6 and simulators are ready. **CocoaPods is not installed and there is
+no Homebrew**, so Flutter cannot build iOS plugins — `sudo gem install
+cocoapods`, and it needs the user's password. `flutter doctor` flags exactly
+this and nothing else.
+
+### Order of work
+
+1. `flutter create --platforms=ios .`, then `NSCameraUsageDescription` and
+   `NSMicrophoneUsageDescription` in Info.plist. This much runs in the
+   simulator with no Apple account — but **the simulator has no camera**, so it
+   proves the shell loads and navigates, not that a call works.
+2. **Apple Developer Program, $99/year.** Blocks every item below and any run
+   on real hardware. The keychain on the build Mac currently holds only a free
+   *Apple Development* certificate, which is not distributable.
+3. **Push.** An APNs key plus an iOS app in the Firebase project
+   (`fir-auth-d4f03`). Nothing on the Android device side carries over, though
+   the server (`src/lib/fcm.ts`) does not care which transport it is feeding.
+4. **The incoming-call ring.** `flutter_callkit_incoming` on iOS means CallKit
+   plus **PushKit VoIP pushes** — a separate certificate, and Apple requires
+   that a VoIP push actually reports a call. Stricter than Android's
+   full-screen intent.
+5. **Screen sharing.** WKWebView has no `getDisplayMedia`, same as Android, and
+   iOS has no MediaProjection to fall back on. It needs a **Broadcast Upload
+   Extension**: a second binary in the bundle, talking to the app through an
+   App Group. `livekit_client` supports it —
+   `ScreenShareCaptureOptions(useiOSBroadcastExtension: true)`. Expect this to
+   be larger than the Android equivalent, which took two sessions.
+
+Items 1 and 5 are the engineering; 2–4 are account and certificate work that
+can be prepared but not finished without the Apple account.
+
+### Carry these over from Android
+
+- **Advertise the capability in the user agent**, and key the web app's
+  buttons off that string — not off the JS bridge existing. Every build has a
+  bridge; that is how you ship a button that does nothing.
+- **The page mints LiveKit tokens, not Dart.** The session cookie lives in the
+  WebView, and Dart's HTTP client is a different cookie jar.
+- A green build says nothing about how it renders on a device.
