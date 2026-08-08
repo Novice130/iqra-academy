@@ -8,7 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { callInvites, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
@@ -17,7 +17,7 @@ import { and, desc, eq, gt } from "drizzle-orm";
 const RING_WINDOW_MS = 60_000;
 
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireAuth(request);
       if (authResult instanceof NextResponse) return authResult;

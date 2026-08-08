@@ -8,14 +8,14 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { notifications } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { and, desc, eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireAuth(request);
       if (authResult instanceof NextResponse) return authResult;

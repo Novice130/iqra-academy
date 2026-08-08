@@ -10,7 +10,9 @@
 
 import { useEffect, useState } from 'react';
 
-const POLL_INTERVAL_MS = 4000;
+// 6s, not 4: a knock at the door tolerates a couple of seconds, and this is
+// the one poll that runs continuously for every host for a whole class.
+const POLL_INTERVAL_MS = 6000;
 
 interface WaitingGuest {
   id: string;
@@ -26,6 +28,10 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
     let cancelled = false;
 
     const poll = async () => {
+      // Nobody can admit a guest from a tab they aren't looking at, and this
+      // poll runs for the whole length of every class — it was the single
+      // biggest source of load when the worker hit its resource limit.
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await fetch(`/api/sessions/${sessionId}/guests`);
         if (!res.ok) return;
@@ -38,9 +44,13 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
 
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
+    // Someone waiting at the door while the host was away in another tab has
+    // to appear the moment the host comes back, not up to an interval later.
+    document.addEventListener('visibilitychange', poll);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', poll);
     };
   }, [sessionId]);
 

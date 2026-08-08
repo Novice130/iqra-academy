@@ -16,7 +16,11 @@ import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/compone
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
 
-const POLL_INTERVAL_MS = 2000;
+// 5s, not 2: this only fires while a student is actually being rung, and it
+// issues one request per ringing student per tick. Two seconds bought no
+// visible responsiveness — the state it reports changes when the student
+// picks up, not on a schedule.
+const POLL_INTERVAL_MS = 5000;
 const RING_TIMEOUT_MS = 45000;
 
 /** Same helper as CustomVideoConference — identities carry a device suffix. */

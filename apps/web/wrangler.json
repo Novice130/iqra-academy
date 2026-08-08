@@ -8,6 +8,14 @@
     "binding": "ASSETS",
     "directory": ".open-next/assets"
   },
+  // Workers Logs. Without this an "exceeded resource limits" (1102) burst
+  // leaves nothing behind but request counts in analytics — the August 6/7
+  // outages had to be traced by guessing at paths. Sampling stays at 1 so a
+  // burst that lasts four minutes is fully captured.
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
   "routes": [
     { "pattern": "novicetutor.com", "custom_domain": true },
     { "pattern": "www.novicetutor.com", "custom_domain": true }

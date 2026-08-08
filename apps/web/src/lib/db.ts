@@ -25,7 +25,8 @@
  */
 
 import { drizzle, type NeonDatabase } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzleHttp } from "drizzle-orm/neon-http";
+import { Pool, neon, neonConfig } from "@neondatabase/serverless";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import ws from "ws";
@@ -39,11 +40,32 @@ if (typeof WebSocket === "undefined" && typeof window === "undefined") {
 
 type Db = NeonDatabase<typeof schema>;
 
-const dbContext = new AsyncLocalStorage<{ db: Db; pool: Pool }>();
+const dbContext = new AsyncLocalStorage<{ db: Db; pool: Pool | null }>();
 
 function createConnection(): { db: Db; pool: Pool } {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
   return { db: drizzle(pool, { schema }), pool };
+}
+
+/**
+ * A pool-less connection over Neon's HTTP endpoint: one `fetch` per query,
+ * no WebSocket, no handshake, nothing to tear down.
+ *
+ * The WebSocket pool above buys interactive transactions, and every request
+ * was paying for it whether it used one or not. A pool is a TLS handshake and
+ * a socket held open for the life of the request; a dashboard sitting on a
+ * poll opened one every couple of seconds, and enough of those at once is
+ * what put the worker over its 128 MB memory limit on 2026-08-06 and -07
+ * (error 1102). Reads that never open a transaction have no reason to pay it.
+ *
+ * Typed as the pooled `Db` so the `db` proxy and every call site stay
+ * unchanged — the two drivers differ only in `.transaction()`, which the
+ * HTTP driver refuses at runtime. That is what `withHttpDb` is documented to
+ * exclude, and `withRLS` is the thing to grep for.
+ */
+function createHttpConnection(): { db: Db; pool: null } {
+  const client = neon(process.env.DATABASE_URL!);
+  return { db: drizzleHttp(client, { schema }) as unknown as Db, pool: null };
 }
 
 /**
@@ -64,6 +86,31 @@ export async function withDb<T>(fn: () => Promise<T>): Promise<T> {
   } finally {
     await pool.end();
   }
+}
+
+/**
+ * Like `withDb`, but over HTTP — for handlers that only read and write rows
+ * and never open a transaction.
+ *
+ * `db.transaction(...)` inside this (directly, or via `withRLS`) throws:
+ * the Neon HTTP driver has no transactions. That is the whole trade. If a
+ * handler needs one, it belongs in `withDb`.
+ *
+ * Better Auth goes through the same `db` proxy, so wrapping a route in this
+ * moves session lookup onto HTTP too — it only ever does single-row reads.
+ *
+ * A handler already inside a `withDb` keeps that pool rather than opening a
+ * second connection of a different kind alongside it.
+ */
+export async function withHttpDb<T>(fn: () => Promise<T>): Promise<T> {
+  if (dbContext.getStore()) {
+    return fn();
+  }
+
+  const { db: requestDb, pool } = createHttpConnection();
+  // Nothing to close: there is no socket, only fetches that have already
+  // completed by the time the handler returns.
+  return dbContext.run({ db: requestDb, pool }, fn);
 }
 
 function currentDb(): Db {

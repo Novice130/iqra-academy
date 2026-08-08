@@ -31,6 +31,12 @@ export default function IncomingCallOverlay() {
 
     const poll = async () => {
       if (responding) return;
+      // A backgrounded tab can't ring anyway — it has no audio and nobody is
+      // looking at it — and every dashboard left open was spending 24
+      // requests a minute here around the clock. That standing load is what
+      // the worker ran out of room for when a class started. Push (FCM) is
+      // what reaches a user who isn't on the page.
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         const res = await fetch("/api/calls/incoming");
         if (!res.ok) return;
@@ -44,9 +50,13 @@ export default function IncomingCallOverlay() {
 
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
+    // Coming back to the tab must not wait out the interval: a call that
+    // arrived while it was hidden should be on screen immediately.
+    document.addEventListener("visibilitychange", poll);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", poll);
     };
   }, [responding]);
 

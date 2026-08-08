@@ -10,7 +10,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withDb, withHttpDb } from "@/lib/db";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
@@ -27,48 +27,65 @@ async function assertHost(request: NextRequest, sessionId: string) {
   const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
   if (!session) throw new NotFoundError("Session");
 
-  const user = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
-  // An ORG_ADMIN hosts for their own org only. Role alone is not enough here:
-  // this endpoint decides who walks into a live lesson, so an admin of one
-  // org must not be able to admit outsiders into another org's class.
-  const isAdmin = user
-    ? user.role === "SUPER_ADMIN" || (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-    : false;
-  if (session.teacherId !== ctx.userId && !isAdmin) {
-    throw new ForbiddenError("Only the host can admit guests.");
+  // The teacher is the common case by a wide margin — this endpoint is polled
+  // by the host's own call screen every few seconds — and their own id on the
+  // session settles it. Only fall through to the users row for the admin case,
+  // which keeps the poll at one round trip instead of two.
+  if (session.teacherId !== ctx.userId) {
+    const user = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
+    // An ORG_ADMIN hosts for their own org only. Role alone is not enough here:
+    // this endpoint decides who walks into a live lesson, so an admin of one
+    // org must not be able to admit outsiders into another org's class.
+    const isAdmin = user
+      ? user.role === "SUPER_ADMIN" || (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
+      : false;
+    if (!isAdmin) throw new ForbiddenError("Only the host can admit guests.");
   }
   return { session };
 }
 
+// Over HTTP, not the WebSocket pool: this is the most-polled endpoint in the
+// app — once per host every few seconds for the length of every class — and
+// nothing in it opens a transaction. The POST below stays on the pool.
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const { id: sessionId } = await params;
       const guard = await assertHost(request, sessionId);
       if ("response" in guard) return guard.response;
 
-      // Retire stale knocks rather than merely hiding them. Filtering them out
-      // of this list left the row PENDING forever, so the guest's own page —
-      // which can only see the status — spun on "Asking to be let in…" long
-      // after the host stopped being shown the knock.
-      await db
-        .update(guestJoinRequests)
-        .set({ status: "EXPIRED" })
-        .where(
-          and(
-            eq(guestJoinRequests.sessionId, sessionId),
-            eq(guestJoinRequests.status, "PENDING"),
-            lt(guestJoinRequests.createdAt, new Date(Date.now() - KNOCK_WINDOW_MS))
-          )
-        );
-
-      const waiting = await db.query.guestJoinRequests.findMany({
+      const pending = await db.query.guestJoinRequests.findMany({
         where: and(
           eq(guestJoinRequests.sessionId, sessionId),
           eq(guestJoinRequests.status, "PENDING")
         ),
         orderBy: [desc(guestJoinRequests.createdAt)],
       });
+
+      const cutoff = new Date(Date.now() - KNOCK_WINDOW_MS);
+      const waiting = pending.filter((g) => g.createdAt >= cutoff);
+
+      // Retire stale knocks rather than merely hiding them. Filtering them out
+      // of this list left the row PENDING forever, so the guest's own page —
+      // which can only see the status — spun on "Asking to be let in…" long
+      // after the host stopped being shown the knock.
+      //
+      // The write only fires when the read actually found something stale.
+      // Issuing it unconditionally meant every poll — one per host every few
+      // seconds, for the whole length of a class — paid for an UPDATE that
+      // matched no rows, and this route was the top source of the 1102s.
+      if (waiting.length < pending.length) {
+        await db
+          .update(guestJoinRequests)
+          .set({ status: "EXPIRED" })
+          .where(
+            and(
+              eq(guestJoinRequests.sessionId, sessionId),
+              eq(guestJoinRequests.status, "PENDING"),
+              lt(guestJoinRequests.createdAt, cutoff)
+            )
+          );
+      }
 
       return NextResponse.json({
         guests: waiting.map((g) => ({ id: g.id, name: g.name, askedAt: g.createdAt.toISOString() })),
