@@ -489,3 +489,15 @@ body {
 .native-app a[aria-label="Chat on WhatsApp"] {
   display: none;
 }
+
+/* Shared by <Spinner /> and the sign-in overlay. */
+@keyframes nt-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Still needs to signal activity, so it pulses rather than freezing. */
+  @keyframes nt-spin {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+}

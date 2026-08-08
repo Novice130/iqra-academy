@@ -8,6 +8,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
+import Spinner from "@/components/Spinner";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -16,6 +17,7 @@ export default function RegisterPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,14 +31,47 @@ export default function RegisterPage() {
       });
 
       if (authError) {
-        setError(authError.message || "Registration failed");
-      } else if (data) {
-        window.location.href = "/dashboard";
+        setError(authError.message || "We couldn't create that account.");
+        setLoading(false);
+        return;
       }
-    } finally {
+
+      if (data) {
+        // Left true on purpose — see the note in login/page.tsx. Creating the
+        // account is followed by a full-page load of the dashboard, and
+        // clearing this first leaves a dead-looking button in front of it.
+        setRedirecting(true);
+        // Two frames, so the handover screen actually paints before the
+        // browser starts unloading. See the same note in login/page.tsx.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            window.location.href = "/dashboard";
+          })
+        );
+        return;
+      }
+
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    } catch {
+      setError("Can't reach Novice Tutor. Check your connection and try again.");
       setLoading(false);
     }
   };
+
+  if (redirecting) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center gap-4 px-6"
+        style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)" }}
+      >
+        <span style={{ color: "var(--accent)" }}>
+          <Spinner size={28} />
+        </span>
+        <p className="text-sm">Setting up your account…</p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -202,7 +237,13 @@ export default function RegisterPage() {
               className="btn-primary w-full"
               style={{ marginTop: "8px" }}
             >
-              {loading ? "Creating account…" : "Create Account"}
+              {loading ? (
+                <>
+                  <Spinner /> Creating account…
+                </>
+              ) : (
+                "Create Account"
+              )}
             </button>
           </form>
         </div>

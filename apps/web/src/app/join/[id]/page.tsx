@@ -9,6 +9,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import Spinner from '@/components/Spinner';
 import { useParams } from 'next/navigation';
 import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
@@ -25,6 +26,7 @@ export default function GuestJoinPage() {
 
   const [stage, setStage] = useState<Stage>('form');
   const [name, setName] = useState('');
+  const [knocking, setKnocking] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
@@ -102,6 +104,10 @@ export default function GuestJoinPage() {
     setMessage(null);
     setDeniedReason(null);
     settledRef.current = false;
+    // Without this the button sits there looking untapped while the request
+    // is in flight, and the natural response is to tap it again — which asks
+    // the teacher to admit the same guest twice.
+    setKnocking(true);
     try {
       const res = await fetch('/api/guest/join', {
         method: 'POST',
@@ -122,6 +128,11 @@ export default function GuestJoinPage() {
     } catch {
       setMessage('Could not reach the classroom. Check your connection and try again.');
       setStage('error');
+    } finally {
+      // Safe in a finally here, unlike the sign-in pages: this stays on the
+      // same page and re-renders into the waiting stage rather than handing
+      // over to a full page load.
+      setKnocking(false);
     }
   };
 
@@ -214,11 +225,17 @@ export default function GuestJoinPage() {
             )}
             <button
               onClick={knock}
-              disabled={name.trim().length < 2}
-              className="mt-4 w-full py-3 rounded-full text-sm font-semibold cursor-pointer disabled:opacity-40"
+              disabled={name.trim().length < 2 || knocking}
+              className="mt-4 w-full py-3 rounded-full text-sm font-semibold cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
               style={{ background: '#8ab4f8', color: '#202124' }}
             >
-              Ask to join
+              {knocking ? (
+                <>
+                  <Spinner /> Asking…
+                </>
+              ) : (
+                'Ask to join'
+              )}
             </button>
           </>
         )}

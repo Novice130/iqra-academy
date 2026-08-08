@@ -5,10 +5,11 @@
  * Email + password, Google Sign-In, minimal visual noise.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authClient } from "@/lib/auth-client";
+import Spinner from "@/components/Spinner";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -16,6 +17,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [redirecting, setRedirecting] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const errorRef = useRef<HTMLDivElement | null>(null);
 
   // Someone who is already signed in has no business seeing this form. They
   // reach it by pressing Back after logging in — this page stays in history
@@ -48,14 +53,60 @@ export default function LoginPage() {
       });
 
       if (authError) {
-        setError(authError.message || "Invalid email or password");
-      } else if (data) {
-        window.location.href = "/dashboard";
+        setError(authError.message || "That email and password don't match.");
+        setLoading(false);
+        return;
       }
-    } finally {
+
+      if (data) {
+        // Deliberately stays true. The old code cleared it in a `finally`,
+        // so the button snapped back to "Sign In" and *then* the browser
+        // began a full-page load of the dashboard — which is server-rendered
+        // and hits the database, so on a phone it can be several seconds of a
+        // screen that looks like the tap did nothing. Handing over to a
+        // "Signing you in…" screen keeps something moving until the dashboard
+        // paints.
+        setRedirecting(true);
+        // Two frames before navigating. Assigning location in the same tick
+        // starts the unload before React has painted, so the "Signing you in…"
+        // screen never appears — measured, not assumed. One rAF fires before
+        // paint; the second is after it.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            window.location.href = "/dashboard";
+          })
+        );
+        return;
+      }
+
+      // Neither data nor error: nothing to act on, and silently leaving a
+      // spinner up is the failure mode this whole change is about.
+      setError("Something went wrong. Please try again.");
+      setLoading(false);
+    } catch {
+      setError("Can't reach Novice Tutor. Check your connection and try again.");
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [error]);
+
+  // Covers the gap between "credentials accepted" and the dashboard painting.
+  if (redirecting) {
+    return (
+      <div
+        className="min-h-screen flex flex-col items-center justify-center gap-4 px-6"
+        style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)" }}
+      >
+        <span style={{ color: "var(--accent)" }}>
+          <Spinner size={28} />
+        </span>
+        <p className="text-sm">Signing you in…</p>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -95,8 +146,14 @@ export default function LoginPage() {
         {/* Card */}
         <div className="card p-6">
           <form onSubmit={handleLogin} className="space-y-4">
+            {/* role=alert so a screen reader announces it, and scrolled into
+                view because on a phone with the keyboard up the top of the
+                form is often off-screen — an error nobody sees is the same as
+                no error at all. */}
             {error && (
               <div
+                ref={errorRef}
+                role="alert"
                 className="p-3 rounded-lg text-sm font-medium"
                 style={{
                   background: "#fef2f2",
@@ -136,10 +193,15 @@ export default function LoginPage() {
                 >
                   Password
                 </label>
+                {/* There is no self-serve reset yet. Until there is, this
+                    says so — a control that does nothing when tapped is worse
+                    than one that explains itself. */}
                 <button
                   type="button"
+                  onClick={() => setShowForgot((v) => !v)}
                   className="text-xs font-medium"
                   style={{ color: "var(--accent)" }}
+                  aria-expanded={showForgot}
                 >
                   Forgot?
                 </button>
@@ -154,6 +216,12 @@ export default function LoginPage() {
                 minLength={6}
                 className="input"
               />
+              {showForgot && (
+                <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
+                  Message your teacher on WhatsApp and we&apos;ll reset it for you.
+                  Password reset by email is coming soon.
+                </p>
+              )}
             </div>
 
             <button
@@ -162,7 +230,13 @@ export default function LoginPage() {
               className="btn-primary w-full"
               style={{ marginTop: "8px" }}
             >
-              {loading ? "Signing in…" : "Sign In"}
+              {loading ? (
+                <>
+                  <Spinner /> Signing in…
+                </>
+              ) : (
+                "Sign In"
+              )}
             </button>
           </form>
 
@@ -189,11 +263,22 @@ export default function LoginPage() {
 
           {/* Google */}
           <button
+            disabled={googleLoading || loading}
             onClick={async () => {
-              await authClient.signIn.social({
-                provider: "google",
-                callbackURL: "/dashboard",
-              });
+              // Google navigates away, so this state normally ends with the
+              // page unloading. It matters for the second or two before that,
+              // and for when the call fails and the page stays put.
+              setGoogleLoading(true);
+              setError("");
+              try {
+                await authClient.signIn.social({
+                  provider: "google",
+                  callbackURL: "/dashboard",
+                });
+              } catch {
+                setError("Couldn't start Google sign-in. Try your email and password.");
+                setGoogleLoading(false);
+              }
             }}
             className="btn-secondary w-full"
           >
@@ -215,7 +300,7 @@ export default function LoginPage() {
                 fill="#EA4335"
               />
             </svg>
-            Continue with Google
+            {googleLoading ? "Opening Google…" : "Continue with Google"}
           </button>
         </div>
 
