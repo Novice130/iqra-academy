@@ -6,9 +6,9 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
 import { eq, and, desc, asc } from "drizzle-orm";
-import { subscriptions, plans, invoices } from "@/db/schema";
+import { subscriptions, plans, invoices, users } from "@/db/schema";
 import { format } from "date-fns";
-import { shouldHidePricing } from "@/lib/pricing-visibility";
+import { shouldHidePricing, subscriptionLabel } from "@/lib/pricing-visibility";
 
 export default async function BillingPage() {
   return withDb(async () => {
@@ -18,7 +18,15 @@ export default async function BillingPage() {
   if (!session) return null;
 
   const user = session.user as unknown as { id: string; orgId: string; email: string };
-  const hidePricing = shouldHidePricing(user.email);
+
+  // The role has to come from the users table: betterAuth() is configured
+  // without user.additionalFields, so session.user.role is always undefined
+  // and reading it off the session silently hides staff figures from staff.
+  const dbUser = await db.query.users.findFirst({
+    where: eq(users.id, user.id),
+    columns: { role: true },
+  });
+  const hidePricing = shouldHidePricing(dbUser?.role);
 
   // 1. Fetch All Available Plans
   const availablePlans = await db.query.plans.findMany({
@@ -78,7 +86,7 @@ export default async function BillingPage() {
             </p>
           </div>
           <div className={`badge ${activeSub ? "badge-accent" : "badge-outline"}`}>
-            {activeSub ? "Active" : "No Plan"}
+            {subscriptionLabel(!!activeSub)}
           </div>
         </div>
         {activeSub && (
@@ -165,7 +173,13 @@ export default async function BillingPage() {
             <thead>
               <tr style={{ borderBottom: "1px solid var(--border)" }}>
                 <th className="text-left text-[11px] font-semibold uppercase tracking-widest px-5 py-3" style={{ color: "var(--text-tertiary)" }}>Date</th>
-                <th className="text-left text-[11px] font-semibold uppercase tracking-widest px-5 py-3" style={{ color: "var(--text-tertiary)" }}>Amount</th>
+                {/* The column is dropped rather than filled with a dash: a
+                    blank Amount column invites "why can't I see this?", which
+                    is a support message about a number we deliberately do not
+                    show here. */}
+                {!hidePricing && (
+                  <th className="text-left text-[11px] font-semibold uppercase tracking-widest px-5 py-3" style={{ color: "var(--text-tertiary)" }}>Amount</th>
+                )}
                 <th className="text-left text-[11px] font-semibold uppercase tracking-widest px-5 py-3" style={{ color: "var(--text-tertiary)" }}>Status</th>
               </tr>
             </thead>
@@ -176,9 +190,11 @@ export default async function BillingPage() {
                     <td className="px-5 py-3.5 text-sm" style={{ color: "var(--text-primary)" }}>
                       {format(invoice.createdAt, "MMM d, yyyy")}
                     </td>
-                    <td className="px-5 py-3.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                      {hidePricing ? "—" : `$${invoice.amountPaidCents / 100}`}
-                    </td>
+                    {!hidePricing && (
+                      <td className="px-5 py-3.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                        ${invoice.amountPaidCents / 100}
+                      </td>
+                    )}
                     <td className="px-5 py-3.5">
                       <span
                         className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase"
@@ -194,7 +210,7 @@ export default async function BillingPage() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan={3} className="px-5 py-10 text-center text-sm" style={{ color: "var(--text-tertiary)" }}>
+                  <td colSpan={hidePricing ? 2 : 3} className="px-5 py-10 text-center text-sm" style={{ color: "var(--text-tertiary)" }}>
                     No payment history found.
                   </td>
                 </tr>

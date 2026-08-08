@@ -293,29 +293,35 @@ const styles: Record<string, React.CSSProperties> = {
     alignItems: "center",
     textAlign: "center",
   },
+  // Sizes are clamp(min, preferred, max) rather than fixed pixels: this
+  // screen has to hold up on a 320px iPhone SE and on a desktop, and a 112px
+  // avatar that is comfortable on one is overbearing on the other. The min is
+  // the smallest that still reads; the max stops it ballooning on a monitor.
   avatar: {
-    width: 112,
-    height: 112,
+    width: "clamp(84px, 24vw, 112px)",
+    height: "clamp(84px, 24vw, 112px)",
     borderRadius: "50%",
     background: "rgba(255, 255, 255, 0.14)",
     display: "grid",
     placeItems: "center",
-    fontSize: 44,
+    fontSize: "clamp(32px, 9vw, 44px)",
     fontWeight: 300,
     color: "rgba(255, 255, 255, 0.92)",
-    marginBottom: 28,
+    marginBottom: "clamp(18px, 5vw, 28px)",
   },
   name: {
     // Big and light, the way a phone announces a caller — the name is the one
     // thing that has to be readable at arm's length.
-    fontSize: 34,
+    fontSize: "clamp(26px, 7.5vw, 34px)",
     lineHeight: 1.15,
     fontWeight: 400,
     color: "#fff",
     letterSpacing: "-0.01em",
+    // A long name wraps instead of forcing the screen sideways.
+    overflowWrap: "anywhere",
   },
   subtitle: {
-    fontSize: 17,
+    fontSize: "clamp(14px, 4vw, 17px)",
     marginTop: 8,
     color: "rgba(255, 255, 255, 0.6)",
   },
@@ -325,7 +331,7 @@ const styles: Record<string, React.CSSProperties> = {
     // mis-tap away from Accept.
     justifyContent: "space-between",
     width: "100%",
-    maxWidth: 340,
+    maxWidth: "min(340px, 86%)",
   },
   action: {
     display: "flex",
@@ -334,8 +340,10 @@ const styles: Record<string, React.CSSProperties> = {
     gap: 10,
   },
   button: {
-    width: 76,
-    height: 76,
+    // Never below 64px: that is about the smallest a thumb hits reliably on a
+    // phone being picked up in a hurry, and well above the 44px minimum.
+    width: "clamp(64px, 19vw, 76px)",
+    height: "clamp(64px, 19vw, 76px)",
     borderRadius: "50%",
     border: 0,
     display: "grid",
@@ -346,7 +354,7 @@ const styles: Record<string, React.CSSProperties> = {
     boxShadow: "0 8px 24px rgba(0, 0, 0, 0.35)",
   },
   actionLabel: {
-    fontSize: 14,
+    fontSize: "clamp(13px, 3.6vw, 14px)",
     color: "rgba(255, 255, 255, 0.85)",
   },
 };
