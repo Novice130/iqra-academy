@@ -19,6 +19,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'google_sign_in_bridge.dart';
+import 'incoming_call.dart';
 import 'push.dart';
 import 'screen_share.dart';
 
@@ -49,13 +50,18 @@ class WebShell extends StatefulWidget {
   State<WebShell> createState() => _WebShellState();
 }
 
-class _WebShellState extends State<WebShell> {
+class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   InAppWebViewController? _controller;
   PullToRefreshController? _refresh;
   bool _offline = false;
   bool _firstLoadDone = false;
   bool _signingIn = false;
   bool _pipAllowed = false;
+
+  /// True when Android would ring but not wake the screen. See
+  /// CallService.canUseFullScreen.
+  bool _needsFullScreen = false;
+  bool _fullScreenDismissed = false;
 
   /// Talks to MainActivity, which is the only thing that can enter Android's
   /// picture-in-picture mode. There is no iOS counterpart: iOS only gives
@@ -87,10 +93,28 @@ class _WebShellState extends State<WebShell> {
 
     // A notification tapped while the app was closed is already waiting here.
     _deepLinks = PushService.instance.deepLinks.listen(_openPath);
+
+    WidgetsBinding.instance.addObserver(this);
+    _checkFullScreenPermission();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Granting happens in Settings, in another app. Re-checking on the way
+    // back is what makes the prompt disappear once it has been dealt with,
+    // instead of sitting there accusing the user of not having done it.
+    if (state == AppLifecycleState.resumed) _checkFullScreenPermission();
+  }
+
+  Future<void> _checkFullScreenPermission() async {
+    final allowed = await CallService.instance.canUseFullScreen();
+    if (!mounted || allowed == !_needsFullScreen) return;
+    setState(() => _needsFullScreen = !allowed);
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _stall?.cancel();
     _deepLinks?.cancel();
     ScreenShareService.instance.onEnded = null;
@@ -284,7 +308,12 @@ class _WebShellState extends State<WebShell> {
       },
       child: Scaffold(
         body: SafeArea(
-          child: _offline ? _offlineView() : _webView(),
+          child: Column(
+            children: [
+              if (_needsFullScreen && !_fullScreenDismissed) _fullScreenPrompt(),
+              Expanded(child: _offline ? _offlineView() : _webView()),
+            ],
+          ),
         ),
       ),
     );
@@ -415,6 +444,43 @@ class _WebShellState extends State<WebShell> {
             child: Center(child: CircularProgressIndicator()),
           ),
       ],
+    );
+  }
+
+  /// Shown only while Android would ring without waking the screen.
+  ///
+  /// A bar rather than a dialog, and dismissible: this is a real problem — a
+  /// student whose phone stays dark misses the class — but it is not worth
+  /// blocking the app over, and a modal on launch is how people learn to tap
+  /// past things without reading them. It disappears by itself once the
+  /// permission is granted, because the check re-runs on resume.
+  Widget _fullScreenPrompt() {
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF1F2937),
+      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+      child: Row(
+        children: [
+          const Icon(Icons.phone_in_talk, color: Color(0xFF34C759), size: 20),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Calls ring, but your screen stays dark. Allow full-screen '
+              'notifications to see who is calling.',
+              style: TextStyle(color: Colors.white, fontSize: 13, height: 1.35),
+            ),
+          ),
+          TextButton(
+            onPressed: () => CallService.instance.requestFullScreen(),
+            child: const Text('Allow', style: TextStyle(color: Color(0xFF34C759))),
+          ),
+          IconButton(
+            onPressed: () => setState(() => _fullScreenDismissed = true),
+            icon: const Icon(Icons.close, color: Colors.white54, size: 18),
+            tooltip: 'Dismiss',
+          ),
+        ],
+      ),
     );
   }
 

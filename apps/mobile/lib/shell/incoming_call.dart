@@ -108,6 +108,38 @@ class CallService {
     await FlutterCallkitIncoming.showCallkitIncoming(params);
   }
 
+  /// Whether Android will let a call notification take over the screen.
+  ///
+  /// **Android 14 stopped granting `USE_FULL_SCREEN_INTENT` on install** to
+  /// anything that is not a dialler or an alarm clock — declaring it in the
+  /// manifest is no longer enough. Without it a ringing class is a heads-up
+  /// notification: the phone makes a noise, but a locked screen stays dark and
+  /// a student who isn't holding the phone misses the lesson. That is the
+  /// difference between "it lights up" and "it just rings".
+  ///
+  /// Returns true on Android 13 and below, on iOS, and if the check itself
+  /// fails — nothing here should ever block the app from running.
+  Future<bool> canUseFullScreen() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final result = await FlutterCallkitIncoming.canUseFullScreenIntent();
+      return result is bool ? result : true;
+    } catch (e) {
+      debugPrint('canUseFullScreenIntent check failed: $e');
+      return true;
+    }
+  }
+
+  /// Opens the system screen where the permission above is granted. It cannot
+  /// be granted from inside the app — Android only offers the Settings page.
+  Future<void> requestFullScreen() async {
+    try {
+      await FlutterCallkitIncoming.requestFullIntentPermission();
+    } catch (e) {
+      debugPrint('requestFullIntentPermission failed: $e');
+    }
+  }
+
   /// The teacher hung up, or another device answered.
   Future<void> end(String callId) async {
     await FlutterCallkitIncoming.endCall(callId);

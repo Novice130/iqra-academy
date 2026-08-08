@@ -158,9 +158,35 @@ rather than delivering an event, so `PushService.init` also checks
 `FlutterCallkitIncoming.activeCalls()` and picks the accepted call up from
 there.
 
-Needs `USE_FULL_SCREEN_INTENT` in the manifest. Android 14 restricts that to
-calling and alarm apps — sideloading is fine, a Play Store listing needs a
-declaration.
+### "It used to light up the screen, now it just rings"
+
+Reported from a real handset on 2026-08-08, and **not a regression in this
+code** — the ring path had not changed.
+
+`USE_FULL_SCREEN_INTENT` is in the manifest, but on **Android 14 declaring it
+is no longer enough**: the OS grants it at install only to apps that are
+diallers or alarm clocks, and everything else has to be given it by the user in
+Settings. It is also lost on reinstall and was revoked from many apps by the
+14/15 upgrade — which is exactly what "it worked, then it stopped" looks like.
+An earlier note in this file said sideloading was fine. It is not.
+
+Without the permission `flutter_callkit_incoming` degrades quietly: the message
+still arrives and the phone still rings, but a dark, locked screen stays dark.
+For a student who isn't holding the phone, that is a missed lesson.
+
+The shell now calls `FlutterCallkitIncoming.canUseFullScreenIntent()` on launch
+and on every resume (`CallService.canUseFullScreen`), and shows a dismissible
+bar above the WebView when it comes back false, with an **Allow** button that
+opens the settings page via `requestFullIntentPermission()`. It cannot be
+granted from inside the app — Android only offers the Settings screen. The
+re-check on resume is what makes the bar disappear once it is dealt with.
+
+A bar rather than a dialog, and dismissible: a launch-time modal is how people
+learn to tap past things without reading them.
+
+**The phone that needs the permission is the one being called**, so it is the
+*student's* handset that must install the new build and grant it, not the
+teacher's. The bar is self-diagnosing — if it appears, this was the cause.
 
 ### Turning push on
 
