@@ -39,6 +39,15 @@ dependencies:
   # behave like a phone call.
   flutter_callkit_incoming: ^2.5.2
 
+  # Screen sharing, and the one place the shell does more than host a page.
+  # Android's WebView has no getDisplayMedia at all, so presenting from the
+  # app cannot go through the web call screen: the shell captures the screen
+  # itself and joins the same LiveKit room to publish it. flutter_webrtc is a
+  # transitive dependency of livekit_client, named here because
+  # `Helper.requestCapturePermission` is called directly.
+  livekit_client: ^2.10.0
+  flutter_webrtc: ^1.6.0
+
   cupertino_icons: ^1.0.8
 
 dev_dependencies:

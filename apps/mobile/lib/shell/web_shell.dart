@@ -19,6 +19,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'google_sign_in_bridge.dart';
 import 'push.dart';
+import 'screen_share.dart';
 
 class WebShell extends StatefulWidget {
   final String initialUrl;
@@ -59,6 +60,8 @@ class _WebShellState extends State<WebShell> {
   @override
   void dispose() {
     _deepLinks?.cancel();
+    ScreenShareService.instance.onEnded = null;
+    ScreenShareService.instance.stop();
     super.dispose();
   }
 
@@ -78,6 +81,39 @@ class _WebShellState extends State<WebShell> {
   Future<bool> _ensureMediaPermissions() async {
     final statuses = await [Permission.camera, Permission.microphone].request();
     return statuses.values.every((s) => s.isGranted);
+  }
+
+  /// The call page's Share button, which inside the app cannot use
+  /// `getDisplayMedia` — Android's WebView doesn't have it. The page mints a
+  /// screen-only LiveKit token (it has the session cookie) and hands it over;
+  /// capture and publishing happen natively. See screen_share.dart.
+  void _registerScreenShareHandlers(InAppWebViewController c) {
+    ScreenShareService.instance.onEnded = () {
+      // Stopping from the system cast chip has to put the page's button back.
+      _controller?.evaluateJavascript(
+        source: 'window.__ntScreenShareEnded && window.__ntScreenShareEnded();',
+      );
+    };
+
+    c.addJavaScriptHandler(
+      handlerName: 'startScreenShare',
+      callback: (args) async {
+        final arg = args.isNotEmpty ? args.first : null;
+        if (arg is! Map) return false;
+        final url = arg['url'];
+        final token = arg['token'];
+        if (url is! String || token is! String) return false;
+        return ScreenShareService.instance.start(url: url, token: token);
+      },
+    );
+
+    c.addJavaScriptHandler(
+      handlerName: 'stopScreenShare',
+      callback: (_) async {
+        await ScreenShareService.instance.stop();
+        return true;
+      },
+    );
   }
 
   Future<void> _handleGoogleSignIn() async {
@@ -113,6 +149,11 @@ class _WebShellState extends State<WebShell> {
     final inCall = url != null && url.path.contains('/dashboard/session/');
     if (inCall == _pipAllowed) return;
     _pipAllowed = inCall;
+    // Navigating out of the call ends the share with it. The native
+    // connection is a separate participant from the WebView's — nothing else
+    // would ever close it, and a teacher who left the class would keep
+    // broadcasting their phone to a room they think they've left.
+    if (!inCall) ScreenShareService.instance.stop();
     _pipChannel.invokeMethod('setPipAllowed', {'allowed': inCall}).catchError((_) {
       // Older Android, or the channel isn't up yet — PiP is a nicety.
       return null;
@@ -177,9 +218,19 @@ class _WebShellState extends State<WebShell> {
             transparentBackground: true,
             // Identifies the shell in server logs without breaking the UA
             // sniffing the web app already does for mobile layouts.
-            applicationNameForUserAgent: 'NoviceTutorApp/1.0',
+            //
+            // The `screenshare` marker is a capability flag, not decoration:
+            // the call page uses it to decide whether to offer the Share
+            // button. Every build of the app has a JS bridge, so the bridge
+            // existing proves nothing — an app installed before screen
+            // sharing shipped would show the button and do nothing when it
+            // was tapped. Only bump this when the handlers below change.
+            applicationNameForUserAgent: 'NoviceTutorApp/1.1 (screenshare)',
           ),
-          onWebViewCreated: (c) => _controller = c,
+          onWebViewCreated: (c) {
+            _controller = c;
+            _registerScreenShareHandlers(c);
+          },
           onPermissionRequest: (controller, request) async {
             // Two separate gates, and this is only the second one. The WebView
             // asks here; Android asks the user. Granting here without holding

@@ -30,6 +30,12 @@ import {
 } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import {
+  isNativeShell,
+  sessionIdFromRoom,
+  startNativeScreenShare,
+  stopNativeScreenShare,
+} from './nativeScreenShare';
+import {
   CameraIcon,
   CameraOffIcon,
   ChatIcon,
@@ -231,12 +237,60 @@ export default function CallControlBar({
   const hasMultipleCameras = useHasMultipleCameras();
   const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
 
-  // Screen share is desktop-only in practice: getDisplayMedia doesn't exist
-  // on iOS Safari or Android Chrome, and a dead button is worse than none.
+  // Two different mechanisms behind one button.
+  //
+  // In a browser it's `getDisplayMedia`, which iOS Safari and Android Chrome
+  // don't have — a dead button is worse than none, so it stays hidden there.
+  // Inside the Android app there is no getDisplayMedia either, but there IS a
+  // native capture path: the shell publishes the screen into this same room
+  // (see nativeScreenShare.ts). That's the branch below.
   const [canScreenShare, setCanScreenShare] = useState(false);
+  const [nativeShell, setNativeShell] = useState(false);
+  const [nativeSharing, setNativeSharing] = useState(false);
+  const [nativePending, setNativePending] = useState(false);
+
   useEffect(() => {
-    setCanScreenShare(typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia);
+    const native = isNativeShell();
+    setNativeShell(native);
+    setCanScreenShare(
+      native || (typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)
+    );
   }, []);
+
+  // The share can also end from outside the page — the user stops it from the
+  // Android notification, or the capture is revoked. The shell calls this so
+  // the button doesn't sit there claiming to be on.
+  useEffect(() => {
+    if (!nativeShell) return;
+    window.__ntScreenShareEnded = () => {
+      setNativeSharing(false);
+      setNativePending(false);
+    };
+    return () => {
+      delete window.__ntScreenShareEnded;
+    };
+  }, [nativeShell]);
+
+  const toggleNativeShare = async () => {
+    if (nativePending) return;
+    if (nativeSharing) {
+      setNativeSharing(false);
+      await stopNativeScreenShare();
+      return;
+    }
+    const sessionId = sessionIdFromRoom(room.name);
+    if (!sessionId) return;
+    // Pending until Android's own "start recording?" dialog is answered —
+    // which the user may simply decline, so this cannot assume success.
+    setNativePending(true);
+    try {
+      setNativeSharing(await startNativeScreenShare(sessionId));
+    } catch {
+      setNativeSharing(false);
+    } finally {
+      setNativePending(false);
+    }
+  };
 
   const toggleMenu = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
 
@@ -269,9 +323,9 @@ export default function CallControlBar({
 
         {canScreenShare && (
           <RoundButton
-            label="Present screen"
-            active={screenShare.enabled}
-            onClick={() => screenShare.toggle()}
+            label={nativeShell && nativePending ? 'Starting screen share…' : 'Present screen'}
+            active={nativeShell ? nativeSharing : screenShare.enabled}
+            onClick={nativeShell ? toggleNativeShare : () => screenShare.toggle()}
           >
             <ScreenShareIcon />
           </RoundButton>

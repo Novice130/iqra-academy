@@ -17,6 +17,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>
+    <!-- Screen sharing. Android WebView has no getDisplayMedia, so presenting
+         from the app is native capture (MediaProjection) published into the
+         same LiveKit room — and the platform refuses to hand out a projection
+         unless a foreground service of this exact type is already running. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"/>
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD"/>
 
     <application
@@ -61,6 +66,14 @@
                 <data android:scheme="https" android:host="www.novicetutor.com"/>
             </intent-filter>
         </activity>
+        <!-- Holds the screen capture up while a teacher presents. Not exported:
+             nothing outside the app has any business starting it. -->
+        <service
+            android:name=".ScreenShareService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection"/>
+
         <!-- FCM posts to this channel; the id must match the one the server
              sends in android.notification.channelId (src/lib/fcm.ts). -->
         <meta-data

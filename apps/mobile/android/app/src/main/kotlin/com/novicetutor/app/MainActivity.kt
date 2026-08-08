@@ -34,6 +34,24 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+
+        // Screen capture needs a foreground service running before Android
+        // will grant a MediaProjection at all. Dart drives the order: service
+        // up, then capture, then publish. See lib/shell/screen_share.dart.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_SHARE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "startService" -> {
+                        ScreenShareService.start(this)
+                        result.success(true)
+                    }
+                    "stopService" -> {
+                        ScreenShareService.stop(this)
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     override fun onUserLeaveHint() {
@@ -55,5 +73,6 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "novicetutor/pip"
+        private const val SCREEN_SHARE_CHANNEL = "novicetutor/screenshare"
     }
 }

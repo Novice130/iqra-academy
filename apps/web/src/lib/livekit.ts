@@ -13,6 +13,17 @@ export interface LiveKitRoomParams {
   userAvatar?: string;
   isModerator: boolean;
   expiresInSeconds?: number;
+  /**
+   * Marks this connection as a screen-share publisher rather than a person.
+   *
+   * The Android app cannot screen share through the WebView — Android's
+   * WebView has no `getDisplayMedia` at all — so the native shell joins the
+   * same room a second time and publishes the captured screen there. That
+   * connection is a camera-less, deaf publisher: it sends one video track and
+   * subscribes to nothing, because the WebView next to it is already
+   * receiving the class and paying for it twice would be wasteful on a phone.
+   */
+  screenShare?: boolean;
 }
 
 export async function generateLiveKitToken(
@@ -25,6 +36,7 @@ export async function generateLiveKitToken(
     userAvatar,
     isModerator,
     expiresInSeconds = 7200, // 2 hours default
+    screenShare = false,
   } = params;
 
   if (!LIVEKIT_CONFIG.apiKey || !LIVEKIT_CONFIG.apiSecret) {
@@ -39,12 +51,17 @@ export async function generateLiveKitToken(
   // default-focus backfill) matches on the part before the '#', which an
   // email address can never contain.
   const base = userEmail || userName;
-  const identity = `${base}#${Math.random().toString(36).slice(2, 8)}`;
+  // The suffix stays random even for the screen publisher: a teacher who
+  // stops and restarts sharing must not collide with the connection LiveKit
+  // has not finished tearing down, or the new share closes the old one and
+  // then itself. `screen-` only makes it recognisable in the room list.
+  const suffix = `${screenShare ? "screen-" : ""}${Math.random().toString(36).slice(2, 8)}`;
+  const identity = `${base}#${suffix}`;
 
   const token = new AccessToken(LIVEKIT_CONFIG.apiKey, LIVEKIT_CONFIG.apiSecret, {
     identity,
     name: userName,
-    metadata: JSON.stringify({ email: userEmail, avatar: userAvatar || "" }),
+    metadata: JSON.stringify({ email: userEmail, avatar: userAvatar || "", screenShare }),
     ttl: `${expiresInSeconds}s`,
   });
 
@@ -52,9 +69,10 @@ export async function generateLiveKitToken(
     room: roomName,
     roomJoin: true,
     canPublish: true,
-    canSubscribe: true,
-    canPublishData: true, // required for chat
-    roomAdmin: isModerator,
+    // The screen publisher is deliberately deaf — see `screenShare` above.
+    canSubscribe: !screenShare,
+    canPublishData: !screenShare, // required for chat
+    roomAdmin: isModerator && !screenShare,
   });
 
   return await token.toJwt();
