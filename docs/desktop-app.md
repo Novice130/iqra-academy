@@ -1,5 +1,13 @@
 # Desktop app (Windows and macOS)
 
+> **Parked 2026-08-08, the day it was written.** The audience is phones —
+> iOS and Android — and desktop users get the website. Nothing here is
+> abandoned or broken: it builds and runs on both platforms, and the
+> reasoning below is worth keeping. But **it is not being shipped, so do
+> not sink time into it** (auto-update, signing, the tray-unload memory
+> work) unless the decision changes. `apps/desktop` stays in the tree for
+> the day it does.
+
 Added 2026-08-08. `apps/desktop` — an Electron shell around novicetutor.com,
 the same bet as the Android app: the web app already has every screen, and the
 shell only does what a browser tab cannot.
