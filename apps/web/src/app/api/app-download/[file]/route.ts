@@ -18,9 +18,9 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { ALLOWED_DOWNLOADS, DOWNLOAD_CONTENT_TYPES } from "@/lib/app-downloads";
 
-/** Only these. The name is a path segment, so nothing else may be reachable. */
-const ALLOWED = new Set(["novice-tutor.apk", "novice-tutor-arm32.apk"]);
+const ALLOWED = new Set<string>(Object.values(ALLOWED_DOWNLOADS));
 
 /**
  * Just enough of R2's shape to stream an object out.
@@ -59,7 +59,10 @@ export async function GET(
 
   return new Response(object.body, {
     headers: {
-      "Content-Type": "application/vnd.android.package-archive",
+      // Was hardcoded to the APK type, which would have handed a Windows
+      // installer to the browser labelled as an Android package.
+      "Content-Type":
+        DOWNLOAD_CONTENT_TYPES[file.slice(file.lastIndexOf("."))] ?? "application/octet-stream",
       "Content-Length": String(object.size),
       // Without this the browser saves it under the route's last segment,
       // which happens to be right here but would not survive a rename.
