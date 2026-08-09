@@ -17,7 +17,8 @@
 import "dotenv/config";
 import { db, withDb } from "../src/lib/db";
 import { bookings, sessions, studentProfiles, users } from "../src/db/schema";
-import { and, eq, inArray, like } from "drizzle-orm";
+import { deleteSessionCascade } from "../src/lib/session-cleanup";
+import { and, eq, like } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
 
 const ORG_ID = "seed_org_iqra_academy";
@@ -30,8 +31,13 @@ async function clean() {
   const rows = await db.query.sessions.findMany({ where: like(sessions.id, `${ID_PREFIX}%`) });
   if (rows.length === 0) return console.log("nothing to clean");
   const ids = rows.map((r) => r.id);
-  await db.delete(bookings).where(inArray(bookings.sessionId, ids));
-  await db.delete(sessions).where(inArray(sessions.id, ids));
+  // Not a hand-rolled list: once a test class has rung a student or fired a
+  // "class started" notification, call_invites and notifications hold FKs to
+  // it and a bookings+sessions delete fails on 23503. Same trap the delete
+  // routes hit — src/lib/session-cleanup.ts is the one list both use.
+  for (const id of ids) {
+    await deleteSessionCascade(db as never, id);
+  }
   console.log(`removed ${ids.length} test sessions`);
 }
 

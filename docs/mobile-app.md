@@ -474,10 +474,60 @@ a real gap, since a *stalled* load calls no callback at all while a *failed*
 one lands on the offline screen. `web_shell.dart` now runs a 20s stall timer
 for exactly that case.
 
-Not testable here, and waiting on a device or on Apple: own-camera video and
-the background effects (**the simulator has a microphone but no camera** —
-probed: zero `videoinput`, and bare `{video: true}` fails
-`OverconstrainedError`), push, the incoming-call ring, and screen sharing.
+Not testable here, and waiting on a device or on Apple: push, the incoming-call
+ring, and screen sharing. Real camera and microphone hardware too — but see
+below, because the *call* is testable anyway.
+
+### A whole class, joined from the simulator — 2026-08-09
+
+Signing in, joining a live class and publishing audio all work, driven with
+`idb ui tap` against a real class on production with a headless Chrome teacher
+in the room:
+
+- the green **"Test Teacher has started the class"** ribbon appears on Home and
+  its Join Meeting button opens the pre-join screen;
+- pre-join lists devices, previews video, and Join Meeting connects;
+- the call screen renders the teacher's video full width with the own-tile
+  bottom right, and **the whole control bar fits on a 402pt-wide screen** —
+  seven buttons plus two device carets, no sideways scroll (the `--call-btn`
+  clamp doing its job on a real WebKit, not just in Chrome);
+- hanging up returns to Home with the ribbon still offering a rejoin, and the
+  participant disappears from the room server-side.
+
+**Audio and video really flow, they are not merely published.** LiveKit's
+server API showed the phone publishing `AUDIO src=MICROPHONE muted=false` and
+`VIDEO 1280x720`, and the teacher browser's own `getStats()` on its one remote
+peer — the phone — grew over an 8-second window:
+
+| | t0 | t+8s |
+| --- | --- | --- |
+| audio packets received | 142 | 286 |
+| audio bytes | 26,536 | 52,823 |
+| `totalAudioEnergy` | 0.50 | 1.01 |
+| video frames decoded | 234 | 474 |
+
+Rising `totalAudioEnergy` is the part that matters: a muted or silent track
+still ships packets, but its energy stays flat.
+
+**Correcting the "no camera" note below: inside the app there is one.** WebKit
+hands the WebView **mock capture devices** on a simulator — the pickers read
+`Mock video device 1` / `Mock audio device 1`, and the published video is the
+1280x720 test pattern, not the Mac's webcam. That is enough to exercise the
+call end to end; it is *not* enough for the background effects, which have to
+segment a real person, and the audio it sends is a generated tone rather than
+the Mac's microphone.
+
+Still unverified on the simulator: whether *incoming* audio is audible.
+WKWebView autoplay is clearly not blocked — the teacher's video plays without a
+tap — but nothing here can listen to the speaker, so treat inbound audio as
+untested until a real device or a person with headphones says otherwise.
+
+One flake worth knowing: a teacher page opened seconds after the previous
+teacher browser was `SIGKILL`ed showed **"Failed to Join Class"** once. The same
+`GET /api/sessions/<id>/join` returned 200 immediately afterwards and every
+later attempt joined normally, so it looks like a race against the dying
+connection rather than a bug in the route — but if it turns up again with a
+real teacher reconnecting, this is the first place to look.
 
 ### What was set up, and why each bit is there
 
@@ -529,14 +579,17 @@ The plan is to test at home first and buy the developer account later — the
 same order Android went in. That works, and most of the app is reachable for
 free. Measured on the build Mac, not assumed:
 
-**The simulator has a microphone and no camera.** A probe page calling
-`enumerateDevices()` in Simulator Safari (iPhone 17, Xcode 26.6) reports one
-device — `audioinput` — and **zero video inputs**; a bare `{video: true}` fails
-with `OverconstrainedError`, so this is an absent camera rather than a
-constraint that could be relaxed. iOS did prompt for the microphone, so the
-Mac's mic passes through. The simulator therefore covers the shell, login,
-layout, navigation, audio, and joining a class — but not your own video, and so
-not the background effects.
+**The simulator has no real camera or microphone, but the WebView is given
+mock ones.** A probe page calling `enumerateDevices()` in Simulator Safari
+(iPhone 17, Xcode 26.6) reported one `audioinput` and **zero video inputs**,
+and a bare `{video: true}` failed with `OverconstrainedError`. Inside the app
+it is different: once the app holds the camera and microphone permissions
+(`xcrun simctl privacy <udid> grant camera|microphone com.novicetutor.app`),
+WebKit exposes `Mock video device 1` and `Mock audio device 1`, and a real
+class publishes 1280x720 video and audio from them — verified 2026-08-09,
+above. So the simulator covers the shell, login, layout, navigation, and a
+whole class end to end; what it cannot cover is anything that needs a genuine
+picture of you, which means the background effects.
 
 **A real iPhone on a free Apple ID covers the rest.** Xcode will sign with a
 "Personal Team" at no cost, and camera and microphone both work, so the whole
@@ -554,12 +607,20 @@ opted in. It needs a published app, so it is no help here.
 
 ### Toolchain on the build Mac, checked 2026-08-08
 
-Xcode 26.6 and the simulators work. **CocoaPods is not installed and there is
-no Homebrew**, so Flutter cannot build iOS plugins yet — and system Ruby is
-Apple's deprecated 2.6.10, which newer CocoaPods dependencies refuse. Install
-Homebrew and then `brew install cocoapods` (it brings its own Ruby); the
-`sudo gem install` route needs `activesupport` pinned to 6.1.7.6 first.
-`flutter doctor` flags this and nothing else.
+Xcode 26.6 and the simulators work. Homebrew and **CocoaPods 1.17.0** are
+installed as of 2026-08-08 (`brew install cocoapods`, which brings its own Ruby
+— system Ruby is Apple's deprecated 2.6.10 and newer CocoaPods dependencies
+refuse it; the `sudo gem install` route would need `activesupport` pinned to
+6.1.7.6 first). Homebrew did not put itself on `PATH`: `~/.zprofile` now
+carries the `shellenv` line, and non-interactive shells that skip it need
+`eval "$(/opt/homebrew/bin/brew shellenv)"` inline.
+
+**Driving the simulator needs `idb`** — `simctl` can launch and screenshot but
+cannot tap or type. `brew trust facebook/fb && brew install idb-companion`
+plus `python3 -m pip install --user fb-idb`; the CLI lands at
+`~/Library/Python/3.9/bin/idb`, off `PATH`. Then `idb connect <udid>` and
+`idb ui tap --udid <udid> X Y`. **Coordinates are points, not pixels** — an
+iPhone 17 screenshot is 1206x2622 at 3x, so divide by three.
 
 Then, from `apps/mobile`:
 
@@ -576,8 +637,10 @@ Free things first, so the app can be seen working before the account is bought.
 
 1. ~~`flutter create --platforms=ios .`, Info.plist usage strings.~~ **Done
    2026-08-08.**
-2. ~~Simulator: shell loads, layout is right.~~ **Done 2026-08-08.** Still to
-   do on the simulator: sign in, then join a class and confirm audio.
+2. ~~Simulator: shell loads, layout is right.~~ **Done 2026-08-08.**
+   ~~Sign in, join a class, confirm audio.~~ **Done 2026-08-09** — signed in,
+   joined a live class, audio and video measured flowing at the far end. Only
+   inbound audio (whether the speaker actually sounds) is still unheard.
 3. A real iPhone on a free Personal Team: the full call screen, camera,
    background effects. Re-sign weekly.
 4. **Apple Developer Program, $99/year** — everything below needs it.
