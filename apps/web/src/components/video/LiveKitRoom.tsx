@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useCallback, useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { DisconnectReason } from 'livekit-client';
 import {
   LiveKitRoom as LKRoom,
   useRoomContext,
@@ -45,7 +46,12 @@ function ApplyAudioOutput({ deviceId }: { deviceId?: string }) {
 function LeaveOnPageHide() {
   const room = useRoomContext();
   useEffect(() => {
-    const leave = () => {
+    const leave = (event: PageTransitionEvent) => {
+      // `persisted` means the page is being frozen into the back/forward
+      // cache, not destroyed — the user pressed Back and can come straight
+      // back to a live call. Hanging up there ends a class because someone
+      // glanced at another page.
+      if (event.persisted) return;
       // stopTracks so the camera light goes out immediately rather than
       // whenever the torn-down page is finally collected.
       room.disconnect(true).catch(() => {});
@@ -135,7 +141,54 @@ export default function LiveKitRoom({
   const router = useRouter();
   useWakeLock();
 
-  const handleDisconnected = useCallback(() => {
+  /**
+   * True while the page is frozen in the back/forward cache. The browser
+   * closes the WebSocket on the way in, so LiveKit reports a disconnect for a
+   * call the user has not left — without this a student pressing Back lands
+   * on the dashboard and a teacher's class is marked COMPLETED.
+   */
+  const frozenRef = useRef(false);
+  /** Bumped on bfcache restore to remount LKRoom, which reconnects it. */
+  const [connectKey, setConnectKey] = useState(0);
+  /** Set once this connection is superseded, so unloading can't end the class. */
+  const supersededRef = useRef(false);
+
+  useEffect(() => {
+    const onHide = (event: PageTransitionEvent) => {
+      if (event.persisted) frozenRef.current = true;
+    };
+    const onShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      frozenRef.current = false;
+      setConnectKey((k) => k + 1);
+    };
+    window.addEventListener('pagehide', onHide);
+    window.addEventListener('pageshow', onShow);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.removeEventListener('pageshow', onShow);
+    };
+  }, []);
+
+  const handleDisconnected = useCallback((reason?: DisconnectReason) => {
+    // Frozen, not gone. Reconnected on `pageshow`.
+    if (frozenRef.current) return;
+
+    // Removed by the server. Either a host kicked this person, or — far more
+    // often — they rejoined from another device and the join API swept this
+    // connection up as a ghost. Neither means the class is over: a teacher
+    // rejoining on their phone used to have their own laptop evicted, which
+    // then POSTed /end and dropped every student in the room.
+    if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
+      supersededRef.current = true;
+      if (onLeave) {
+        onLeave();
+        return;
+      }
+      router.push('/dashboard');
+      return;
+    }
+
     // Only the session's own teacher ending the call marks it done. This
     // used to key off isModerator, which is also true for an ORG_ADMIN /
     // SUPER_ADMIN observing someone else's class — so an admin dropping out
@@ -162,7 +215,11 @@ export default function LiveKitRoom({
    */
   useEffect(() => {
     if (!isHost) return;
-    const endOnClose = () => {
+    const endOnClose = (event: PageTransitionEvent) => {
+      // Frozen into the back/forward cache, or already replaced by this
+      // teacher's connection on another device — the class carries on
+      // either way, so it must not be ended here.
+      if (event.persisted || supersededRef.current) return;
       navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`);
     };
     window.addEventListener('pagehide', endOnClose);
@@ -171,6 +228,10 @@ export default function LiveKitRoom({
 
   return (
     <LKRoom
+      // Remounting is the reconnect: coming back from the back/forward cache
+      // leaves a dead Room whose connect effect never re-runs, so the call UI
+      // sits there frozen. A new key builds a fresh Room on the same token.
+      key={connectKey}
       serverUrl={url}
       token={token}
       connect={true}

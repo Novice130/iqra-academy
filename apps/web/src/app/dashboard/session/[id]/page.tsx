@@ -42,12 +42,22 @@ export default function SessionRoomPage() {
   const [isHost, setIsHost] = useState(false);
   const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
   const [choices, setChoices] = useState<JoinChoices | null>(null);
+  const [joining, setJoining] = useState(false);
   const joinedRef = useRef(false);
 
-  const attemptJoin = useCallback(async () => {
-    if (joinedRef.current) return;
+  /**
+   * `connecting` tells the server this token is about to be handed to LiveKit.
+   * That is also when it sweeps this person's stale connections out of the
+   * room, so it must not be set for the mount-time call that only decides
+   * between lobby / redirect / pre-join — otherwise opening a class on a
+   * second device evicts you from the one you are really in on the first.
+   */
+  const attemptJoin = useCallback(async (opts?: { connecting?: boolean; force?: boolean }) => {
+    if (joinedRef.current && !opts?.force) return false;
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/join`);
+      const res = await fetch(
+        `/api/sessions/${sessionId}/join${opts?.connecting ? '?connecting=1' : ''}`
+      );
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.error || 'Failed to join session');
@@ -59,7 +69,7 @@ export default function SessionRoomPage() {
       if (data.redirectSessionId) {
         joinedRef.current = true;
         router.replace(`/dashboard/session/${data.redirectSessionId}`);
-        return;
+        return false;
       }
 
       // Class hasn't started. No token by design, so there's no room to sit
@@ -70,7 +80,7 @@ export default function SessionRoomPage() {
           teacherName: data.teacherName ?? null,
           scheduledStart: data.scheduledStart ?? null,
         });
-        return;
+        return false;
       }
 
       joinedRef.current = true;
@@ -83,8 +93,10 @@ export default function SessionRoomPage() {
       if (data.userName) {
         setUserName(data.userName);
       }
+      return true;
     } catch (err: any) {
       setError(err.message);
+      return false;
     } finally {
       setLoading(false);
     }
@@ -92,20 +104,30 @@ export default function SessionRoomPage() {
 
   useEffect(() => {
     if (!sessionId) return;
-    attemptJoin();
-  }, [sessionId, attemptJoin]);
+    // Answering a ring goes straight into the room, so that first call *is*
+    // the connecting one.
+    attemptJoin({ connecting: autoJoin });
+  }, [sessionId, autoJoin, attemptJoin]);
 
   // Keep asking while we're in the lobby. The moment the teacher starts — this
   // session or another one — the next poll picks up a token or a redirect.
   useEffect(() => {
     if (!waiting) return;
-    const interval = setInterval(attemptJoin, LOBBY_POLL_MS);
+    const interval = setInterval(() => attemptJoin({ connecting: autoJoin }), LOBBY_POLL_MS);
     return () => clearInterval(interval);
-  }, [waiting, attemptJoin]);
+  }, [waiting, autoJoin, attemptJoin]);
 
   // The pre-join choices double as the "has joined" flag — there's no room
-  // to render until the user has actually picked their devices.
-  const handleJoin = (picked: JoinChoices) => {
+  // to render until the user has actually picked their devices. The token is
+  // re-minted here rather than reused from mount, so the server's stale-
+  // connection sweep happens now, when this device is genuinely joining.
+  const handleJoin = async (picked: JoinChoices) => {
+    setJoining(true);
+    const ready = await attemptJoin({ connecting: true, force: true });
+    if (!ready) {
+      setJoining(false);
+      return;
+    }
     setChoices(picked);
   };
 
@@ -205,6 +227,24 @@ export default function SessionRoomPage() {
         choices={choices}
         teacherIdentity={teacherIdentity}
       />
+    );
+  }
+
+  // The gap between tapping Join and the room appearing is one request long.
+  // Leaving the pre-join screen up looks like the button did nothing.
+  if (joining) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen font-sans" style={{ background: '#131417' }}>
+        <div
+          className="mb-4 w-12 h-12 rounded-full"
+          style={{
+            border: '3px solid rgba(138,180,248,0.25)',
+            borderTopColor: '#8ab4f8',
+            animation: 'lk-spin 900ms linear infinite',
+          }}
+        />
+        <p style={{ color: 'rgba(255,255,255,0.55)' }}>Joining…</p>
+      </div>
     );
   }
 

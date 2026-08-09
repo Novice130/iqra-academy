@@ -179,6 +179,7 @@ export async function GET(
       // as having begun.
       const isOwningTeacher = session.teacherId === ctx.userId;
       const isAttending = isOwningTeacher || isStudent;
+      const isConnecting = request.nextUrl.searchParams.get("connecting") === "1";
       const shouldMarkStarted = isAttending && session.status === "SCHEDULED";
 
       /**
@@ -220,7 +221,17 @@ export async function GET(
 
       // Before the token, not alongside it: the removal has to land before
       // the client reconnects, or it races and can evict the new connection.
-      if (isAttending) await dropStaleConnections();
+      //
+      // Only when the caller is about to connect. This route is also hit on
+      // page mount, before the pre-join screen — sweeping there meant merely
+      // opening a class on a second device kicked you out of the class you
+      // were actually in on the first, even if you then sat on the device
+      // picker and never joined. The client asks for `connecting=1` at the
+      // moment it hands the token to LiveKit.
+      //
+      // Not gated on `isAttending`: an observing admin gets the same
+      // `email#random` identity and duplicates themselves the same way.
+      if (isConnecting) await dropStaleConnections();
 
       const [token] = await Promise.all([
         generateLiveKitToken({
