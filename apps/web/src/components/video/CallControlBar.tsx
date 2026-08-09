@@ -88,8 +88,12 @@ function RoundButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="relative w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-colors shrink-0"
+      className="relative rounded-full flex items-center justify-center cursor-pointer transition-colors shrink-0"
       style={{
+        // --call-btn shrinks with the viewport (globals.css) so the whole row
+        // fits a 360px phone instead of scrolling sideways.
+        width: 'var(--call-btn)',
+        height: 'var(--call-btn)',
         background: danger ? OFF_BG : active ? '#8ab4f8' : ON_BG,
         color: danger ? '#fff' : active ? '#202124' : '#e8eaed',
       }}
@@ -135,8 +139,8 @@ function ToggleWithCaret({
         disabled={pending}
         title={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
         aria-label={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
-        className="w-10 h-10 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60"
-        style={{ color: '#fff' }}
+        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60"
+        style={{ width: 'var(--call-btn)', height: 'var(--call-btn)', color: '#fff' }}
       >
         <Icon />
       </button>
@@ -145,10 +149,15 @@ function ToggleWithCaret({
         onClick={onToggleMenu}
         title={`${label} options`}
         aria-label={`${label} options`}
-        className="w-5 sm:w-6 h-10 sm:h-12 rounded-r-full flex items-center justify-center cursor-pointer"
-        style={{ color: '#fff', opacity: menuOpen ? 1 : 0.75 }}
+        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0"
+        style={{
+          width: 'calc(var(--call-btn) * 0.5)',
+          height: 'var(--call-btn)',
+          color: '#fff',
+          opacity: menuOpen ? 1 : 0.75,
+        }}
       >
-        <ChevronUpIcon />
+        <ChevronUpIcon className="call-caret" />
       </button>
     </div>
   );
@@ -335,10 +344,16 @@ export default function CallControlBar({
 
       {/* Every control stays on the bar, including on a phone. Hiding one to
           make room is how "the app has no background button" happens — the
-          row scrolls sideways instead if it genuinely cannot fit, which on a
-          360px screen it just about does. */}
+          buttons shrink instead (--call-btn, globals.css), because a 40px row
+          needed ~400px and a 360px Samsung pushed the leave button off the
+          edge into a sideways scroll nobody thinks to do mid-lesson.
+
+          No justify-center class either: the centring lives in
+          .call-control-bar as `safe center`, which degrades to flex-start
+          rather than pushing the first buttons off the left edge, where a
+          scroll container cannot reach them. */}
       <div
-        className="call-control-bar flex items-center justify-center gap-1 sm:gap-3 px-1.5 sm:px-3 shrink-0 overflow-x-auto"
+        className="call-control-bar flex items-center gap-1 sm:gap-3 px-1.5 sm:px-3 shrink-0 overflow-x-auto"
         style={{
           background: '#131417',
           borderTop: '1px solid rgba(255,255,255,0.08)',

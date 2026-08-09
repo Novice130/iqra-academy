@@ -192,6 +192,37 @@ body {
 }
 .call-control-bar {
   height: var(--call-bar-height);
+  /* `safe` so that when the row genuinely can't fit, it overflows to the
+     right only. Plain `center` in a scroll container pushes the first
+     buttons off the left edge where they cannot be scrolled back to — the
+     mic would have been unreachable. Browsers that don't know the keyword
+     drop the declaration and fall back to flex-start, which is also safe. */
+  justify-content: safe center;
+}
+
+/* ── Round-button size on the call bar. Eight controls, two of which carry a
+   device caret half a button wide, plus gaps and padding, have to fit the
+   narrowest phone in use here (a 360px Samsung):
+
+       9 × btn + 7 × gap(4px) + 12px padding ≤ 100vw
+
+   Fixed 40px buttons needed ~400px and the row scrolled sideways on that
+   phone, with the leave button off the edge. This solves the same line for
+   btn and caps it at the 48px used on a desktop (reached at ~470px wide). ── */
+:root {
+  --call-btn: clamp(30px, calc(11.1vw - 4.5px), 48px);
+  --call-icon: min(22px, calc(var(--call-btn) * 0.56));
+}
+/* The icons shrink with the buttons, or a 22px glyph in a 30px circle leaves
+   no ring around it and the row reads as a wall. The device carets are half a
+   button wide, so their chevron is scaled off the icon size again. */
+.call-control-bar svg:not(.call-caret) {
+  width: var(--call-icon);
+  height: var(--call-icon);
+}
+.call-control-bar svg.call-caret {
+  width: calc(var(--call-icon) * 0.66);
+  height: auto;
 }
 @media (max-height: 480px) {
   :root {
