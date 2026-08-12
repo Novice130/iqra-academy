@@ -217,118 +217,6 @@ function Popover({
   );
 }
 
-/**
- * What the teacher is asked when they tap Leave.
- *
- * Centred modal rather than `window.confirm()`: confirm steals focus from the
- * call, and on a phone it renders as a bare system dialog that reads like the
- * page has errored. Backdrop is deliberately light and unblurred — the same
- * mistake was made once on MediaRequestModal, where a near-opaque backdrop
- * blacked out the teacher mid-sentence.
- *
- * Inline styles throughout, matching the rest of the call screen: a className
- * that silently fails to apply has broken this UI twice.
- */
-function LeaveSheet({
-  onCancel,
-  onLeave,
-  onEndForEveryone,
-}: {
-  onCancel: () => void;
-  onLeave: () => void;
-  onEndForEveryone: () => void;
-}) {
-  return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 90,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 16,
-        background: 'rgba(0,0,0,0.38)',
-      }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 'min(92vw, 360px)',
-          borderRadius: 16,
-          padding: 20,
-          background: '#202124',
-          border: '1px solid rgba(255,255,255,0.12)',
-          boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
-          color: '#fff',
-        }}
-      >
-        <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 6 }}>Leave this class?</div>
-        <div style={{ fontSize: 13, opacity: 0.72, marginBottom: 18, lineHeight: 1.45 }}>
-          Ending it closes the class for everyone. Leaving keeps it running, so you can rejoin from
-          your dashboard.
-        </div>
-
-        <button
-          type="button"
-          onClick={onEndForEveryone}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            borderRadius: 10,
-            border: 'none',
-            background: '#d93025',
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: 'pointer',
-            marginBottom: 10,
-          }}
-        >
-          End class for everyone
-        </button>
-
-        <button
-          type="button"
-          onClick={onLeave}
-          style={{
-            width: '100%',
-            padding: '12px 16px',
-            borderRadius: 10,
-            border: '1px solid rgba(255,255,255,0.2)',
-            background: 'transparent',
-            color: '#fff',
-            fontSize: 14,
-            fontWeight: 600,
-            cursor: 'pointer',
-            marginBottom: 10,
-          }}
-        >
-          Leave — class continues
-        </button>
-
-        <button
-          type="button"
-          onClick={onCancel}
-          style={{
-            width: '100%',
-            padding: '10px 16px',
-            borderRadius: 10,
-            border: 'none',
-            background: 'transparent',
-            color: 'rgba(255,255,255,0.7)',
-            fontSize: 14,
-            cursor: 'pointer',
-          }}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 /** What each layout actually does, in the words of someone in a lesson. */
 const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'speaker', label: 'Speaker', hint: 'The spotlighted person fills the screen' },
@@ -349,7 +237,7 @@ export default function CallControlBar({
   onViewModeChange,
 }: {
   effects: BackgroundEffects;
-  /** The session's own teacher — the only person who is asked before leaving. */
+  /** The session's own teacher — the only person whose leaving ends the class. */
   isHost: boolean;
   /** Arms the end-the-class path. See LiveKitRoom's endOnDisconnectRef. */
   onEndClassIntent: () => void;
@@ -363,13 +251,6 @@ export default function CallControlBar({
 }) {
   const room = useRoomContext();
   const [menu, setMenu] = useState<MenuId>(null);
-  /**
-   * The host's leave is two different actions wearing one button, and picking
-   * the wrong one is expensive in both directions: ending a class by accident
-   * throws every student out, and stepping away without ending leaves a room
-   * running. So the host is asked. Students still just leave.
-   */
-  const [leaveOpen, setLeaveOpen] = useState(false);
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
   const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
@@ -528,31 +409,25 @@ export default function CallControlBar({
           <LayoutIcon />
         </RoundButton>
 
+        {/* One tap, no question asked. A confirm sheet was tried and pulled:
+            teachers here are not all technically confident, and two similar
+            red options at the end of a lesson is a decision they shouldn't
+            have to make. Tapping this is the deliberate act that ends a
+            class — everything else (a tunnel, a dead battery, the OS killing
+            the app) leaves it running so they can come back. */}
         <RoundButton
-          label={isHost ? 'Leave or end class' : 'Leave call'}
+          label={isHost ? 'End class' : 'Leave call'}
           danger
-          onClick={() => (isHost ? setLeaveOpen(true) : room.disconnect())}
+          onClick={() => {
+            // Order matters: arm first, then disconnect. `disconnect()`
+            // resolves into onDisconnected, which reads the flag.
+            if (isHost) onEndClassIntent();
+            room.disconnect();
+          }}
         >
           <LeaveIcon />
         </RoundButton>
       </div>
-
-      {leaveOpen && (
-        <LeaveSheet
-          onCancel={() => setLeaveOpen(false)}
-          onLeave={() => {
-            setLeaveOpen(false);
-            room.disconnect();
-          }}
-          onEndForEveryone={() => {
-            setLeaveOpen(false);
-            // Order matters: arm first, then disconnect. `disconnect()`
-            // resolves into onDisconnected, which reads the flag.
-            onEndClassIntent();
-            room.disconnect();
-          }}
-        />
-      )}
 
       {menu === 'mic' && (
         <Popover onClose={() => setMenu(null)}>

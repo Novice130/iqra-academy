@@ -188,12 +188,15 @@ export default function LiveKitRoom({
   /**
    * The only thing that ends a class.
    *
-   * Set by the host choosing "End class for everyone" in the leave sheet, and
-   * by nothing else. Every other way out of a room — a tunnel, a dead battery,
-   * the OS reclaiming the WebView, the teacher stepping out for a minute —
+   * Set by the host *tapping* End class, and by nothing else. Every other way
+   * out of a room — a tunnel, a dead battery, the OS reclaiming the WebView —
    * leaves the class running so they can come back to it. Before this, any
    * disconnect at all from the teacher marked the row COMPLETED and deleted
    * the LiveKit room out from under the students still in it.
+   *
+   * The button press has to be the signal rather than the disconnect reason:
+   * `LeaveOnPageHide` also calls `room.disconnect()`, so a killed app arrives
+   * here as CLIENT_INITIATED too and is indistinguishable at this level.
    */
   const endOnDisconnectRef = useRef(false);
 

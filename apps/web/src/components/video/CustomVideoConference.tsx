@@ -53,8 +53,8 @@ interface CustomVideoConferenceProps {
   /** True only for the session's own teacher — who alone may end the class. */
   isHost: boolean;
   /**
-   * Called by the leave sheet the instant before it disconnects, when the host
-   * picked "End class for everyone". Nothing else ends a class.
+   * Called the instant before the host's End class button disconnects them.
+   * Nothing else ends a class.
    */
   onEndClassIntent: () => void;
   sessionId: string;
