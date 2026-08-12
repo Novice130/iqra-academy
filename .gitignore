@@ -46,3 +46,11 @@ repo_files.json
 **/.flutter-plugins*
 **/.packages
 **/.pub-cache
+
+# design-sync (claude.ai/design) — staged scripts, build output, machine state
+.ds-sync/
+ds-bundle/
+apps/web/.ds-css/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules

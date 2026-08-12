@@ -1,0 +1,9 @@
+{
+  "pkg": "web",
+  "globalName": "NoviceTutor",
+  "shape": "package",
+  "projectId": "59e7520c-0de7-41f3-bfb5-d648c769f304",
+  "srcDir": ".ds-css",
+  "cssEntry": ".ds-css/styles.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}
