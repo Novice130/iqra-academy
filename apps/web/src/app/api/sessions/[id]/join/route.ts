@@ -31,6 +31,7 @@ import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName, getRoomServiceClient, makeIdentity } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { resolveClassRoom } from "@/lib/class-room";
+import { ringClassStudents } from "@/lib/class-ring";
 import { createId } from "@paralleldrive/cuid2";
 
 export async function GET(
@@ -304,6 +305,23 @@ export async function GET(
           identity,
         }),
         isConnecting ? recordJoin().catch(() => {}) : Promise.resolve(),
+        // The teacher arriving is what rings the class. Gated on
+        // `connecting=1` like the attendance write, for the same reason: this
+        // route is also hit on page mount, and a teacher who opens a class and
+        // then sits on the device picker has not started it.
+        //
+        // Only the *owning* teacher — an admin dropping in to observe must not
+        // summon a class. Re-ringing on reconnect is handled inside
+        // ringClassStudents, which matters now that a teacher who drops off
+        // comes straight back through here.
+        isConnecting && isOwningTeacher
+          ? ringClassStudents({
+              canonical: session,
+              roomName,
+              teacherId: ctx.userId,
+              teacherName: user?.name || "Your teacher",
+            }).catch(() => {})
+          : Promise.resolve(),
         // Seed the spotlight whoever opens the room — it always names the
         // class teacher, so a student opening early still lands everyone on
         // the teacher once they arrive.
