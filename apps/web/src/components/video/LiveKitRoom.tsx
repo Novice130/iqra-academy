@@ -185,6 +185,17 @@ export default function LiveKitRoom({
   const [connectKey, setConnectKey] = useState(0);
   /** Set once this connection is superseded, so unloading can't end the class. */
   const supersededRef = useRef(false);
+  /**
+   * The only thing that ends a class.
+   *
+   * Set by the host choosing "End class for everyone" in the leave sheet, and
+   * by nothing else. Every other way out of a room — a tunnel, a dead battery,
+   * the OS reclaiming the WebView, the teacher stepping out for a minute —
+   * leaves the class running so they can come back to it. Before this, any
+   * disconnect at all from the teacher marked the row COMPLETED and deleted
+   * the LiveKit room out from under the students still in it.
+   */
+  const endOnDisconnectRef = useRef(false);
 
   useEffect(() => {
     const onHide = (event: PageTransitionEvent) => {
@@ -251,12 +262,15 @@ export default function LiveKitRoom({
       return;
     }
 
-    // Only the session's own teacher ending the call marks it done. This
-    // used to key off isModerator, which is also true for an ORG_ADMIN /
-    // SUPER_ADMIN observing someone else's class — so an admin dropping out
-    // of a room closed the LiveKit room and ended the lesson for the teacher
-    // and students still in it. Students disconnecting never ended it.
-    if (isHost) {
+    // Deliberate only. `isHost` alone used to be the whole test, so a teacher
+    // whose connection dropped ended the lesson for everyone still in it —
+    // the exact situation they most need to be able to rejoin from. The flag
+    // is set in one place: the host picking "End class for everyone".
+    //
+    // (isHost is still the narrower half of the check that matters — the
+    // route itself accepts any admin, and an ORG_ADMIN observing someone
+    // else's class must not be able to end it by leaving.)
+    if (isHost && endOnDisconnectRef.current) {
       fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
     }
     recordLeave();
@@ -268,26 +282,20 @@ export default function LiveKitRoom({
   }, [isHost, sessionId, router, onLeave, recordLeave]);
 
   /**
-   * The handler above only runs on a clean disconnect. A teacher who closes
-   * the tab, or whose phone kills the browser, never reaches it — which is
-   * how a class sat IN_PROGRESS for five hours after everyone had gone home,
-   * with the LiveKit room open and billing.
+   * There is deliberately no `pagehide` handler ending the class any more.
    *
-   * `pagehide` fires in the cases `beforeunload` misses on mobile, and
-   * sendBeacon survives the page being torn down mid-request.
+   * It used to beacon /end whenever the host's page went away, to stop a class
+   * sitting IN_PROGRESS for hours with the room open and billing. But the page
+   * going away is exactly what a killed WebView, a dead battery and a swiped-
+   * away app all look like, and ending the class there is the opposite of what
+   * a teacher wants — they reopen the app to find the lesson over and every
+   * student thrown out.
+   *
+   * The abandoned-room case is now LiveKit's own job: the room is created with
+   * `emptyTimeout` (see /api/sessions/[id]/join), so once the last person is
+   * gone it closes itself and the `room_finished` webhook closes out the
+   * attendance rows. `/api/admin/livekit-rooms` is the manual backstop.
    */
-  useEffect(() => {
-    if (!isHost) return;
-    const endOnClose = (event: PageTransitionEvent) => {
-      // Frozen into the back/forward cache, or already replaced by this
-      // teacher's connection on another device — the class carries on
-      // either way, so it must not be ended here.
-      if (event.persisted || supersededRef.current) return;
-      navigator.sendBeacon?.(`/api/sessions/${sessionId}/end`);
-    };
-    window.addEventListener('pagehide', endOnClose);
-    return () => window.removeEventListener('pagehide', endOnClose);
-  }, [isHost, sessionId]);
 
   /**
    * The same story for attendance, and for everybody rather than just the
@@ -340,6 +348,12 @@ export default function LiveKitRoom({
       <LeaveOnPageHide />
       <CustomVideoConference
         isModerator={isModerator}
+        isHost={isHost}
+        // Armed by the leave sheet immediately before it disconnects, so
+        // handleDisconnected above can tell "end the class" from "I'm going".
+        onEndClassIntent={() => {
+          endOnDisconnectRef.current = true;
+        }}
         sessionId={sessionId}
         teacherIdentity={teacherIdentity}
         initialEffect={choices.backgroundEffect}

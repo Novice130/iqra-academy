@@ -10,6 +10,7 @@ import {
   useTracks,
   useRoomContext,
   useSpeakingParticipants,
+  useRemoteParticipants,
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
@@ -49,6 +50,13 @@ function useLiveRoomMetadata(): string | undefined {
 
 interface CustomVideoConferenceProps {
   isModerator: boolean;
+  /** True only for the session's own teacher — who alone may end the class. */
+  isHost: boolean;
+  /**
+   * Called by the leave sheet the instant before it disconnects, when the host
+   * picked "End class for everyone". Nothing else ends a class.
+   */
+  onEndClassIntent: () => void;
   sessionId: string;
   /** The class teacher's identity (their email), from the join API. */
   teacherIdentity: string | null;
@@ -65,6 +73,40 @@ interface CustomVideoConferenceProps {
 function baseIdentity(identity: string | null | undefined): string | null {
   if (!identity) return null;
   return identity.split('#')[0];
+}
+
+/**
+ * True when the class teacher is not in the room and hasn't been for a moment.
+ *
+ * A teacher can now drop out without the class ending, which is the right
+ * behaviour but leaves the students staring at a room that has quietly lost
+ * the person teaching them. This is what the banner keys off.
+ *
+ * The delay matters more than it looks: LiveKit drops and re-adds a
+ * participant during an ordinary reconnect, so without it the banner strobes
+ * on every wobble. Matching is on `baseIdentity` because identity carries a
+ * per-connection suffix — a teacher who rejoins is a different identity and
+ * the same person.
+ */
+function useTeacherAway(teacherIdentity: string | null, enabled: boolean): boolean {
+  const remotes = useRemoteParticipants();
+  const teacherBase = baseIdentity(teacherIdentity);
+  const present =
+    !enabled ||
+    !teacherBase ||
+    remotes.some((p) => baseIdentity(p.identity) === teacherBase);
+
+  const [away, setAway] = useState(false);
+  useEffect(() => {
+    if (present) {
+      setAway(false);
+      return;
+    }
+    const timer = setTimeout(() => setAway(true), 5000);
+    return () => clearTimeout(timer);
+  }, [present]);
+
+  return away;
 }
 
 function parseSpotlightIdentity(metadata: string | undefined): string | null {
@@ -311,6 +353,8 @@ function columnsFor(count: number) {
 
 export default function CustomVideoConference({
   isModerator,
+  isHost,
+  onEndClassIntent,
   sessionId,
   teacherIdentity,
   initialEffect,
@@ -373,6 +417,10 @@ export default function CustomVideoConference({
     unreadMessages: 0,
     showSettings: false,
   });
+
+  // Only the people waiting on the teacher need telling — not the teacher,
+  // and not an admin observing, who can see perfectly well that they left.
+  const teacherAway = useTeacherAway(teacherIdentity, !isModerator);
 
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
@@ -616,12 +664,40 @@ export default function CustomVideoConference({
 
           <ScreenSharePill />
 
+          {/* Inline styles, not classNames — the call screen has been broken
+              twice by a rule that silently never applied. See
+              docs/integration-livekit.md. */}
+          {teacherAway && (
+            <div
+              style={{
+                position: 'absolute',
+                top: 12,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 30,
+                maxWidth: 'calc(100% - 24px)',
+                padding: '8px 16px',
+                borderRadius: 9999,
+                background: 'rgba(17, 17, 17, 0.82)',
+                color: '#fff',
+                fontSize: 13,
+                lineHeight: 1.3,
+                textAlign: 'center',
+                pointerEvents: 'none',
+              }}
+            >
+              Teacher disconnected — waiting for them to rejoin.
+            </div>
+          )}
+
           {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
 
           <MediaRequestModal />
 
           <CallControlBar
             effects={effects}
+            isHost={isHost}
+            onEndClassIntent={onEndClassIntent}
             unreadMessages={widgetState.unreadMessages}
             chatOpen={widgetState.showChat}
             peopleOpen={peopleOpen}

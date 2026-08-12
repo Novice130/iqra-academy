@@ -151,7 +151,21 @@ export async function GET(
       const ensureSpotlight = async () => {
         const svc = getRoomServiceClient();
         await svc
-          .createRoom({ name: roomName, metadata: JSON.stringify({ spotlightIdentity: defaultSpotlight }) })
+          .createRoom({
+            name: roomName,
+            metadata: JSON.stringify({ spotlightIdentity: defaultSpotlight }),
+            // How long an EMPTY room survives before LiveKit closes it, which
+            // in turn fires the `room_finished` webhook that closes out the
+            // attendance rows. Ten minutes rather than LiveKit's default five,
+            // because a teacher whose phone died has to be able to get back
+            // into the same room — nothing on the client ends a class any
+            // more except the host choosing to (see LiveKitRoom).
+            //
+            // Only counts while nobody is connected. A teacher who drops with
+            // students still in the room leaves it non-empty, so the class
+            // keeps running for them — which is the point.
+            emptyTimeout: 600,
+          })
           .catch(() => {});
         try {
           const rooms = await svc.listRooms([roomName]);

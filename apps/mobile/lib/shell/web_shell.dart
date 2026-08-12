@@ -149,9 +149,60 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   /// listens never needs to be asked at all. The cost is that the very first
   /// tap on the camera button raises the OS dialog — acceptable, and the same
   /// thing every browser does.
+  /// Guards against stacking dialogs: the call page asks for camera and mic as
+  /// two separate WebView permission requests, so a single denial otherwise
+  /// puts two identical sheets on screen.
+  bool _permissionDialogOpen = false;
+
   Future<bool> _ensureMediaPermissions() async {
     final statuses = await [Permission.camera, Permission.microphone].request();
-    return statuses.values.every((s) => s.isGranted);
+    if (statuses.values.every((s) => s.isGranted)) return true;
+
+    // Denied — and on Android a second denial makes it *permanently* denied,
+    // after which `request()` returns immediately without ever showing the OS
+    // prompt again. There is nothing more this app can ask for; the only way
+    // back is the system settings page. Without this the camera button simply
+    // stopped working with no explanation, which is what it looked like from
+    // the outside: "the app is broken".
+    final permanent = statuses.values.any((s) => s.isPermanentlyDenied);
+    if (permanent) await _showPermissionHelp();
+    return false;
+  }
+
+  Future<void> _showPermissionHelp() async {
+    if (!mounted || _permissionDialogOpen) return;
+    _permissionDialogOpen = true;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Camera and microphone are blocked'),
+          content: const Text(
+            'Novice Tutor needs camera and microphone access so you can be seen '
+            'and heard in a class. Turn them on in Settings, then come back and '
+            'try again.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Not now'),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                // Sends them to this app's own permission page. The webview is
+                // left as it is — coming back re-runs getUserMedia on the next
+                // tap, by which point the grant is live.
+                openAppSettings();
+              },
+              child: const Text('Open Settings'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      _permissionDialogOpen = false;
+    }
   }
 
   /// The call page's Share button, which inside the app cannot use

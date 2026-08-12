@@ -143,6 +143,18 @@ export async function POST(request: NextRequest) {
           // catches the last person out, whose own `participant_left` can be
           // lost in the same teardown that closed the room.
           await closeAttendanceRows({ sessionId, at });
+          // And the class itself is over. This used to be the job of a
+          // `pagehide` beacon on the teacher's client, which was removed
+          // because it also fired when the OS killed the app — ending a class
+          // the teacher was about to rejoin. LiveKit closing the room is the
+          // honest signal: it only happens once nobody has been connected for
+          // `emptyTimeout` (see the join route), or because the host ended it
+          // deliberately, in which case /end already set this and the update
+          // below matches nothing.
+          await db
+            .update(sessions)
+            .set({ status: "COMPLETED", actualEnd: at })
+            .where(and(eq(sessions.id, sessionId), eq(sessions.status, "IN_PROGRESS")));
           break;
         default:
           break;
