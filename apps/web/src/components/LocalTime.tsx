@@ -39,14 +39,45 @@ export function ViewerTimeZoneProvider({
   return <ViewerTimeZoneContext.Provider value={timeZone}>{children}</ViewerTimeZoneContext.Provider>;
 }
 
-export type LocalTimeMode = 'time' | 'weekday-time' | 'date-time' | 'date';
+export type LocalTimeMode =
+  | 'time'
+  | 'time-seconds'
+  | 'weekday-time'
+  | 'date-time'
+  | 'date'
+  | 'full-date';
 
 const OPTIONS: Record<LocalTimeMode, Intl.DateTimeFormatOptions> = {
   time: { hour: 'numeric', minute: '2-digit' },
+  // Attendance cares whether somebody was thirty seconds late or thirty
+  // minutes, and a minute-resolution join time hides the difference between
+  // "arrived with the teacher" and "arrived just after".
+  'time-seconds': { hour: 'numeric', minute: '2-digit', second: '2-digit' },
   'weekday-time': { weekday: 'long', hour: 'numeric', minute: '2-digit' },
   'date-time': { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' },
   date: { month: 'short', day: 'numeric' },
+  'full-date': { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' },
 };
+
+/**
+ * Which calendar day an instant falls on, **in the viewer's zone**, as
+ * `YYYY-MM-DD`.
+ *
+ * A class at 23:00 UTC is Tuesday evening in Illinois and Wednesday morning in
+ * India. Both are correct, so "group attendance by day" only has an answer
+ * once you say whose day — and that answer can only be reached in the browser.
+ * `en-CA` is used purely because it formats as ISO order.
+ */
+export function dayKeyInZone(value: string | Date, timeZone?: string): string {
+  const date = typeof value === 'string' ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    ...(timeZone ? { timeZone } : {}),
+  }).format(date);
+}
 
 export function formatInZone(
   value: string | Date,

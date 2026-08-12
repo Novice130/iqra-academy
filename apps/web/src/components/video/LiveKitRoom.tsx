@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { DisconnectReason } from 'livekit-client';
 import {
@@ -109,6 +109,27 @@ function useWakeLock() {
   }, []);
 }
 
+/**
+ * iOS refuses to let script change playback volume: `HTMLMediaElement.volume`
+ * is read-only in Safari and WKWebView, and volume is a hardware button only.
+ * That would make the teacher's per-student slider move and do nothing on an
+ * iPhone — the worst kind of broken, because it looks like it worked.
+ *
+ * `webAudioMix` routes remote audio through a Web Audio gain node instead,
+ * which iOS *does* allow. It isn't the default everywhere because it also
+ * takes over output routing, and `setSinkId` — how the pre-join screen's
+ * speaker picker works — is unsupported on iOS anyway, so there is nothing to
+ * lose there and something real to lose on desktop.
+ */
+function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return (
+    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    // iPadOS reports itself as a Mac; the touch points give it away.
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
 interface LiveKitRoomProps {
   token: string;
   url: string;
@@ -120,6 +141,13 @@ interface LiveKitRoomProps {
   choices: JoinChoices;
   /** The class teacher's identity — what a student's view focuses by default. */
   teacherIdentity: string | null;
+  /**
+   * This connection's own LiveKit identity, from the join API. Sent back when
+   * leaving so the right attendance row is closed — a teacher who is in the
+   * room from a laptop and a phone has two open rows, and shutting the laptop
+   * must not record the phone as having left too.
+   */
+  identity?: string | null;
   /**
    * Where to send someone once the room closes. Defaults to the dashboard,
    * which is right for anyone with an account and wrong for a guest — the
@@ -136,10 +164,15 @@ export default function LiveKitRoom({
   isHost,
   choices,
   teacherIdentity,
+  identity,
   onLeave,
 }: LiveKitRoomProps) {
   const router = useRouter();
   useWakeLock();
+
+  // See isIOS: without this the teacher's volume slider is decorative on an
+  // iPhone. Empty deps — the browser doesn't change mid-call.
+  const roomOptions = useMemo(() => ({ webAudioMix: isIOS() }), []);
 
   /**
    * True while the page is frozen in the back/forward cache. The browser
@@ -170,6 +203,32 @@ export default function LiveKitRoom({
     };
   }, []);
 
+  /**
+   * Close this connection's attendance row.
+   *
+   * Everyone sends this, not just the host: the point of the record is when
+   * each *student* left, and a student disconnecting has never told the server
+   * anything at all. `keepalive` so it still goes out if the page is being
+   * dismantled around it.
+   */
+  const recordLeave = useCallback(
+    (beacon = false) => {
+      const url = `/api/sessions/${sessionId}/leave`;
+      const payload = JSON.stringify({ identity });
+      if (beacon && navigator.sendBeacon) {
+        navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+        return;
+      }
+      fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    },
+    [sessionId, identity]
+  );
+
   const handleDisconnected = useCallback((reason?: DisconnectReason) => {
     // Frozen, not gone. Reconnected on `pageshow`.
     if (frozenRef.current) return;
@@ -181,6 +240,9 @@ export default function LiveKitRoom({
     // then POSTed /end and dropped every student in the room.
     if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
       supersededRef.current = true;
+      // The class carries on, but *this connection* is over either way —
+      // kicked or replaced — so its attendance row closes here.
+      recordLeave();
       if (onLeave) {
         onLeave();
         return;
@@ -197,12 +259,13 @@ export default function LiveKitRoom({
     if (isHost) {
       fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
     }
+    recordLeave();
     if (onLeave) {
       onLeave();
       return;
     }
     router.push('/dashboard');
-  }, [isHost, sessionId, router, onLeave]);
+  }, [isHost, sessionId, router, onLeave, recordLeave]);
 
   /**
    * The handler above only runs on a clean disconnect. A teacher who closes
@@ -226,6 +289,28 @@ export default function LiveKitRoom({
     return () => window.removeEventListener('pagehide', endOnClose);
   }, [isHost, sessionId]);
 
+  /**
+   * The same story for attendance, and for everybody rather than just the
+   * host. `handleDisconnected` only fires on a clean leave; a student who
+   * swipes the app away or whose phone dies never reaches it, and their row
+   * would sit open forever showing them as still in a class that finished
+   * hours ago.
+   *
+   * This is still only the fast path. The LiveKit `participant_left` webhook
+   * is what actually catches the killed app — it just arrives seconds later.
+   */
+  useEffect(() => {
+    const leaveOnClose = (event: PageTransitionEvent) => {
+      // Frozen into the back/forward cache — they can come straight back to a
+      // live call. Or already superseded, in which case the row was closed
+      // when the server dropped this connection.
+      if (event.persisted || supersededRef.current) return;
+      recordLeave(true);
+    };
+    window.addEventListener('pagehide', leaveOnClose);
+    return () => window.removeEventListener('pagehide', leaveOnClose);
+  }, [recordLeave]);
+
   return (
     <LKRoom
       // Remounting is the reconnect: coming back from the back/forward cache
@@ -244,6 +329,9 @@ export default function LiveKitRoom({
       audio={
         choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false
       }
+      // Computed once per mount rather than inline: a fresh options object on
+      // every render would tear down and rebuild the Room.
+      options={roomOptions}
       data-lk-theme="default"
       style={{ height: '100dvh' }}
       onDisconnected={handleDisconnected}

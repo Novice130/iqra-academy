@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { isTrackReference, type TrackReferenceOrPlaceholder, type WidgetState } from '@livekit/components-core';
 import {
@@ -75,6 +75,62 @@ function parseSpotlightIdentity(metadata: string | undefined): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Per-student playback volume, keyed by base identity. Room state, not a
+ * local preference: the teacher turns somebody down and the whole class hears
+ * it that way. Absent means full volume.
+ */
+function parseVolumes(metadata: string | undefined): Record<string, number> {
+  if (!metadata) return {};
+  try {
+    const parsed = JSON.parse(metadata);
+    const volumes = parsed?.volumes;
+    if (!volumes || typeof volumes !== 'object') return {};
+    const clean: Record<string, number> = {};
+    for (const [identity, value] of Object.entries(volumes)) {
+      if (typeof value === 'number' && Number.isFinite(value)) {
+        clean[identity] = Math.min(1, Math.max(0, value));
+      }
+    }
+    return clean;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Pushes the room's volumes onto the actual audio, on every client.
+ *
+ * `RemoteParticipant.setVolume` remembers the value and re-applies it when a
+ * track is subscribed later — but only for that participant *object*. A
+ * reconnect builds a new one with an empty map, so the value has to be pushed
+ * again on ParticipantConnected and TrackSubscribed, not only when the
+ * metadata changes.
+ *
+ * Safe to drive directly: `<RoomAudioRenderer/>` below is mounted without a
+ * `volume` prop, and its own setVolume effect short-circuits when that prop is
+ * undefined — so it never fights these calls.
+ */
+function useAppliedVolumes(volumes: Record<string, number>) {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    const apply = () => {
+      room.remoteParticipants.forEach((participant) => {
+        const base = baseIdentity(participant.identity);
+        participant.setVolume(base ? volumes[base] ?? 1 : 1);
+      });
+    };
+    apply();
+    room.on(RoomEvent.ParticipantConnected, apply);
+    room.on(RoomEvent.TrackSubscribed, apply);
+    return () => {
+      room.off(RoomEvent.ParticipantConnected, apply);
+      room.off(RoomEvent.TrackSubscribed, apply);
+    };
+  }, [room, volumes]);
 }
 
 /**
@@ -274,6 +330,22 @@ export default function CustomVideoConference({
   }, [metadata]);
   const roomSpotlight = pendingSpotlight !== undefined ? pendingSpotlight : parseSpotlightIdentity(metadata);
 
+  // Memoised on the raw metadata string: a fresh object every render would
+  // re-run the apply effect on every render, resetting every volume.
+  const volumes = useMemo(() => parseVolumes(metadata), [metadata]);
+  useAppliedVolumes(volumes);
+
+  const setVolume = useCallback(
+    (base: string, volume: number) => {
+      fetch(`/api/sessions/${sessionId}/volume`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identity: base, volume }),
+      }).catch(() => {});
+    },
+    [sessionId]
+  );
+
   // What "speaker" view focuses. Room metadata wins, but until it arrives (or
   // if it was never written) fall back to the class teacher — a student
   // should never open the call and find an admin who dropped in to observe
@@ -387,6 +459,10 @@ export default function CustomVideoConference({
       onAskForCamera: p.cameraOff ? () => askForCamera(p.identity) : undefined,
       onRename: (name: string) => rename(p.identity, name),
       onRemove: () => removeParticipant(p.identity),
+      // Keyed on the base identity, not the connection: a student who drops
+      // and rejoins should come back as quiet as the teacher left them.
+      volume: volumes[p.base] ?? 1,
+      onVolume: (volume: number) => setVolume(p.base, volume),
     };
   };
 
@@ -564,6 +640,8 @@ export default function CustomVideoConference({
             isModerator={isModerator}
             spotlightIdentity={focusIdentity}
             onSpotlight={handleSpotlight}
+            volumes={volumes}
+            onVolume={setVolume}
             onClose={() => setPeopleOpen(false)}
           />
         )}

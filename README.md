@@ -141,6 +141,7 @@ quran-lms/
 │   ├── integration-stripe.md
 │   ├── integration-calcom.md
 │   ├── integration-livekit.md
+│   ├── attendance.md                  # who joined when; needs a LiveKit webhook
 │   ├── timezones.md
 │   ├── mobile-app.md                  # WebView shell, push, screen sharing
 │   └── test-accounts.md

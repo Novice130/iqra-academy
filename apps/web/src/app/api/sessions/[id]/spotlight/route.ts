@@ -13,7 +13,8 @@ import { eq } from "drizzle-orm";
 import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
-import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { generateRoomName } from "@/lib/livekit";
+import { patchRoomMetadata } from "@/lib/room-metadata";
 
 export async function POST(
   request: NextRequest,
@@ -47,11 +48,12 @@ export async function POST(
         throw new ForbiddenError("Only the host can change the spotlight.");
       }
 
+      // Merge, never replace. `updateRoomMetadata` overwrites the whole
+      // string, and the room also carries the per-student volumes the teacher
+      // has set — writing `{ spotlightIdentity }` outright would reset every
+      // one of them each time the spotlight moved.
       const roomName = generateRoomName(sessionId);
-      await getRoomServiceClient().updateRoomMetadata(
-        roomName,
-        JSON.stringify({ spotlightIdentity: identity })
-      );
+      await patchRoomMetadata(roomName, { spotlightIdentity: identity });
 
       return NextResponse.json({ success: true, spotlightIdentity: identity });
     } catch (error) {

@@ -15,6 +15,7 @@ import { RoomEvent, Track } from 'livekit-client';
 import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
+import VolumeSlider from './VolumeSlider';
 
 // 5s, not 2: this only fires while a student is actually being rung, and it
 // issues one request per ringing student per tick. Two seconds bought no
@@ -282,12 +283,17 @@ export default function PeoplePanel({
   isModerator,
   spotlightIdentity,
   onSpotlight,
+  volumes,
+  onVolume,
   onClose,
 }: {
   sessionId: string;
   isModerator: boolean;
   spotlightIdentity: string | null;
   onSpotlight: (identity: string | null) => void;
+  /** Room-wide playback volumes, 0–1, keyed by base identity. */
+  volumes: Record<string, number>;
+  onVolume: (base: string, volume: number) => void;
   onClose: () => void;
 }) {
   const { muteTrack, askToUnmute, removeParticipant } = useHostControls(sessionId);
@@ -344,7 +350,8 @@ export default function PeoplePanel({
         {people.map((p) => {
           const spotlighted = p.base === baseIdentity(spotlightIdentity);
           return (
-            <div key={p.identity} className="flex items-center justify-between gap-2 py-2">
+            <div key={p.identity} className="py-2">
+            <div className="flex items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-white truncate">
                   {p.name}
@@ -406,6 +413,19 @@ export default function PeoplePanel({
                     ))}
                 </div>
               )}
+            </div>
+
+            {/* The roomier of the two homes for the volume control — the tile
+                ⋮ menu is 240px wide, this sidebar is 340. Same room-wide
+                value, so the two always read the same. */}
+            {isModerator && !p.isLocal && (
+              <VolumeSlider
+                value={volumes[p.base] ?? 1}
+                onChange={(v) => onVolume(p.base, v)}
+                label={p.name}
+                compact
+              />
+            )}
             </div>
           );
         })}

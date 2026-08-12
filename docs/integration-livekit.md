@@ -164,6 +164,7 @@ shouldn't silently open someone's microphone. So:
 | Mute / turn off camera | `POST /api/sessions/[id]/mute-participant` (server) |
 | Ask to unmute / ask for camera | data channel message, `MediaRequestModal` on their side |
 | Rename | `POST /api/sessions/[id]/participant` (the name comes from the JWT) |
+| Turn one person down | `POST /api/sessions/[id]/volume` (room metadata — see below) |
 | Remove from call | `DELETE /api/sessions/[id]/participant?identity=…` |
 
 Removal is per-call, not a ban: LiveKit closes that connection, and nothing
@@ -174,6 +175,45 @@ before removing — a mis-tap throws a child out of their lesson, and a browser
 Every host route resolves the caller against the session, and an `ORG_ADMIN`
 counts as a host **only for their own org** — role alone let an admin of one
 org reach into another org's live class.
+
+### Per-student volume
+
+The teacher can turn one student down without muting them — asked for so a
+student who has finished their turn can carry on reciting out loud while the
+class listens to somebody else. Muting would stop that; a quieter mic doesn't.
+
+**It is room state, not a listener preference.** The teacher lowers Sobur and
+*everybody* hears Sobur quietly. So the value lives in room metadata beside the
+spotlight, as `volumes: { "<base identity>": 0..1 }`, written by a host-only
+route and applied on every client:
+
+```
+teacher drags ──▶ POST /api/sessions/[id]/volume  (host only)
+                     └─ patchRoomMetadata → LiveKit broadcasts
+                          └─ every client: RemoteParticipant.setVolume()
+```
+
+Keyed on **base** identity, so a student whose phone drops and reconnects comes
+back as quiet as the teacher left them. The apply effect re-runs on
+`ParticipantConnected` and `TrackSubscribed` as well as on metadata change:
+`setVolume` remembers the value on the participant *object*, and a reconnect
+builds a new one.
+
+Three things worth knowing before touching it:
+
+- **`patchRoomMetadata` (`src/lib/room-metadata.ts`) exists because
+  `updateRoomMetadata` replaces the whole string.** The spotlight route used to
+  write `{ spotlightIdentity }` outright, which was harmless only while
+  spotlight was the sole key. Read, merge, write — always.
+- **The range stops at 100%.** `setVolume` lands on `HTMLMediaElement.volume`,
+  which clamps at 1; a "boost" would move the handle and do nothing.
+- **iOS makes `volume` read-only**, so the room opts into `webAudioMix` on iOS
+  only (`isIOS()` in `LiveKitRoom.tsx`), routing audio through a gain node. It
+  is not enabled everywhere because it also takes over output routing, and
+  `setSinkId` — the pre-join speaker picker — is unsupported on iOS anyway.
+
+Two surfaces, one `VolumeSlider`: the tile ⋮ menu and the People panel row.
+Moderator-only, because it changes what everyone hears.
 
 ### Spotlight
 

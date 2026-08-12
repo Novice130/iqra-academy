@@ -25,10 +25,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
-import { sessions, users, bookings, studentProfiles } from "@/db/schema";
+import { sessions, users, bookings, studentProfiles, sessionAttendance } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
-import { generateLiveKitToken, generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { generateLiveKitToken, generateRoomName, getRoomServiceClient, makeIdentity } from "@/lib/livekit";
+import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { resolveClassRoom } from "@/lib/class-room";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -154,12 +155,11 @@ export async function GET(
           .catch(() => {});
         try {
           const rooms = await svc.listRooms([roomName]);
-          const existing = rooms[0]?.metadata ? JSON.parse(rooms[0].metadata) : {};
+          const existing = parseRoomMetadata(rooms[0]?.metadata);
           if (!existing.spotlightIdentity) {
-            await svc.updateRoomMetadata(
-              roomName,
-              JSON.stringify({ ...existing, spotlightIdentity: defaultSpotlight })
-            );
+            // Merge, never replace — the room may already carry the volumes
+            // the teacher set earlier in this class.
+            await patchRoomMetadata(roomName, { spotlightIdentity: defaultSpotlight });
           }
         } catch {
           // Best-effort — worst case the room falls back to LiveKit's
@@ -233,13 +233,63 @@ export async function GET(
       // `email#random` identity and duplicates themselves the same way.
       if (isConnecting) await dropStaleConnections();
 
+      // Minted here rather than inside the token so the attendance row can name
+      // the exact connection it belongs to. That is what lets the
+      // `participant_left` webhook close out the right row when the same
+      // person is in the room twice.
+      const identity = makeIdentity(user?.email || user?.name || "participant");
+
+      /**
+       * Who was actually in this class, and when they arrived.
+       *
+       * Only on `connecting=1`. This route is also hit on page mount, before
+       * the pre-join screen, and someone who opens a class and then sits on
+       * the device picker without ever joining did not attend it.
+       *
+       * `sessionId` is the canonical row for the occurrence — the function
+       * already returned above if it weren't — so every row for one class
+       * lands together without the report having to stitch them back.
+       *
+       * Best-effort, like the room bookkeeping beside it: a failure to record
+       * attendance must never be a reason somebody can't get into their class.
+       */
+      const recordJoin = async () => {
+        const studentProfileId =
+          session.bookings.find((b: any) => b.userId === ctx.userId)?.studentProfileId ??
+          (isStudent
+            ? (
+                await db.query.studentProfiles.findFirst({
+                  where: eq(studentProfiles.userId, ctx.userId),
+                  columns: { id: true },
+                })
+              )?.id ?? null
+            : null);
+
+        await db
+          .insert(sessionAttendance)
+          .values({
+            orgId: session.orgId,
+            sessionId,
+            userId: ctx.userId,
+            studentProfileId,
+            role: isOwningTeacher ? "TEACHER" : isStudent ? "STUDENT" : "OBSERVER",
+            identity,
+            joinedAt: new Date(),
+          })
+          // The client can retry the token request; the identity is unique per
+          // connection, so a retry that reuses it must not double-count.
+          .onConflictDoNothing();
+      };
+
       const [token] = await Promise.all([
         generateLiveKitToken({
           roomName,
           userName: user?.name || "Participant",
           userEmail: user?.email || "",
           isModerator: isTeacher,
+          identity,
         }),
+        isConnecting ? recordJoin().catch(() => {}) : Promise.resolve(),
         // Seed the spotlight whoever opens the room — it always names the
         // class teacher, so a student opening early still lands everyone on
         // the teacher once they arrive.
@@ -265,6 +315,10 @@ export async function GET(
         userName: user?.name || "Participant",
         joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
         isModerator: isTeacher,
+        // The identity inside the token. The client sends it back when it
+        // leaves, so the right connection's attendance row gets closed even
+        // when the same person is in the room from two devices.
+        identity,
         // Who the class teacher is, so a student's client can focus them by
         // default even before any spotlight metadata has landed.
         teacherIdentity: sessionTeacher?.email || null,

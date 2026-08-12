@@ -136,6 +136,9 @@ export default function DashboardChrome({
                 href="/dashboard/teacher/availability"
                 label="Availability"
               />
+              {/* Teaching, not Admin: a teacher sees their own classes here,
+                  an admin sees the whole org through the same page. */}
+              <SidebarItem href="/dashboard/attendance" label="Attendance" />
             </>
           )}
 
@@ -272,6 +275,7 @@ export default function DashboardChrome({
                       <SidebarItem href="/dashboard/teacher/messages" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/teacher/students" label="My Students" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/attendance" label="Attendance" onNavigate={() => setMobileMenuOpen(false)} />
                     </>
                   )}
 
@@ -414,6 +418,7 @@ function AppChrome({
                 <>
                   <SheetLink href="/dashboard/progress" label="Progress" onNavigate={() => setMoreOpen(false)} />
                   <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={() => setMoreOpen(false)} />
                 </>
               )}
               {isAdminRole && <SheetLink href="/admin" label="Admin Panel" onNavigate={() => setMoreOpen(false)} />}
@@ -441,6 +446,7 @@ function titleFor(pathname: string, isTeachingRole: boolean): string {
     "/dashboard/teacher/messages": "Messages",
     "/dashboard/teacher/students": "My Students",
     "/dashboard/teacher/availability": "Availability",
+    "/dashboard/attendance": "Attendance",
   };
   return map[pathname] ?? (isTeachingRole ? "Teaching" : "Novice Tutor");
 }

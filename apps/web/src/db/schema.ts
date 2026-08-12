@@ -184,6 +184,20 @@ export const guestJoinStatusEnum = pgEnum("GuestJoinStatus", [
   "EXPIRED",
 ]);
 
+/**
+ * Why a person was in a class, for the attendance record.
+ *
+ * OBSERVER is an admin dropping in to watch. They are recorded — somebody
+ * should be able to see who was in the room — but they are not counted for or
+ * against attendance, the same way the join API refuses to let their arrival
+ * mark a class as started.
+ */
+export const attendanceRoleEnum = pgEnum("AttendanceRole", [
+  "TEACHER",
+  "STUDENT",
+  "OBSERVER",
+]);
+
 export const crmSyncTypeEnum = pgEnum("CrmSyncType", [
   "CONTACT_CREATED",
   "CONTACT_UPDATED",
@@ -664,6 +678,53 @@ export const sessionAttendees = pgTable(
   },
   (t) => [
     uniqueIndex("session_attendees_unique_idx").on(t.sessionId, t.studentProfileId),
+  ]
+);
+
+/**
+ * SessionAttendance — who was actually in the room, and when.
+ *
+ * Distinct from `sessionAttendees` above, which nothing has ever written to
+ * and structurally cannot answer the question that was asked: its foreign key
+ * points at `student_profiles`, so the *teacher's* arrival has no home in it.
+ * `sessions.actualStart` doesn't answer it either — that is stamped by
+ * whoever walks in first, student or teacher (see the join API).
+ *
+ * One row per **connection**, not per person: append-only. A student whose
+ * phone drops and who comes back gets a second row, and the report can then
+ * say "joined 6:02, dropped 6:31, back 6:33" instead of quietly rewriting
+ * history. The report collapses connections per person when it needs a single
+ * arrival time.
+ *
+ * `sessionId` is always the *canonical* row for the class occurrence (see
+ * lib/class-room.ts) — a class is spread over a group row plus one individual
+ * row per student, and attendance scattered across those is unreadable.
+ */
+export const sessionAttendance = pgTable(
+  "session_attendance",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    userId: text("user_id").notNull().references(() => users.id),
+    /** Null for the teacher and for an observing admin — neither is a learner. */
+    studentProfileId: text("student_profile_id").references(() => studentProfiles.id),
+    role: attendanceRoleEnum("role").notNull(),
+    /**
+     * The LiveKit identity (`email#random`), which is per connection. This is
+     * what a `participant_left` webhook arrives carrying, and the only way to
+     * close out the right row when somebody is in the room twice.
+     */
+    identity: text("identity").notNull(),
+    joinedAt: timestamp("joined_at").notNull().defaultNow(),
+    leftAt: timestamp("left_at"),
+    durationSeconds: integer("duration_seconds"),
+  },
+  (t) => [
+    uniqueIndex("session_attendance_identity_idx").on(t.sessionId, t.identity),
+    index("session_attendance_session_idx").on(t.sessionId),
+    index("session_attendance_org_joined_idx").on(t.orgId, t.joinedAt),
+    index("session_attendance_user_idx").on(t.userId),
   ]
 );
 
@@ -1191,6 +1252,7 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   teacher: one(users, { fields: [sessions.teacherId], references: [users.id] }),
   bookings: many(bookings),
   attendees: many(sessionAttendees),
+  attendance: many(sessionAttendance),
   chatRoom: many(chatRooms),
   feedback: many(teacherFeedback),
   progressRecords: many(progressRecords),
@@ -1199,6 +1261,13 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
 export const sessionAttendeesRelations = relations(sessionAttendees, ({ one }) => ({
   session: one(sessions, { fields: [sessionAttendees.sessionId], references: [sessions.id] }),
   studentProfile: one(studentProfiles, { fields: [sessionAttendees.studentProfileId], references: [studentProfiles.id] }),
+}));
+
+export const sessionAttendanceRelations = relations(sessionAttendance, ({ one }) => ({
+  org: one(organizations, { fields: [sessionAttendance.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [sessionAttendance.sessionId], references: [sessions.id] }),
+  user: one(users, { fields: [sessionAttendance.userId], references: [users.id] }),
+  studentProfile: one(studentProfiles, { fields: [sessionAttendance.studentProfileId], references: [studentProfiles.id] }),
 }));
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({

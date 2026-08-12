@@ -23,6 +23,7 @@ import {
   guestJoinRequests,
   notifications,
   progressRecords,
+  sessionAttendance,
   sessionAttendees,
   sessions,
   teacherFeedback,
@@ -68,6 +69,7 @@ export async function deleteSessionCascade(tx: Tx, sessionId: string) {
   await t.delete(progressRecords).where(eq(progressRecords.sessionId, sessionId));
   await t.delete(teacherFeedback).where(eq(teacherFeedback.sessionId, sessionId));
   await t.delete(sessionAttendees).where(eq(sessionAttendees.sessionId, sessionId));
+  await t.delete(sessionAttendance).where(eq(sessionAttendance.sessionId, sessionId));
   await t.delete(bookings).where(eq(bookings.sessionId, sessionId));
   await t.delete(sessions).where(eq(sessions.id, sessionId));
 }

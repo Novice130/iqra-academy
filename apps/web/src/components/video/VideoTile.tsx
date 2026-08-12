@@ -18,6 +18,7 @@ import { createPortal } from 'react-dom';
 import { isTrackReference, type TrackReferenceOrPlaceholder } from '@livekit/components-core';
 import { VideoTrack } from '@livekit/components-react';
 import { MicOffIcon, MoreIcon } from './CallIcons';
+import VolumeSlider from './VolumeSlider';
 
 /** Wide enough for "Spotlight for everyone" on one line, narrow enough for a phone. */
 const MENU_WIDTH = 240;
@@ -33,6 +34,12 @@ export interface TileActions {
   onRename?: (name: string) => void;
   /** Drops them from the call. Asks for confirmation first — it's abrupt. */
   onRemove?: () => void;
+  /**
+   * This person's playback volume, 0–1, as the whole room currently hears it.
+   * Room state rather than a local preference — see VolumeSlider.
+   */
+  volume?: number;
+  onVolume?: (volume: number) => void;
 }
 
 export default function VideoTile({
@@ -138,6 +145,7 @@ export default function VideoTile({
       actions.onCameraOff ||
       actions.onAskForCamera ||
       actions.onRename ||
+      actions.onVolume ||
       actions.onRemove);
 
   const submitRename = () => {
@@ -319,6 +327,33 @@ export default function VideoTile({
                         />
                       )}
                   {actions?.onRename && <MenuItem label="Rename…" onClick={() => setRenaming(true)} />}
+
+                  {/* Turning somebody down instead of muting them: they keep
+                      reciting, the class hears them quietly. The menu stays
+                      open while the handle is dragged — VolumeSlider stops the
+                      pointer events that would otherwise dismiss it. */}
+                  {actions?.onVolume && (
+                    <>
+                      <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
+                      {/* Same 14px inset as MenuItem — at a smaller one the
+                          speaker icon sat on the menu's edge and read as
+                          clipped. */}
+                      <div className="px-3.5 pt-0.5 pb-1.5">
+                        <div
+                          className="pb-1 text-[10px] font-semibold uppercase tracking-wider"
+                          style={{ color: 'rgba(255,255,255,0.45)' }}
+                        >
+                          Volume for everyone
+                        </div>
+                        <VolumeSlider
+                          value={actions.volume ?? 1}
+                          onChange={(v) => actions.onVolume?.(v)}
+                          label={name}
+                          compact
+                        />
+                      </div>
+                    </>
+                  )}
 
                   {/* Two taps, not a browser confirm(): the dialog steals
                       focus from the call and reads as a page error on a

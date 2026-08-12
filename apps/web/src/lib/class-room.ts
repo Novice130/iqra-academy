@@ -35,7 +35,54 @@ export const LATE_JOIN_MS = 3 * 60 * 60 * 1000;
  * absorb a 1-on-1 booked five minutes off the group slot, narrow enough not to
  * swallow the next class.
  */
-const SIBLING_WINDOW_MS = 90 * 60 * 1000;
+export const SIBLING_WINDOW_MS = 90 * 60 * 1000;
+
+/**
+ * Group already-fetched session rows into class occurrences, by the same rule
+ * `resolveClassRoom` picks a canonical row with: same teacher, scheduled
+ * starts within `SIBLING_WINDOW_MS` of each other, earliest slot wins and ties
+ * break by id.
+ *
+ * Exists so the attendance report can reconstruct occurrences over a date
+ * range without a `resolveClassRoom` round-trip per row — and, more
+ * importantly, so it groups them the same way the join API does. A report that
+ * disagreed with the room resolver about what "one class" means would show
+ * three classes of one student where there was one class of three.
+ *
+ * Rows are grouped greedily in `scheduledStart` order: the first row opens an
+ * occurrence and every later row of the same teacher starting within the
+ * window joins it. Chaining is deliberately not transitive — a row is measured
+ * against the occurrence's start, not against its nearest neighbour, or a
+ * dense day would collapse into one enormous "class".
+ */
+export function groupIntoOccurrences<T extends { id: string; teacherId: string; scheduledStart: Date | null }>(
+  rows: T[]
+): { canonical: T; sessions: T[] }[] {
+  const ordered = [...rows].sort((a, b) => {
+    const t = (a.scheduledStart?.getTime() ?? 0) - (b.scheduledStart?.getTime() ?? 0);
+    return t !== 0 ? t : a.id.localeCompare(b.id);
+  });
+
+  const occurrences: { canonical: T; sessions: T[] }[] = [];
+  const byTeacher = new Map<string, { canonical: T; sessions: T[] }>();
+
+  for (const row of ordered) {
+    const start = row.scheduledStart?.getTime() ?? 0;
+    const open = byTeacher.get(row.teacherId);
+    const openStart = open?.canonical.scheduledStart?.getTime() ?? 0;
+
+    if (open && Math.abs(start - openStart) <= SIBLING_WINDOW_MS) {
+      open.sessions.push(row);
+      continue;
+    }
+
+    const fresh = { canonical: row, sessions: [row] };
+    byTeacher.set(row.teacherId, fresh);
+    occurrences.push(fresh);
+  }
+
+  return occurrences;
+}
 
 export type RoomResolution =
   | { kind: "live"; session: SessionRow }

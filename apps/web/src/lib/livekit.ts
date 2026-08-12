@@ -24,6 +24,45 @@ export interface LiveKitRoomParams {
    * receiving the class and paying for it twice would be wasteful on a phone.
    */
   screenShare?: boolean;
+  /**
+   * Use this exact identity instead of minting one.
+   *
+   * The join API needs to know which identity it just handed out so it can
+   * write an attendance row against it and have the `participant_left`
+   * webhook find that row again. Everything else can let this be minted here.
+   */
+  identity?: string;
+}
+
+/**
+ * Build a LiveKit identity for one connection.
+ *
+ * Identity must be unique *per connection*, not per person. LiveKit closes an
+ * existing participant when a new one joins with the same identity, so using
+ * the bare email meant a teacher opening the room on their phone silently
+ * kicked their own laptop out of the class. The email stays as the prefix —
+ * everything that reasons about "who is this" (spotlight, attendance, the
+ * default-focus backfill) matches on the part before the '#', which an email
+ * address can never contain.
+ *
+ * The suffix stays random even for the screen publisher: a teacher who stops
+ * and restarts sharing must not collide with the connection LiveKit has not
+ * finished tearing down, or the new share closes the old one and then itself.
+ * `screen-` only makes it recognisable in the room list.
+ */
+export function makeIdentity(base: string, screenShare = false): string {
+  const suffix = `${screenShare ? "screen-" : ""}${Math.random().toString(36).slice(2, 8)}`;
+  return `${base}#${suffix}`;
+}
+
+/** The part of an identity before the '#' — the person, not the connection. */
+export function baseIdentity(identity: string): string {
+  return identity.split("#")[0];
+}
+
+/** True for the Android shell's separate screen-publishing connection, which is not a person. */
+export function isScreenShareIdentity(identity: string): boolean {
+  return identity.includes("#screen-");
 }
 
 export async function generateLiveKitToken(
@@ -43,20 +82,8 @@ export async function generateLiveKitToken(
     throw new Error("LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be configured");
   }
 
-  // Identity must be unique *per connection*, not per person. LiveKit closes
-  // an existing participant when a new one joins with the same identity, so
-  // using the bare email meant a teacher opening the room on their phone
-  // silently kicked their own laptop out of the class. The email stays as the
-  // prefix — everything that reasons about "who is this" (spotlight, the
-  // default-focus backfill) matches on the part before the '#', which an
-  // email address can never contain.
-  const base = userEmail || userName;
-  // The suffix stays random even for the screen publisher: a teacher who
-  // stops and restarts sharing must not collide with the connection LiveKit
-  // has not finished tearing down, or the new share closes the old one and
-  // then itself. `screen-` only makes it recognisable in the room list.
-  const suffix = `${screenShare ? "screen-" : ""}${Math.random().toString(36).slice(2, 8)}`;
-  const identity = `${base}#${suffix}`;
+  // See `makeIdentity` for why this is per connection rather than per person.
+  const identity = params.identity ?? makeIdentity(userEmail || userName, screenShare);
 
   const token = new AccessToken(LIVEKIT_CONFIG.apiKey, LIVEKIT_CONFIG.apiSecret, {
     identity,
@@ -80,6 +107,11 @@ export async function generateLiveKitToken(
 
 export function generateRoomName(sessionId: string): string {
   return `qlms-${sessionId}`;
+}
+
+/** The inverse of `generateRoomName`, for webhooks that only know the room. */
+export function sessionIdFromRoomName(roomName: string): string | null {
+  return roomName.startsWith("qlms-") ? roomName.slice("qlms-".length) : null;
 }
 
 let roomServiceClient: RoomServiceClient | null = null;

@@ -16,6 +16,7 @@ import SessionRowActions from "./SessionRowActions";
 import TodaySchedule, { type ScheduleRow } from "./TodaySchedule";
 import LocalTime from "@/components/LocalTime";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import { getAttendanceReport } from "@/lib/attendance";
 
 export default async function TeacherDashboard() {
   return withDb(async () => {
@@ -33,7 +34,7 @@ export default async function TeacherDashboard() {
   // active-classes panel from both admin accounts.
   const dbUser = await db.query.users.findFirst({
     where: eq(usersTable.id, user.id),
-    columns: { role: true },
+    columns: { role: true, orgId: true },
   });
   const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(dbUser?.role || "");
 
@@ -120,6 +121,36 @@ export default async function TeacherDashboard() {
 
   const upcomingCount = todaySessions.filter((s) => s.status === "SCHEDULED").length;
 
+  /**
+   * Attendance over the last 30 days: of the students booked into classes that
+   * have already happened, how many actually turned up.
+   *
+   * Deliberately computed through `getAttendanceReport` rather than with a
+   * quick COUNT pair. A class is several session rows — a group row plus one
+   * per student — and bookings sit on the individual rows while attendance is
+   * recorded against the canonical one, so counting the two tables directly
+   * against each other reads as half the students missing every class. The
+   * report already collapses occurrences properly, and going through it also
+   * guarantees this number agrees with the page it links to.
+   */
+  const attendanceReport = await getAttendanceReport({
+    orgId: dbUser?.orgId ?? "",
+    ...(isAdmin ? {} : { teacherId: user.id }),
+    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+    // Only classes that are already due — one scheduled for tomorrow is not a
+    // class everybody missed.
+    to: new Date(),
+  });
+
+  const expected = attendanceReport.reduce((sum, occ) => sum + occ.students.length, 0);
+  const attended = attendanceReport.reduce(
+    (sum, occ) => sum + occ.students.filter((s) => s.status !== "ABSENT").length,
+    0
+  );
+  // Nothing recorded yet reads as "--" rather than 0%, which would look like
+  // every student had missed every class.
+  const attendanceRate = expected > 0 && attended > 0 ? `${Math.round((attended / expected) * 100)}%` : "--";
+
   return (
     <div className="p-6 lg:p-10 max-w-5xl">
       {/* Greeting */}
@@ -137,7 +168,13 @@ export default async function TeacherDashboard() {
         <StatCard label="Next 48h" value={String(todaySessions.length)} sub="classes" />
         <StatCard label="This week" value={String(weekCountResult[0].count)} sub="sessions" />
         <StatCard label="Students" value={String(activeStudentsResult.length)} sub="active" />
-        <StatCard label="Attendance" value="--" sub="coming soon" />
+        <Link href="/dashboard/attendance" className="block">
+          <StatCard
+            label="Attendance"
+            value={attendanceRate}
+            sub={expected > 0 ? `${attended}/${expected} in 30 days` : "no classes yet"}
+          />
+        </Link>
       </div>
 
       {/* Admin oversight — every class running anywhere in the school, with

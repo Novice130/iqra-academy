@@ -16,6 +16,7 @@ import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { closeAttendanceRows } from "@/lib/attendance";
 
 export async function POST(
   request: NextRequest,
@@ -43,12 +44,19 @@ export async function POST(
         throw new ForbiddenError("Only the host can end this session.");
       }
 
+      const endedAt = new Date();
+
       if (session.status === "IN_PROGRESS") {
         await db
           .update(sessions)
-          .set({ status: "COMPLETED", actualEnd: new Date() })
+          .set({ status: "COMPLETED", actualEnd: endedAt })
           .where(eq(sessions.id, sessionId));
       }
+
+      // The class is over, so nobody is still in it. Anyone whose own leave
+      // never landed — the room is about to be deleted underneath them —
+      // is closed out here rather than left looking permanently present.
+      await closeAttendanceRows({ sessionId, at: endedAt }).catch(() => {});
 
       // Force-close the room immediately — disconnects any straggling
       // participants right now instead of waiting on LiveKit's empty-room

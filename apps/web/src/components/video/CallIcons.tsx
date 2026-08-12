@@ -125,3 +125,21 @@ export const FlipCameraIcon = (p: P) => (
     <path d="M8.5 21.5V18.5h3" />
   </svg>
 );
+
+/** A speaker with sound coming out of it — the per-student volume control. */
+export const VolumeIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" />
+    <path d="M15.5 9.5a3.5 3.5 0 0 1 0 5" />
+    <path d="M18 7a7 7 0 0 1 0 10" />
+  </svg>
+);
+
+/** The same speaker with the waves gone — a student turned all the way down. */
+export const VolumeOffIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M4 9.5h3.5L12 5.5v13L7.5 14.5H4z" />
+    <path d="M16 9.5l5 5" />
+    <path d="M21 9.5l-5 5" />
+  </svg>
+);
