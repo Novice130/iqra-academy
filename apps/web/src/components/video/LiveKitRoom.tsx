@@ -110,21 +110,26 @@ function useWakeLock() {
 }
 
 /**
- * iOS refuses to let script change playback volume: `HTMLMediaElement.volume`
- * is read-only in Safari and WKWebView, and volume is a hardware button only.
- * That would make the teacher's per-student slider move and do nothing on an
- * iPhone — the worst kind of broken, because it looks like it worked.
+ * Phones refuse to let script change playback volume. On iOS
+ * `HTMLMediaElement.volume` is read-only in Safari and WKWebView; Chromium
+ * ignores the setter on Android too, in Chrome and in the app's WebView alike.
+ * Either way volume is a hardware button only, which would make the teacher's
+ * per-student slider move and do nothing — the worst kind of broken, because
+ * it looks like it worked.
  *
  * `webAudioMix` routes remote audio through a Web Audio gain node instead,
- * which iOS *does* allow. It isn't the default everywhere because it also
- * takes over output routing, and `setSinkId` — how the pre-join screen's
- * speaker picker works — is unsupported on iOS anyway, so there is nothing to
- * lose there and something real to lose on desktop.
+ * which both platforms *do* allow. It isn't the default everywhere because it
+ * also takes over output routing, and `setSinkId` — how the pre-join screen's
+ * speaker picker works — is unsupported on mobile anyway, so there is nothing
+ * to lose there and something real to lose on desktop.
+ *
+ * The cost of the mix path is that its AudioContext can come up suspended;
+ * `useAudioPlaybackUnlock` in CustomVideoConference catches that.
  */
-function isIOS(): boolean {
+function needsWebAudioMix(): boolean {
   if (typeof navigator === 'undefined') return false;
   return (
-    /iP(hone|ad|od)/.test(navigator.userAgent) ||
+    /iP(hone|ad|od)|Android/.test(navigator.userAgent) ||
     // iPadOS reports itself as a Mac; the touch points give it away.
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
   );
@@ -170,9 +175,9 @@ export default function LiveKitRoom({
   const router = useRouter();
   useWakeLock();
 
-  // See isIOS: without this the teacher's volume slider is decorative on an
-  // iPhone. Empty deps — the browser doesn't change mid-call.
-  const roomOptions = useMemo(() => ({ webAudioMix: isIOS() }), []);
+  // See needsWebAudioMix: without this the teacher's volume slider is
+  // decorative on a phone. Empty deps — the browser doesn't change mid-call.
+  const roomOptions = useMemo(() => ({ webAudioMix: needsWebAudioMix() }), []);
 
   /**
    * True while the page is frozen in the back/forward cache. The browser

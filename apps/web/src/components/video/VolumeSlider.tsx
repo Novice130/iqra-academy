@@ -13,9 +13,15 @@
  * metadata and is written through a host-only API rather than being kept in
  * this component. That is also why only a moderator ever sees this control.
  *
- * The range stops at 100%: `RemoteParticipant.setVolume` ends up on
- * `HTMLMediaElement.volume`, which clamps at 1, so a "boost" would move the
+ * The range stops at 100%: that is the top of the gain curve
+ * (`lib/audio-gain.ts`), and `RemoteParticipant.setVolume` ends up on
+ * `HTMLMediaElement.volume`, which clamps at 1 — so a "boost" would move the
  * handle and change nothing.
+ *
+ * The percentage shown is slider travel, not amplitude. Clients map it through
+ * `gainForSlider` so half the travel sounds about half as loud; feeding the
+ * raw fraction to the audio (as this did at first) made 40% barely audible as
+ * a change.
  */
 
 import { useEffect, useRef, useState } from 'react';

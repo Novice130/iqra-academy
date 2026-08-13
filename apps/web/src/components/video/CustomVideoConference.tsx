@@ -22,6 +22,7 @@ import ScreenSharePill from './ScreenSharePill';
 import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
+import { gainForSlider } from '@/lib/audio-gain';
 
 /**
  * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
@@ -154,6 +155,10 @@ function parseVolumes(metadata: string | undefined): Record<string, number> {
  * Safe to drive directly: `<RoomAudioRenderer/>` below is mounted without a
  * `volume` prop, and its own setVolume effect short-circuits when that prop is
  * undefined — so it never fights these calls.
+ *
+ * The stored fraction goes through `gainForSlider` on the way in. setVolume
+ * takes raw amplitude, and handing it the slider fraction directly is why
+ * turning somebody down to 40% barely sounded different.
  */
 function useAppliedVolumes(volumes: Record<string, number>) {
   const room = useRoomContext();
@@ -162,7 +167,11 @@ function useAppliedVolumes(volumes: Record<string, number>) {
     const apply = () => {
       room.remoteParticipants.forEach((participant) => {
         const base = baseIdentity(participant.identity);
-        participant.setVolume(base ? volumes[base] ?? 1 : 1);
+        const gain = gainForSlider(base ? volumes[base] ?? 1 : 1);
+        participant.setVolume(gain);
+        // setVolume defaults to the microphone alone, so without this a
+        // student sharing a screen kept blasting its audio at full volume.
+        participant.setVolume(gain, Track.Source.ScreenShareAudio);
       });
     };
     apply();
@@ -173,6 +182,49 @@ function useAppliedVolumes(volumes: Record<string, number>) {
       room.off(RoomEvent.TrackSubscribed, apply);
     };
   }, [room, volumes]);
+}
+
+/**
+ * Unblocks audio playback when the browser refuses to start it on its own.
+ *
+ * Mobile runs with `webAudioMix` (see LiveKitRoom) so the volume slider has a
+ * gain node to move, and a Web Audio context can come up suspended if the
+ * browser didn't count the join tap as a gesture for it. Suspended means the
+ * whole class is silent, not just quiet — far worse than the problem the mix
+ * mode solves — so take the next tap anywhere and start audio with it.
+ */
+function useAudioPlaybackUnlock() {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    let armed: (() => void) | null = null;
+
+    const disarm = () => {
+      if (!armed) return;
+      window.removeEventListener('pointerdown', armed);
+      armed = null;
+    };
+
+    const check = () => {
+      if (room.canPlaybackAudio) {
+        disarm();
+        return;
+      }
+      if (armed) return;
+      armed = () => {
+        room.startAudio().catch(() => {});
+        disarm();
+      };
+      window.addEventListener('pointerdown', armed);
+    };
+
+    check();
+    room.on(RoomEvent.AudioPlaybackStatusChanged, check);
+    return () => {
+      room.off(RoomEvent.AudioPlaybackStatusChanged, check);
+      disarm();
+    };
+  }, [room]);
 }
 
 /**
@@ -378,6 +430,7 @@ export default function CustomVideoConference({
   // re-run the apply effect on every render, resetting every volume.
   const volumes = useMemo(() => parseVolumes(metadata), [metadata]);
   useAppliedVolumes(volumes);
+  useAudioPlaybackUnlock();
 
   const setVolume = useCallback(
     (base: string, volume: number) => {

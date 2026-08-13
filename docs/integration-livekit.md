@@ -199,18 +199,40 @@ back as quiet as the teacher left them. The apply effect re-runs on
 `setVolume` remembers the value on the participant *object*, and a reconnect
 builds a new one.
 
-Three things worth knowing before touching it:
+**The stored number is slider travel, not amplitude.** `setVolume` takes raw
+amplitude, and the first version handed it the fraction directly — so 50%
+meant −6 dB, which the ear reads as about two thirds as loud, and turning a
+student down "sounded almost the same". Clients now map the fraction through
+`gainForSlider` (`src/lib/audio-gain.ts`), which spreads the travel over 40 dB:
+
+| Slider | 100% | 75% | 50% | 25% | 0% |
+|--------|------|-----|-----|-----|-----|
+| Gain   | 1.0  | 0.32 | 0.10 | 0.03 | 0 (silent) |
+
+Metadata, the API and the UI all still talk in fractions; only the last step
+before the audio applies the curve. Anything asserting on a real `<audio>`
+element must expect the *gain*, not the percentage.
+
+Four things worth knowing before touching it:
 
 - **`patchRoomMetadata` (`src/lib/room-metadata.ts`) exists because
   `updateRoomMetadata` replaces the whole string.** The spotlight route used to
   write `{ spotlightIdentity }` outright, which was harmless only while
   spotlight was the sole key. Read, merge, write — always.
-- **The range stops at 100%.** `setVolume` lands on `HTMLMediaElement.volume`,
-  which clamps at 1; a "boost" would move the handle and do nothing.
-- **iOS makes `volume` read-only**, so the room opts into `webAudioMix` on iOS
-  only (`isIOS()` in `LiveKitRoom.tsx`), routing audio through a gain node. It
-  is not enabled everywhere because it also takes over output routing, and
-  `setSinkId` — the pre-join speaker picker — is unsupported on iOS anyway.
+- **The range stops at 100%.** That is the top of the curve, and `setVolume`
+  lands on `HTMLMediaElement.volume`, which clamps at 1; a "boost" would move
+  the handle and do nothing.
+- **Both audio sources get the value.** `setVolume` defaults to the microphone
+  alone, so it is called a second time for `Track.Source.ScreenShareAudio` —
+  otherwise a shared screen keeps playing at full volume.
+- **Phones ignore `volume` entirely** — read-only on iOS, ignored by Chromium
+  on Android (Chrome and the app's WebView). Both opt into `webAudioMix`
+  (`needsWebAudioMix()` in `LiveKitRoom.tsx`), routing audio through a gain
+  node. Desktop stays off it: it takes over output routing, and `setSinkId` —
+  the pre-join speaker picker — only exists on desktop. Its one hazard is an
+  AudioContext that starts suspended, which silences the whole class;
+  `useAudioPlaybackUnlock` in `CustomVideoConference.tsx` calls `startAudio()`
+  on the next tap when `canPlaybackAudio` is false.
 
 Two surfaces, one `VolumeSlider`: the tile ⋮ menu and the People panel row.
 Moderator-only, because it changes what everyone hears.

@@ -57,16 +57,22 @@ export async function POST(
       const user = await db.query.users.findFirst({
         where: eq(users.id, ctx.userId),
       });
-      const isAdmin = user ? ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role) : false;
+      // An admin can host only their own org's sessions. SUPER_ADMIN is the
+      // only role allowed across orgs.
+      const isAdmin = user
+        ? user.role === "SUPER_ADMIN" ||
+          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
+        : false;
       const isHost = session.teacherId === ctx.userId || isAdmin;
 
       if (!isHost) {
         throw new ForbiddenError("Only the host can change a participant's volume.");
       }
 
-      // Above 1 does nothing — `setVolume` lands on HTMLMediaElement.volume,
-      // which clamps. Better to reject the impossible than to store a boost
-      // the room will silently ignore.
+      // The stored value is the slider's own fraction; clients run it through
+      // `gainForSlider` before it reaches the audio. 1 is the top of that
+      // curve, so a boost above it has nothing to map to — better to clamp
+      // than to store a value the room will silently ignore.
       const clamped = Math.min(1, Math.max(0, volume));
 
       const roomName = generateRoomName(sessionId);
