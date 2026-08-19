@@ -174,6 +174,7 @@ function openPicker(): Promise<{ id: string; withAudio: boolean } | null> {
         preload: path.join(__dirname, '../preload/picker.js'),
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: true,
       },
     });
 

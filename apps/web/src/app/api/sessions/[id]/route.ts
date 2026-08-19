@@ -34,7 +34,12 @@ export async function DELETE(
       const user = await db.query.users.findFirst({
         where: eq(users.id, ctx.userId),
       });
-      const isAdmin = user ? ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role) : false;
+      // An admin can delete only their own org's sessions. SUPER_ADMIN is the
+      // only role allowed across orgs.
+      const isAdmin = user
+        ? user.role === "SUPER_ADMIN" ||
+          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
+        : false;
       const isOwner = session.teacherId === ctx.userId || isAdmin;
 
       if (!isOwner) {

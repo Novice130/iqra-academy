@@ -106,7 +106,17 @@ export const paymentMethodEnum = pgEnum("PaymentMethod", [
   "AUTO_CHARGE",
 ]);
 
-/** Plan tiers: FREE, INDIVIDUAL ($70), GROUP ($50), SIBLINGS ($100). */
+/**
+ * Plan tiers, by how many students from one family they cover.
+ *
+ * The names are historical; the meanings were remapped in migration
+ * 0004_family_plans.sql because retiring a Postgres enum value costs more than
+ * it is worth. Read them as:
+ *   FREE        webinars only
+ *   INDIVIDUAL  1 student   $70
+ *   GROUP       2 students  $120  — same family, not strangers
+ *   SIBLINGS    3 students  $150
+ */
 export const planTierEnum = pgEnum("PlanTier", [
   "FREE",
   "INDIVIDUAL",
@@ -162,6 +172,16 @@ export const recordingAccessEnum = pgEnum("RecordingAccess", [
 export const notificationTypeEnum = pgEnum("NotificationType", [
   "MEETING_STARTED",
   "NEW_MESSAGE",
+  /** A student asked for a trial class — goes to the teacher and the admins. */
+  "TRIAL_REQUESTED",
+  /** The trial is on the books — goes to the family. */
+  "TRIAL_CONFIRMED",
+  /** An invoice was issued. The amount lives in the email, never in the app. */
+  "INVOICE_ISSUED",
+  /** Somebody was made a teacher and needs to set their hours. */
+  "ROLE_GRANTED",
+  /** A class moved, because two consecutive ones were combined into one. */
+  "CLASS_MOVED",
 ]);
 
 /** Direct call ring state machine. */
@@ -231,6 +251,16 @@ export const auditActionEnum = pgEnum("AuditAction", [
   "EXPORT_GENERATED",
   "SETTINGS_CHANGED",
   "RECORDING_ACCESS_CHANGED",
+  /** An admin raised an invoice by hand. See api/admin/invoices. */
+  "INVOICE_ISSUED",
+  /** An admin recorded a payment against one. */
+  "INVOICE_PAID",
+  /** An admin voided one — raised in error, or superseded. */
+  "INVOICE_VOIDED",
+  /** Two consecutive classes were combined into one. */
+  "SESSION_MERGED",
+  /** ...and separated again. */
+  "SESSION_UNMERGED",
 ]);
 
 // ============================================================================
@@ -362,9 +392,14 @@ export const observerEmails = pgTable(
  * Plan — pricing tier belonging to an org.
  * 📚 PRICING RULES:
  * - FREE: $0, webinar only, no chat.
- * - INDIVIDUAL: $70/mo, 4 classes/week, 1:1.
- * - GROUP: $50/mo, 4 classes/week, group of 3.
- * - SIBLINGS: $100/mo, 4 classes/week PER CHILD, up to 3 children.
+ * - INDIVIDUAL: $70/mo, 4 classes/week, 1 student.
+ * - GROUP: $120/mo, 4 classes/week PER CHILD, 2 students from one family.
+ * - SIBLINGS: $150/mo, 4 classes/week PER CHILD, 3 students from one family.
+ *
+ * Classes are 30 minutes. Amounts live in three places that must agree: these
+ * rows, `PRICING` in src/lib/stripe.ts, and this comment. Families never see
+ * any of them in the app — only in the emailed invoice (App Store 3.1.1, see
+ * src/lib/pricing-visibility.ts).
  */
 export const plans = pgTable(
   "plans",
@@ -445,9 +480,20 @@ export const invoices = pgTable(
     amountDueCents: integer("amount_due_cents").notNull(),
     amountPaidCents: integer("amount_paid_cents").notNull().default(0),
     currency: text("currency").notNull().default("usd"),
-    /** URL to Stripe's hosted invoice page (for manual payment). */
+    /**
+     * URL to Stripe's hosted invoice page (for manual payment). Also where a
+     * plain payment link goes when we add one — a pay button is a write to
+     * this column, not a migration.
+     */
     hostedInvoiceUrl: text("hosted_invoice_url"),
     invoicePdf: text("invoice_pdf"),
+    /**
+     * The admin who raised it. Null for anything Stripe created, and for rows
+     * that predate manual invoicing. A disputed amount needs an author.
+     */
+    issuedById: text("issued_by_id").references(() => users.id),
+    /** Free text shown on the invoice email — "includes Eid week", etc. */
+    notes: text("notes"),
     dueDate: timestamp("due_date"),
     paidAt: timestamp("paid_at"),
     periodStart: timestamp("period_start"),
@@ -534,7 +580,23 @@ export const teacherAvailability = pgTable(
     startTime: time("start_time").notNull(),
     /** End time in teacher's timezone (e.g., "17:00"). */
     endTime: time("end_time").notNull(),
-    timezone: text("timezone").notNull().default("America/New_York"),
+    /**
+     * The teacher's own IANA zone, and the only thing that makes the two
+     * columns above mean anything.
+     *
+     * This deliberately has **no default**. It used to default to
+     * "America/New_York" while the write path never set it, so every row
+     * claimed a zone nobody was in — a teacher in Asia/Kolkata had their
+     * 6:00 PM stored as 6:00 PM Eastern. A wrong default is worse than a
+     * missing one, because it looks like an answer. Now a write that forgets
+     * the zone fails loudly instead.
+     */
+    timezone: text("timezone").notNull(),
+    /**
+     * Length of one bookable class in this window. Classes are 30 minutes;
+     * the slot grid is generated from this rather than from a hardcoded hour.
+     */
+    slotMinutes: smallint("slot_minutes").notNull().default(30),
     /** Whether this slot is currently active. */
     isActive: boolean("is_active").notNull().default(true),
     /** Cal.com schedule ID for syncing. */
@@ -545,6 +607,37 @@ export const teacherAvailability = pgTable(
   (t) => [
     index("teacher_availability_org_idx").on(t.orgId),
     index("teacher_availability_teacher_idx").on(t.teacherId),
+  ]
+);
+
+/**
+ * TeacherTimeOff — a stretch of time the teacher is not available, overriding
+ * the recurring weekly pattern.
+ *
+ * Recurring-only availability cannot say "I am away for Eid", "I am
+ * travelling next Tuesday", or "I am ill today". Without this the first of
+ * those is a support ticket and a student sitting alone in a room.
+ *
+ * Stored as **absolute instants**, not date + wall clock, for two reasons:
+ * it matches `sessions.scheduledStart` so subtracting busy time from
+ * generated slots is a plain instant comparison, and it keeps the server out
+ * of zone arithmetic entirely — the editor already knows the teacher's zone
+ * and converts before POSTing.
+ */
+export const teacherTimeOff = pgTable(
+  "teacher_time_off",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    teacherId: text("teacher_id").notNull().references(() => users.id),
+    startsAt: timestamp("starts_at").notNull(),
+    endsAt: timestamp("ends_at").notNull(),
+    reason: text("reason"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("teacher_time_off_teacher_range_idx").on(t.teacherId, t.startsAt, t.endsAt),
+    index("teacher_time_off_org_idx").on(t.orgId),
   ]
 );
 
@@ -614,6 +707,22 @@ export const sessions = pgTable(
      * or quota-consuming. This flag controls which.
      */
     consumesQuota: boolean("consumes_quota").notNull().default(true),
+    /**
+     * A free trial class. Structurally an ordinary session so the whole call
+     * stack — LiveKit rooms, ringing, attendance, class-room.ts — keeps
+     * working unchanged; a separate trial table would have broken all of it.
+     * Always paired with `consumesQuota: false`, since a prospect has no
+     * subscription to draw from.
+     */
+    isTrial: boolean("is_trial").notNull().default(false),
+    /**
+     * Set when this session was merged into another one. The row is left
+     * CANCELLED rather than deleted — session_attendance, progress_records,
+     * notifications, chat_rooms and bookings all FK to sessions, so a delete
+     * either fails on the constraint or orphans history. This pointer lets the
+     * UI and the attendance report follow a cancelled row to its replacement.
+     */
+    mergedIntoId: text("merged_into_id"),
 
     // Video integration (LiveKit)
     videoRoomName: text("video_room_name").unique(),

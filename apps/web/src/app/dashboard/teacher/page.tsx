@@ -7,13 +7,15 @@ import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, desc, sql, count, isNull, or } from "drizzle-orm";
-import { sessions, bookings, studentProfiles, users as usersTable } from "@/db/schema";
+import { sessions, bookings, studentProfiles, teacherAvailability, users as usersTable } from "@/db/schema";
+import { redirect } from "next/navigation";
 import { startOfDay, endOfDay, startOfWeek, endOfWeek, formatDistanceToNow } from "date-fns";
 import Link from "next/link";
 import StartInstantMeetingButton from "./StartInstantMeetingButton";
 import CleanupInstantMeetingsButton from "./CleanupInstantMeetingsButton";
 import SessionRowActions from "./SessionRowActions";
 import TodaySchedule, { type ScheduleRow } from "./TodaySchedule";
+import CombineClasses from "./CombineClasses";
 import LocalTime from "@/components/LocalTime";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import { getAttendanceReport } from "@/lib/attendance";
@@ -38,6 +40,19 @@ export default async function TeacherDashboard() {
   });
   const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(dbUser?.role || "");
 
+  // A teacher with no hours declared cannot be booked, and nothing else on
+  // this page works until they are. Send them to the editor once, on their
+  // first visit after being promoted. Derived from a row count rather than an
+  // "onboarded" column: the count *is* the fact, and a flag could disagree
+  // with it. Admins are exempt — they land here to watch, not to teach.
+  if (!isAdmin) {
+    const [{ n }] = await db
+      .select({ n: count() })
+      .from(teacherAvailability)
+      .where(eq(teacherAvailability.teacherId, user.id));
+    if (n === 0) redirect("/dashboard/teacher/availability?onboarding=1");
+  }
+
   // The server runs in UTC, so "today" here is a ±1 day window on purpose —
   // TodaySchedule narrows it to the viewer's own calendar day in the browser.
   const todayStart = startOfDay(new Date(Date.now() - 24 * 60 * 60 * 1000));
@@ -50,7 +65,11 @@ export default async function TeacherDashboard() {
     where: and(
       eq(sessions.teacherId, user.id),
       gte(sessions.scheduledStart, todayStart),
-      lte(sessions.scheduledStart, todayEnd)
+      lte(sessions.scheduledStart, todayEnd),
+      // Classes combined into another one are cancelled rows kept for their
+      // history (lib/class-merge.ts). Showing them here would put the same
+      // class on the schedule twice, once crossed out.
+      isNull(sessions.mergedIntoId)
     ),
     with: {
       bookings: {
@@ -70,7 +89,8 @@ export default async function TeacherDashboard() {
       and(
         eq(sessions.teacherId, user.id),
         gte(sessions.scheduledStart, weekStart),
-        lte(sessions.scheduledStart, weekEnd)
+        lte(sessions.scheduledStart, weekEnd),
+        isNull(sessions.mergedIntoId)
       )
     );
 
@@ -232,6 +252,11 @@ export default async function TeacherDashboard() {
           </div>
         </div>
       )}
+
+      {/* Two classes back to back, with one student each, are one class the
+          teacher has not been asked about yet. Hidden entirely when there is
+          nothing to suggest. */}
+      <CombineClasses />
 
       <div className="grid lg:grid-cols-5 gap-6">
         {/* Today's schedule */}

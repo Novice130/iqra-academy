@@ -1,177 +1,373 @@
 "use client";
 
 /**
- * Booking Page — 3-step class booking wizard
+ * Book a trial class.
  *
- * Clean, minimal step flow: Track → Date → Time Slot → Confirm.
+ * Replaces a mock that had hardcoded teacher names and a setTimeout where the
+ * network call should have been — and which was linked from the sidebar, the
+ * mobile tab bar and the dashboard, so students could already press a button
+ * that pretended to work.
+ *
+ * ── Times ───────────────────────────────────────────────────────────────────
+ * Every slot arrives as an absolute instant and is rendered through
+ * `LocalTime`, so it lands in the viewer's own zone with no arithmetic here.
+ * Underneath each one we also show the teacher's hour: a family should be able
+ * to see that the person teaching them is awake, and a mis-entered teacher
+ * zone shows up as an obviously silly number rather than as a no-show three
+ * weeks later.
+ *
+ * No prices anywhere on this page — see lib/pricing-visibility.ts.
  */
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import LocalTime, { formatInZone, useViewerTimeZone } from "@/components/LocalTime";
 
-const TRACKS = [
-  { id: "QAIDAH", name: "Qaidah", desc: "Learn Arabic letters and sounds" },
-  { id: "QURAN_READING", name: "Quran Reading", desc: "Tajweed rules and recitation" },
-  { id: "HIFZ", name: "Hifz", desc: "Memorization with guided repetition" },
-];
+interface Teacher {
+  id: string;
+  name: string | null;
+  image: string | null;
+  timezone: string | null;
+}
 
-const SLOTS = [
-  { time: "9:00 AM", teacher: "Ustadh Ali Rahman", open: true },
-  { time: "10:00 AM", teacher: "Ustadha Maryam Khan", open: true },
-  { time: "11:30 AM", teacher: "Ustadh Ali Rahman", open: false },
-  { time: "2:00 PM", teacher: "Ustadha Maryam Khan", open: true },
-  { time: "4:00 PM", teacher: "Ustadh Ali Rahman", open: true },
-  { time: "7:00 PM", teacher: "Ustadha Maryam Khan", open: false },
-];
+interface Slot {
+  teacherId: string;
+  teacherName: string;
+  teacherTimeZone: string;
+  startsAt: string;
+  endsAt: string;
+}
 
 export default function BookingPage() {
-  const [track, setTrack] = useState("QAIDAH");
-  const [day, setDay] = useState(0);
-  const [slot, setSlot] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [done, setDone] = useState(false);
+  const viewerZone = useViewerTimeZone();
 
-  const days = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date();
-    d.setDate(d.getDate() + i);
-    return {
-      short: d.toLocaleDateString("en-US", { weekday: "short" }),
-      date: d.getDate(),
-      month: d.toLocaleDateString("en-US", { month: "short" }),
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacherId, setTeacherId] = useState<string>("");
+  const [slots, setSlots] = useState<Slot[]>([]);
+  const [dayKey, setDayKey] = useState<string>("");
+  const [chosen, setChosen] = useState<Slot | null>(null);
+
+  const [loadingTeachers, setLoadingTeachers] = useState(true);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [booking, setBooking] = useState(false);
+  const [done, setDone] = useState<Slot | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/teachers");
+        if (!res.ok) throw new Error("Couldn't load teachers.");
+        const data = (await res.json()) as { teachers: Teacher[] };
+        setTeachers(data.teachers);
+        if (data.teachers.length === 1) setTeacherId(data.teachers[0].id);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        setLoadingTeachers(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!teacherId) {
+      setSlots([]);
+      return;
+    }
+    let cancelled = false;
+    setLoadingSlots(true);
+    setChosen(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`);
+        if (!res.ok) throw new Error("Couldn't load available times.");
+        const data = (await res.json()) as { slots: Slot[] };
+        if (cancelled) return;
+        setSlots(data.slots);
+        setDayKey("");
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        if (!cancelled) setLoadingSlots(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
     };
-  });
+  }, [teacherId]);
 
-  const handleBook = async () => {
-    if (!slot) return;
-    setLoading(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setLoading(false);
-    setDone(true);
-    setTimeout(() => setDone(false), 4000);
-    setSlot(null);
+  /**
+   * Group by the viewer's calendar day, not by UTC's. A 7:30 PM Chicago class
+   * is already "tomorrow" in UTC, and a student should not be offered
+   * Wednesday's slot under Thursday's heading.
+   */
+  const byDay = useMemo(() => {
+    const map = new Map<string, Slot[]>();
+    for (const s of slots) {
+      const key = formatInZone(s.startsAt, "full-date", false, viewerZone || undefined);
+      const list = map.get(key) ?? [];
+      list.push(s);
+      map.set(key, list);
+    }
+    return map;
+  }, [slots, viewerZone]);
+
+  const dayKeys = useMemo(() => [...byDay.keys()], [byDay]);
+  const activeDay = dayKey || dayKeys[0] || "";
+  const daySlots = byDay.get(activeDay) ?? [];
+
+  async function confirm() {
+    if (!chosen) return;
+    setBooking(true);
+    setError("");
+    try {
+      const res = await fetch("/api/trials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teacherId: chosen.teacherId, startsAt: chosen.startsAt }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(data.error || "We couldn't book that time.");
+      setDone(chosen);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      // The slot may have gone while they were deciding. Refresh so the grid
+      // stops offering something that is no longer there.
+      setChosen(null);
+      if (teacherId) {
+        fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d) => d && setSlots(d.slots))
+          .catch(() => {});
+      }
+    } finally {
+      setBooking(false);
+    }
+  }
+
+  const card: React.CSSProperties = {
+    border: "1px solid var(--border)",
+    borderRadius: "14px",
+    padding: "18px",
+    background: "var(--bg-elevated)",
   };
 
-  return (
-    <div className="p-6 lg:p-10 max-w-3xl">
-      <div className="mb-10">
-        <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
-          Book a Class
+  if (done) {
+    return (
+      <div style={{ padding: "32px 16px", maxWidth: "560px", margin: "0 auto", textAlign: "center" }}>
+        <div style={{ fontSize: "44px", marginBottom: "12px" }}>🌙</div>
+        <h1 style={{ fontSize: "22px", fontWeight: 700, color: "var(--text-primary)", margin: "0 0 8px" }}>
+          Your trial class is booked
         </h1>
-        <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-          Choose your track, date, and time
+        <p style={{ fontSize: "16px", color: "var(--text-primary)", margin: "0 0 4px" }}>
+          <LocalTime iso={done.startsAt} mode="date-time" withZone />
         </p>
+        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: 0 }}>
+          with {done.teacherName}
+        </p>
+        <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "20px", lineHeight: 1.6 }}>
+          We&apos;ve emailed your teacher. You&apos;ll find the class on your schedule, and
+          the Join button appears shortly before it starts.
+        </p>
+        <a
+          href="/dashboard/schedule"
+          style={{
+            display: "inline-block",
+            marginTop: "20px",
+            padding: "11px 22px",
+            borderRadius: "10px",
+            background: "var(--accent)",
+            color: "#fff",
+            textDecoration: "none",
+            fontWeight: 600,
+            fontSize: "15px",
+          }}
+        >
+          See my schedule
+        </a>
       </div>
+    );
+  }
 
-      {/* Success */}
-      {done && (
-        <div className="card p-4 mb-6 animate-in flex items-center gap-3" style={{
-          background: "var(--accent-light)", border: `1px solid ${`rgba(10,137,103,0.15)`}`
-        }}>
-          <svg className="w-5 h-5 shrink-0" style={{ color: "var(--accent)" }} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          <span className="text-sm font-medium" style={{ color: "var(--accent)" }}>
-            Class booked successfully!
-          </span>
+  return (
+    <div style={{ padding: "24px 16px", maxWidth: "760px", margin: "0 auto" }}>
+      <h1 style={{ fontSize: "22px", fontWeight: 700, color: "var(--text-primary)", margin: 0 }}>
+        Book a trial class
+      </h1>
+      <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
+        Half an hour, one to one, no charge.
+        {viewerZone && ` All times shown in ${viewerZone.replace("_", " ")}.`}
+      </p>
+
+      {error && (
+        <div
+          style={{
+            margin: "16px 0",
+            padding: "11px 14px",
+            borderRadius: "10px",
+            background: "#fee2e2",
+            color: "#991b1b",
+            fontSize: "14px",
+          }}
+        >
+          {error}
         </div>
       )}
 
-      {/* Step 1: Track */}
-      <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
-          1 · Track
+      {/* 1 — teacher */}
+      <section style={{ ...card, marginTop: "20px" }}>
+        <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)", margin: "0 0 12px" }}>
+          1. Choose a teacher
         </h2>
-        <div className="grid sm:grid-cols-3 gap-3">
-          {TRACKS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => setTrack(t.id)}
-              className="card p-4 text-left transition-all"
-              style={track === t.id ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" } : {}}
-            >
-              <div className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{t.name}</div>
-              <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>{t.desc}</div>
-            </button>
-          ))}
-        </div>
+        {loadingTeachers ? (
+          <p style={{ color: "var(--text-tertiary)", fontSize: "14px", margin: 0 }}>Loading…</p>
+        ) : teachers.length === 0 ? (
+          <p style={{ color: "var(--text-tertiary)", fontSize: "14px", margin: 0 }}>
+            No teachers are taking bookings yet. Please check back shortly.
+          </p>
+        ) : (
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+            {teachers.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => setTeacherId(t.id)}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: "10px",
+                  border: `1px solid ${teacherId === t.id ? "var(--accent)" : "var(--border)"}`,
+                  background: teacherId === t.id ? "var(--accent)" : "transparent",
+                  color: teacherId === t.id ? "#fff" : "var(--text-primary)",
+                  fontSize: "14px",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                }}
+              >
+                {t.name || "Teacher"}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
-      {/* Step 2: Date */}
-      <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
-          2 · Date
-        </h2>
-        <div className="flex gap-2 overflow-x-auto pb-1">
-          {days.map((d, i) => (
-            <button
-              key={i}
-              onClick={() => { setDay(i); setSlot(null); }}
-              className="flex flex-col items-center min-w-[56px] py-3 px-1 rounded-xl transition-all"
-              style={day === i
-                ? { background: "var(--accent)", color: "#fff" }
-                : { background: "var(--bg-elevated)", border: "1px solid var(--border)", color: "var(--text-secondary)" }
-              }
-            >
-              <span className="text-[10px] font-medium uppercase">{d.short}</span>
-              <span className="text-lg font-bold mt-0.5">{d.date}</span>
-              <span className="text-[10px]">{d.month}</span>
-            </button>
-          ))}
-        </div>
-      </section>
+      {/* 2 — day and time */}
+      {teacherId && (
+        <section style={{ ...card, marginTop: "16px" }}>
+          <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)", margin: "0 0 12px" }}>
+            2. Pick a time
+          </h2>
 
-      {/* Step 3: Time */}
-      <section className="mb-8">
-        <h2 className="text-xs font-semibold uppercase tracking-widest mb-3" style={{ color: "var(--text-tertiary)" }}>
-          3 · Available Slots
-        </h2>
-        <div className="space-y-2">
-          {SLOTS.map((s) => (
-            <button
-              key={s.time}
-              onClick={() => s.open && setSlot(s.time)}
-              disabled={!s.open}
-              className="card w-full p-4 text-left flex items-center gap-4 transition-all"
-              style={
-                slot === s.time
-                  ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" }
-                  : !s.open
-                    ? { opacity: 0.4, cursor: "not-allowed" }
-                    : {}
-              }
-            >
-              <div className="flex-1">
-                <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{s.time}</div>
-                <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>{s.teacher} · 30 min</div>
+          {loadingSlots ? (
+            <p style={{ color: "var(--text-tertiary)", fontSize: "14px", margin: 0 }}>
+              Finding open times…
+            </p>
+          ) : slots.length === 0 ? (
+            <p style={{ color: "var(--text-tertiary)", fontSize: "14px", margin: 0 }}>
+              This teacher has no open times in the next two weeks.
+            </p>
+          ) : (
+            <>
+              <div style={{ display: "flex", gap: "8px", overflowX: "auto", paddingBottom: "10px" }}>
+                {dayKeys.map((k) => (
+                  <button
+                    key={k}
+                    onClick={() => {
+                      setDayKey(k);
+                      setChosen(null);
+                    }}
+                    style={{
+                      padding: "8px 14px",
+                      borderRadius: "9px",
+                      whiteSpace: "nowrap",
+                      border: `1px solid ${k === activeDay ? "var(--accent)" : "var(--border)"}`,
+                      background: k === activeDay ? "var(--accent)" : "transparent",
+                      color: k === activeDay ? "#fff" : "var(--text-secondary)",
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {k}
+                  </button>
+                ))}
               </div>
-              {s.open ? (
-                slot === s.time ? (
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "var(--accent)" }}>
-                    <svg className="w-3 h-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                    </svg>
-                  </div>
-                ) : (
-                  <div className="w-5 h-5 rounded-full" style={{ border: "2px solid var(--border)" }} />
-                )
-              ) : (
-                <span className="text-[11px] font-medium" style={{ color: "var(--text-tertiary)" }}>Booked</span>
-              )}
-            </button>
-          ))}
-        </div>
-      </section>
 
-      {/* Confirm */}
-      <div className="flex justify-end">
-        <button
-          onClick={handleBook}
-          disabled={!slot || loading}
-          className="btn-primary"
-          style={{ padding: "12px 32px" }}
-        >
-          {loading ? "Booking…" : "Confirm Booking"}
-        </button>
-      </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))",
+                  gap: "10px",
+                  marginTop: "10px",
+                }}
+              >
+                {daySlots.map((s) => {
+                  const active = chosen?.startsAt === s.startsAt;
+                  return (
+                    <button
+                      key={s.startsAt}
+                      onClick={() => setChosen(s)}
+                      style={{
+                        padding: "11px 12px",
+                        borderRadius: "10px",
+                        textAlign: "left",
+                        border: `1px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                        background: active ? "var(--accent)" : "transparent",
+                        color: active ? "#fff" : "var(--text-primary)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      <div style={{ fontSize: "15px", fontWeight: 600 }}>
+                        <LocalTime iso={s.startsAt} mode="time" />
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "11.5px",
+                          marginTop: "3px",
+                          color: active ? "rgba(255,255,255,0.85)" : "var(--text-tertiary)",
+                        }}
+                      >
+                        {formatInZone(s.startsAt, "time", false, s.teacherTimeZone)} for your teacher
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      )}
+
+      {/* 3 — confirm */}
+      {chosen && (
+        <section style={{ ...card, marginTop: "16px" }}>
+          <h2 style={{ fontSize: "14px", fontWeight: 600, color: "var(--text-primary)", margin: "0 0 10px" }}>
+            3. Confirm
+          </h2>
+          <p style={{ fontSize: "15px", color: "var(--text-primary)", margin: "0 0 4px" }}>
+            <LocalTime iso={chosen.startsAt} mode="date-time" withZone /> with {chosen.teacherName}
+          </p>
+          <p style={{ fontSize: "13px", color: "var(--text-tertiary)", marginTop: 0 }}>
+            30 minutes · that&apos;s{" "}
+            {formatInZone(chosen.startsAt, "weekday-time", false, chosen.teacherTimeZone)} where
+            they are
+          </p>
+          <button
+            onClick={confirm}
+            disabled={booking}
+            style={{
+              marginTop: "14px",
+              padding: "12px 24px",
+              borderRadius: "10px",
+              border: "none",
+              background: "var(--accent)",
+              color: "#fff",
+              fontSize: "15px",
+              fontWeight: 600,
+              cursor: booking ? "not-allowed" : "pointer",
+              opacity: booking ? 0.6 : 1,
+            }}
+          >
+            {booking ? "Booking…" : "Book this trial class"}
+          </button>
+        </section>
+      )}
     </div>
   );
 }

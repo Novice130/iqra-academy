@@ -9,10 +9,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db, withDb } from "@/lib/db";
-import { eq, desc } from "drizzle-orm";
-import { observerEmails } from "@/db/schema";
+import { eq, desc, inArray } from "drizzle-orm";
+import { observerEmails, studentProfiles } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
-import { handleApiError } from "@/lib/errors";
+import { handleApiError, ForbiddenError } from "@/lib/errors";
 
 const observerSchema = z.object({
   email: z.string().email("Must be a valid email"),
@@ -20,11 +20,59 @@ const observerSchema = z.object({
   frequency: z.enum(["weekly", "daily"]).default("weekly"),
 });
 
+/**
+ * Only a student (managing their own children's observers) or an admin may
+ * touch observer config. TEACHER is deliberately excluded.
+ */
+async function requireObserverRole(request: NextRequest) {
+  const authResult = await requireAuth(request);
+  if (authResult instanceof NextResponse) return authResult;
+  const ctx = authResult;
+
+  if (!["STUDENT", "ORG_ADMIN", "SUPER_ADMIN"].includes(ctx.role)) {
+    return NextResponse.json(
+      { error: "Forbidden", message: "Only students and admins can manage observer emails." },
+      { status: 403 }
+    );
+  }
+  return ctx;
+}
+
+/**
+ * Every profileId must belong to the caller's org, and a student is further
+ * restricted to their own profiles. Observer config referencing another
+ * tenant's child is how update emails leak across orgs.
+ */
+async function assertProfilesOwned(
+  ctx: { userId: string; orgId: string; role: string },
+  profileIds: string[]
+) {
+  if (profileIds.length === 0) return;
+
+  const profiles = await db.query.studentProfiles.findMany({
+    where: inArray(studentProfiles.id, profileIds),
+    columns: { id: true, userId: true, orgId: true },
+  });
+
+  if (profiles.length !== profileIds.length) {
+    throw new ForbiddenError("One or more profile ids are not valid.");
+  }
+
+  for (const profile of profiles) {
+    if (profile.orgId !== ctx.orgId) {
+      throw new ForbiddenError("You can only attach observers to profiles in your own organization.");
+    }
+    if (ctx.role === "STUDENT" && profile.userId !== ctx.userId) {
+      throw new ForbiddenError("You can only attach observers to your own profiles.");
+    }
+  }
+}
+
 /** GET /api/admin/observers — list observer emails for the current user */
 export async function GET(request: NextRequest) {
   return withDb(async () => {
     try {
-      const authResult = await requireAuth(request);
+      const authResult = await requireObserverRole(request);
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
@@ -44,12 +92,14 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   return withDb(async () => {
     try {
-      const authResult = await requireAuth(request);
+      const authResult = await requireObserverRole(request);
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
       const body = await request.json();
       const data = observerSchema.parse(body);
+
+      await assertProfilesOwned(ctx, data.profileIds);
 
       const [observer] = await db.insert(observerEmails).values({
         userId: ctx.userId,

@@ -13,6 +13,8 @@ import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import DashboardChrome from "./DashboardChrome";
 import { ViewerTimeZoneProvider } from "@/components/LocalTime";
+import TimeZoneConfirmBanner from "@/components/TimeZoneConfirmBanner";
+import { resolveViewerZone } from "@/lib/viewer-zone";
 import { isNativeAppUserAgent } from "@/lib/native-app";
 
 export default async function DashboardLayout({
@@ -29,7 +31,7 @@ export default async function DashboardLayout({
     }
 
     const dbUser = await db.query.users.findFirst({
-      where: eq(users.email, session.user.email),
+      where: eq(users.id, session.user.id),
       columns: { role: true, timezone: true },
     });
 
@@ -43,9 +45,20 @@ export default async function DashboardLayout({
     // Every time on every dashboard page renders through this. Without it the
     // browser's zone is the only signal, and a device set to the wrong country
     // silently shows the wrong hour for the class.
+    //
+    // Their own setting wins; failing that we use the zone Cloudflare derives
+    // from their IP, which beats the handset for the traveller-with-a-stale-
+    // phone case. `source` travels with it so the banner can offer to save an
+    // IP guess rather than us writing it behind their back — see
+    // lib/viewer-zone.ts for why that distinction matters.
+    const { timeZone, source } = await resolveViewerZone(dbUser?.timezone);
+
     return (
-      <ViewerTimeZoneProvider timeZone={dbUser?.timezone ?? null}>
-        <DashboardChrome user={user} nativeApp={nativeApp}>{children}</DashboardChrome>
+      <ViewerTimeZoneProvider timeZone={timeZone} source={source}>
+        <DashboardChrome user={user} nativeApp={nativeApp}>
+          <TimeZoneConfirmBanner />
+          {children}
+        </DashboardChrome>
       </ViewerTimeZoneProvider>
     );
   });

@@ -1,8 +1,28 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release signing comes from android/key.properties when present:
+//
+//   storeFile=../keystore/release.jks   (path relative to android/app)
+//   storePassword=...
+//   keyAlias=upload
+//   keyPassword=...
+//
+// Generate the keystore with:
+//   keytool -genkey -v -keystore android/keystore/release.jks \
+//     -alias upload -keyalg RSA -keysize 2048 -validity 10000
+//
+// Neither the keystore nor key.properties must ever be committed.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) load(FileInputStream(f))
 }
 
 android {
@@ -26,11 +46,29 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            // Only configured when key.properties exists; otherwise release
+            // builds fail loudly instead of silently shipping debug-signed.
+            val storeFile = keystoreProperties.getProperty("storeFile")
+            val storePassword = keystoreProperties.getProperty("storePassword")
+            val keyAlias = keystoreProperties.getProperty("keyAlias")
+            val keyPassword = keystoreProperties.getProperty("keyPassword")
+            if (storeFile != null && storePassword != null && keyAlias != null && keyPassword != null) {
+                this.storeFile = file(storeFile)
+                this.storePassword = storePassword
+                this.keyAlias = keyAlias
+                this.keyPassword = keyPassword
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Never fall back to the debug key: a release signed with a
+            // predictable debug identity is the worst of both worlds. Without
+            // key.properties the build fails, which is the honest outcome.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

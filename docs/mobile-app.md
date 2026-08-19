@@ -644,6 +644,10 @@ Free things first, so the app can be seen working before the account is bought.
 3. A real iPhone on a free Personal Team: the full call screen, camera,
    background effects. Re-sign weekly.
 4. **Apple Developer Program, $99/year** — everything below needs it.
+   **The whole publishing path — the account, the App Store Connect record,
+   the API key, TestFlight, the guidelines that bite a WebView shell, and the
+   `scripts/ios-release.sh` that does the build and upload — is written up in
+   `docs/ios-release.md`.** Read that rather than re-deriving it here.
 5. **Push.** An APNs key plus an iOS app in the Firebase project
    (`fir-auth-d4f03`), which yields `GoogleService-Info.plist` (gitignored,
    like `google-services.json`). Nothing on the Android device side carries

@@ -19,24 +19,48 @@
  * either warns or leaves the stale UTC text on screen.
  */
 
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
 /**
- * The viewer's own zone, when we actually know it (users.timezone). Set from
- * the dashboard layout. Null means "trust the browser", which is right until
- * the device is wrong — a student in Illinois on a phone still set to India
- * time was shown 4:30 AM, their teacher's hour, not their own 6:00 PM.
+ * Where the zone we are rendering in came from. See lib/viewer-zone.ts.
+ *
+ * - `account` — they told us (users.timezone). Never second-guess it.
+ * - `ip`      — Cloudflare placed their connection. Good enough to render,
+ *               worth confirming once, and never written to the account
+ *               without them saying so.
+ * - `device`  — we don't know; the browser decides below.
  */
-const ViewerTimeZoneContext = createContext<string | null>(null);
+export type ViewerZoneSource = 'account' | 'ip' | 'device';
+
+/**
+ * The viewer's own zone, when we actually know it. Set from the dashboard
+ * layout. A null `timeZone` means "trust the browser", which is right until
+ * the device is wrong — a student in Illinois on a phone still set to India
+ * time was shown 4:30 AM, their teacher's hour, not their own 6:00 PM. That
+ * case is exactly what `source: 'ip'` now covers.
+ */
+const ViewerTimeZoneContext = createContext<{
+  timeZone: string | null;
+  source: ViewerZoneSource;
+}>({ timeZone: null, source: 'device' });
 
 export function ViewerTimeZoneProvider({
   timeZone,
+  source = 'account',
   children,
 }: {
   timeZone: string | null;
+  /** Defaults to `account` so existing callers keep their old meaning. */
+  source?: ViewerZoneSource;
   children: React.ReactNode;
 }) {
-  return <ViewerTimeZoneContext.Provider value={timeZone}>{children}</ViewerTimeZoneContext.Provider>;
+  const value = useMemo(() => ({ timeZone, source }), [timeZone, source]);
+  return <ViewerTimeZoneContext.Provider value={value}>{children}</ViewerTimeZoneContext.Provider>;
+}
+
+/** The zone and where it came from — for UI that needs to explain itself. */
+export function useViewerZoneSource(): { timeZone: string | null; source: ViewerZoneSource } {
+  return useContext(ViewerTimeZoneContext);
 }
 
 export type LocalTimeMode =
@@ -94,11 +118,12 @@ export function formatInZone(
 }
 
 /**
- * The viewer's IANA zone, e.g. "America/Chicago". The account's own setting
- * wins; otherwise fall back to the device. Empty string on the server.
+ * The viewer's IANA zone, e.g. "America/Chicago". Whatever the server resolved
+ * (their account setting, else their IP) wins; otherwise fall back to the
+ * device. Empty string on the server.
  */
 export function useViewerTimeZone() {
-  const accountZone = useContext(ViewerTimeZoneContext);
+  const { timeZone: accountZone } = useContext(ViewerTimeZoneContext);
   const [tz, setTz] = useState('');
   useEffect(() => {
     if (accountZone) {
@@ -125,7 +150,7 @@ export default function LocalTime({
   /** Append the zone abbreviation, e.g. "6:00 AM CDT". */
   withZone?: boolean;
 }) {
-  const accountZone = useContext(ViewerTimeZoneContext);
+  const { timeZone: accountZone } = useContext(ViewerTimeZoneContext);
   const [text, setText] = useState(() => formatInZone(iso, mode, withZone, 'UTC'));
 
   useEffect(() => {

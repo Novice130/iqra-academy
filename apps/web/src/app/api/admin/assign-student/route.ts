@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { sessions, bookings, studentProfiles, users } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError } from "@/lib/errors";
+import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { createId } from "@paralleldrive/cuid2";
 import { eq } from "drizzle-orm";
 
@@ -40,6 +40,16 @@ export async function POST(request: NextRequest) {
       });
       if (!teacher) throw new NotFoundError("Teacher");
 
+      // Both sides of the assignment must belong to the caller's org.
+      // SUPER_ADMIN spans orgs, but the session must still land in the
+      // profile's own org — a booking created under the admin's org id
+      // would leak a foreign student into their tenant.
+      const isSuper = ctx.role === "SUPER_ADMIN";
+      const targetOrgId = profile.orgId;
+      if (!isSuper && (profile.orgId !== ctx.orgId || teacher.orgId !== ctx.orgId)) {
+        throw new ForbiddenError("You can only assign students and teachers from your own organization.");
+      }
+
       // Check if there is already a scheduled session or create a recurring assignment session
       const sessionId = createId();
       const now = new Date();
@@ -48,7 +58,7 @@ export async function POST(request: NextRequest) {
 
       await db.insert(sessions).values({
         id: sessionId,
-        orgId: ctx.orgId || profile.orgId,
+        orgId: targetOrgId,
         teacherId: teacher.id,
         type: "INDIVIDUAL",
         status: "SCHEDULED",
@@ -60,7 +70,7 @@ export async function POST(request: NextRequest) {
 
       await db.insert(bookings).values({
         id: createId(),
-        orgId: ctx.orgId || profile.orgId,
+        orgId: targetOrgId,
         userId: profile.userId,
         studentProfileId: profile.id,
         sessionId: sessionId,

@@ -194,17 +194,26 @@ export default async function BillingPage() {
                     <td className="px-5 py-3.5 text-sm" style={{ color: "var(--text-primary)" }}>
                       {format(invoice.createdAt, "MMM d, yyyy")}
                     </td>
+                    {/* An unpaid invoice has amountPaidCents 0, and this
+                        column used to read "$0" for every invoice waiting to
+                        be paid — which looks like a free month rather than a
+                        bill. Show what is owed until something is paid. */}
                     {!hidePricing && (
                       <td className="px-5 py-3.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                        ${invoice.amountPaidCents / 100}
+                        ${(invoice.amountPaidCents > 0 ? invoice.amountPaidCents : invoice.amountDueCents) / 100}
                       </td>
                     )}
                     <td className="px-5 py-3.5">
                       <span
                         className="inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase"
                         style={{
-                          background: invoice.status === "PAID" ? "#dcfce7" : "#fee2e2",
-                          color: invoice.status === "PAID" ? "#166534" : "#991b1b",
+                          // Amber for "we are waiting", red only for a real
+                          // problem: an OPEN invoice in red reads as a debt in
+                          // arrears on the day it was issued.
+                          background: invoice.status === "PAID" ? "#dcfce7"
+                            : ["OPEN", "DRAFT"].includes(invoice.status) ? "#fef3c7" : "#fee2e2",
+                          color: invoice.status === "PAID" ? "#166534"
+                            : ["OPEN", "DRAFT"].includes(invoice.status) ? "#92400e" : "#991b1b",
                         }}
                       >
                         {invoice.status}

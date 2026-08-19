@@ -46,9 +46,11 @@ export function createMainWindow(): BrowserWindow {
       preload: path.join(__dirname, '../preload/index.js'),
       // The window loads a remote site. Node stays out of it and everything
       // the page is allowed to ask for goes through the preload's narrow API.
+      // The preloads only use contextBridge/ipcRenderer/process.platform,
+      // which the sandboxed preload polyfills cover.
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
     },
   });
 

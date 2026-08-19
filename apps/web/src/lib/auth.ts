@@ -118,6 +118,28 @@ export const auth = betterAuth({
     expiresIn: 60 * 60 * 24 * 7, // 7 days in seconds
     updateAge: 60 * 60 * 24, // Refresh after 1 day
   },
+
+  /**
+   * Rate limiting for auth endpoints. Slows brute-force against
+   * sign-in/sign-up and the password flows. The default storage is memory —
+   * per-isolate — which is the right fit for Workers: the edge already
+   * spreads requests across isolates, and a DB-backed counter would add a
+   * write per login for every student.
+   *
+   * Sign-in/sign-up get a much tighter built-in rule (3 per 10s) applied by
+   * Better Auth itself; these numbers are the general ceiling.
+   */
+  rateLimit: {
+    enabled: true,
+    window: 60, // seconds
+    max: 30, // requests per window per IP
+    customRules: {
+      "/sign-in/email": { window: 60, max: 10 },
+      "/sign-up/email": { window: 60, max: 10 },
+      "/request-password-reset": { window: 60, max: 5 },
+      "/reset-password": { window: 60, max: 10 },
+    },
+  },
 });
 
 /**

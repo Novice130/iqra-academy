@@ -59,7 +59,7 @@ export interface AuthContext {
  * Instead of listing every role for every endpoint, we define a hierarchy:
  *   STUDENT < TEACHER < ORG_ADMIN < SUPER_ADMIN
  */
-const ROLE_HIERARCHY: Record<UserRole, number> = {
+export const ROLE_HIERARCHY: Record<UserRole, number> = {
   STUDENT: 0,
   TEACHER: 1,
   ORG_ADMIN: 2,
@@ -92,10 +92,13 @@ export async function getAuthContext(
       return null;
     }
 
-    // Step 2: Get full user data with role and org from our database
+    // Step 2: Get full user data with role and org from our database.
+    // Look up by the session's user id (Better Auth shares our users table),
+    // never by email — email is only unique per org, so an email lookup can
+    // resolve to the wrong tenant's row.
     const user = await db.query.users.findFirst({
       where: and(
-        eq(users.email, session.user.email),
+        eq(users.id, session.user.id),
         isNull(users.deletedAt)
       ),
       columns: {

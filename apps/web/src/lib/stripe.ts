@@ -65,8 +65,8 @@ function getStripe(): Stripe {
 export const PRICING = {
   FREE: { amountCents: 0, classesPerWeek: 0, maxStudents: 20 },
   INDIVIDUAL: { amountCents: 7000, classesPerWeek: 4, maxStudents: 1 },
-  GROUP: { amountCents: 5000, classesPerWeek: 4, maxStudents: 3 },
-  SIBLINGS: { amountCents: 10000, classesPerWeek: 4, maxStudents: 3 },
+  GROUP: { amountCents: 12000, classesPerWeek: 4, maxStudents: 2 },
+  SIBLINGS: { amountCents: 15000, classesPerWeek: 4, maxStudents: 3 },
 } as const;
 
 // ============================================================================

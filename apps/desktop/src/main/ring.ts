@@ -122,6 +122,7 @@ function startRinging(call: IncomingCall) {
       preload: path.join(__dirname, '../preload/ring.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
     },
   });
 

@@ -6,6 +6,10 @@
 .rsync.exp
 *.pem
 *.key
+# App Store Connect API keys — anyone holding one can ship builds as us.
+*.p8
+# Signed app builds. Same rule as the APK: never in git.
+*.ipa
 .wrangler/
 .cloudflared/
 

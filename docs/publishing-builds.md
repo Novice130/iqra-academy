@@ -31,6 +31,10 @@ what exists on every request, so a platform's row appears — with the real file
 size — the moment the upload finishes. A platform with no object in the bucket
 shows "Not published yet" instead of a broken link.
 
+**iOS is not in this table and never will be.** An APK is a file we host; an
+iOS build can only reach a phone through Apple, so it has its own path
+entirely — `docs/ios-release.md`. Nothing about the R2 bucket applies to it.
+
 Two rules that are not optional:
 
 - **Never commit a build.** `apps/desktop/release/`, `apps/desktop/dist/` and

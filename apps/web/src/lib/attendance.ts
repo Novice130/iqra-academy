@@ -178,6 +178,11 @@ export async function getAttendanceReport(opts: {
         eq(sessions.orgId, opts.orgId),
         gte(sessions.scheduledStart, opts.from),
         lte(sessions.scheduledStart, opts.to),
+        // A row that was combined into another class holds no attendance of
+        // its own — its bookings moved. Left in, it would be the earliest
+        // start in its window and so become the occurrence's canonical row,
+        // lending the report a cancelled title and a roster of nobody.
+        isNull(sessions.mergedIntoId),
         ...(opts.teacherId ? [eq(sessions.teacherId, opts.teacherId)] : [])
       )
     );

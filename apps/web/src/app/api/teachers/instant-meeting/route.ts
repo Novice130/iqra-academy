@@ -124,7 +124,10 @@ export async function POST(request: NextRequest) {
       let addedStudents: { studentProfileId: string; userId: string; name: string }[] = [];
       if (studentProfileIds.length > 0) {
         const profiles = await db.query.studentProfiles.findMany({
-          where: inArray(studentProfiles.id, studentProfileIds),
+          where: and(
+            inArray(studentProfiles.id, studentProfileIds),
+            eq(studentProfiles.orgId, ctx.orgId)
+          ),
         });
         // Resuming a class means the bookings are already there — inserting
         // them again would double-book everyone on the roster.
@@ -134,7 +137,7 @@ export async function POST(request: NextRequest) {
           await db.insert(bookings).values(
             fresh.map((p) => ({
               id: createId(),
-              orgId: ctx.orgId || "seed_org_iqra_academy",
+              orgId: ctx.orgId,
               userId: p.userId,
               studentProfileId: p.id,
               sessionId,

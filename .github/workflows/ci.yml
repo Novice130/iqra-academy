@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [master]
 
+# Least privilege: this workflow only needs to read the repo contents.
+# Fork PRs also get a read-only GITHUB_TOKEN by default; keeping the
+# explicit block means even maintainer-triggered runs can't write.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest

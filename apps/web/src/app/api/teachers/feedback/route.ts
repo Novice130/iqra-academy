@@ -9,9 +9,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { db, withDb } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
-import { sessions, teacherFeedback } from "@/db/schema";
+import { sessions, teacherFeedback, studentProfiles } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError } from "@/lib/errors";
+import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 
 const feedbackSchema = z.object({
@@ -38,6 +38,18 @@ export async function POST(request: NextRequest) {
         where: and(eq(sessions.id, data.sessionId), eq(sessions.teacherId, ctx.userId)),
       });
       if (!session) throw new NotFoundError("Session");
+
+      // The student profile must belong to the same org as the session —
+      // feedback must never attach to another tenant's child.
+      const profile = await db.query.studentProfiles.findFirst({
+        where: and(
+          eq(studentProfiles.id, data.studentProfileId),
+          eq(studentProfiles.orgId, session.orgId)
+        ),
+      });
+      if (!profile) {
+        throw new ForbiddenError("The student profile is not part of this session's organization.");
+      }
 
       const [feedback] = await db.insert(teacherFeedback).values({
         sessionId: data.sessionId,

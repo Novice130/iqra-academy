@@ -53,7 +53,11 @@ export async function GET(
       if (!session) throw new NotFoundError("Session");
       if (!user) throw new NotFoundError("User");
 
-      const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role);
+      // An admin can join only their own org's sessions. SUPER_ADMIN is the
+      // only role allowed across orgs.
+      const isAdmin =
+        user.role === "SUPER_ADMIN" ||
+        (user.role === "ORG_ADMIN" && user.orgId === session.orgId);
       const isTeacher = session.teacherId === ctx.userId || isAdmin;
       const isStudent = session.bookings.some((b: { userId: string }) => b.userId === ctx.userId);
 

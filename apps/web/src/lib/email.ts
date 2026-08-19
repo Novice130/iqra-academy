@@ -245,3 +245,140 @@ export async function sendPaymentReceipt(
     console.error("[EMAIL] Failed to send payment receipt:", error);
   }
 }
+
+/**
+ * The generic send, used by lib/notify.ts.
+ *
+ * The named helpers above each own one message's copy. This one exists for
+ * everything routed through `notify()`, where the caller has already composed
+ * the body. Same swallow-and-log contract: an email that does not send must
+ * never fail the thing it was announcing.
+ *
+ * Returns whether Resend accepted it, for callers that want to log it.
+ */
+export async function sendRawEmail(opts: {
+  to: string | string[];
+  subject: string;
+  html: string;
+  replyTo?: string;
+}): Promise<boolean> {
+  if (!process.env.RESEND_API_KEY) {
+    // Local dev and any deploy where the key was never set. Log rather than
+    // throw, so the whole flow stays testable without a mail provider.
+    console.warn("[EMAIL] RESEND_API_KEY unset — would have sent:", opts.subject, "→", opts.to);
+    return false;
+  }
+  try {
+    await getResend().emails.send({
+      from: FROM_EMAIL,
+      to: opts.to,
+      subject: opts.subject,
+      html: opts.html,
+      ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+    });
+    return true;
+  } catch (error) {
+    console.error("[EMAIL] Failed to send:", opts.subject, error);
+    return false;
+  }
+}
+
+/**
+ * The trial-class request, as the teacher and the admin see it.
+ *
+ * Deliberately carries the time twice — once in the teacher's zone and once in
+ * the student's. A teacher in India reading "6:00 PM" about a student in
+ * Chicago has no way to tell which 6:00 PM is meant, and getting that wrong
+ * means somebody sits alone in a room.
+ */
+export async function sendTrialRequestEmail(
+  to: string | string[],
+  opts: {
+    studentName: string;
+    studentEmail: string;
+    teacherName: string;
+    whenTeacherZone: string;
+    whenStudentZone: string;
+    manageUrl: string;
+  }
+): Promise<boolean> {
+  return sendRawEmail({
+    to,
+    subject: `New trial class request — ${opts.studentName}`,
+    replyTo: opts.studentEmail,
+    html: `
+      <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+        <h2 style="color:#1a5f3a;">New trial class request</h2>
+        <p style="font-size:16px;color:#333;">
+          <strong>${opts.studentName}</strong> (${opts.studentEmail}) has booked a trial class
+          with <strong>${opts.teacherName}</strong>.
+        </p>
+        <div style="background:#f8f9fa;border-radius:8px;padding:16px;margin:16px 0;">
+          <p style="margin:4px 0;color:#333;">🕐 <strong>${opts.whenTeacherZone}</strong> &mdash; teacher's time</p>
+          <p style="margin:4px 0;color:#555;">🌍 ${opts.whenStudentZone} &mdash; student's time</p>
+        </div>
+        <div style="text-align:center;margin:28px 0;">
+          <a href="${opts.manageUrl}" style="background:#1a5f3a;color:#fff;padding:13px 26px;
+             text-decoration:none;border-radius:8px;font-size:15px;font-weight:bold;">
+            View the class
+          </a>
+        </div>
+        <p style="font-size:14px;color:#666;">Reply to this email to reach the student directly.</p>
+      </div>
+    `,
+  });
+}
+
+/**
+ * The invoice.
+ *
+ * This is the ONLY place a family is ever shown a price. The app itself stays
+ * price-free on purpose — see lib/pricing-visibility.ts. Do not "helpfully"
+ * mirror this figure onto a dashboard.
+ */
+export async function sendInvoiceEmail(
+  to: string,
+  opts: {
+    name: string;
+    orgName: string;
+    planName: string;
+    amount: string;
+    studentCount: number;
+    periodLabel: string;
+    dueLabel: string;
+    payUrl?: string;
+  }
+): Promise<boolean> {
+  const students = opts.studentCount === 1 ? "1 student" : `${opts.studentCount} students`;
+  const payButton = opts.payUrl
+    ? `<div style="text-align:center;margin:28px 0;">
+         <a href="${opts.payUrl}" style="background:#1a5f3a;color:#fff;padding:13px 26px;
+            text-decoration:none;border-radius:8px;font-size:15px;font-weight:bold;">Pay now</a>
+       </div>`
+    : `<p style="font-size:15px;color:#333;">
+         Reply to this email and we'll share the payment details.
+       </p>`;
+
+  return sendRawEmail({
+    to,
+    subject: `Invoice from ${opts.orgName} — ${opts.amount}`,
+    html: `
+      <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+        <h2 style="color:#1a5f3a;">Your invoice 🌙</h2>
+        <p style="font-size:16px;color:#333;">
+          Assalamu Alaikum ${opts.name}, here is your invoice for ${opts.periodLabel}.
+        </p>
+        <div style="background:#f8f9fa;border-radius:8px;padding:20px;margin:20px 0;">
+          <p style="margin:6px 0;color:#333;font-size:16px;">
+            <strong>${opts.planName}</strong> &mdash; ${students}
+          </p>
+          <p style="margin:6px 0;color:#555;">4 classes per week &middot; 30 minutes each</p>
+          <p style="margin:14px 0 0;color:#1a5f3a;font-size:26px;font-weight:bold;">${opts.amount}</p>
+          <p style="margin:6px 0 0;color:#666;font-size:14px;">Due ${opts.dueLabel}</p>
+        </div>
+        ${payButton}
+        <p style="font-size:14px;color:#666;">JazakAllahu Khairan. &mdash; ${opts.orgName}</p>
+      </div>
+    `,
+  });
+}

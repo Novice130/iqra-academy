@@ -48,7 +48,12 @@ export type AuditAction =
   | "COUPON_CREATED"
   | "EXPORT_GENERATED"
   | "SETTINGS_CHANGED"
-  | "RECORDING_ACCESS_CHANGED";
+  | "RECORDING_ACCESS_CHANGED"
+  | "INVOICE_ISSUED"
+  | "INVOICE_PAID"
+  | "INVOICE_VOIDED"
+  | "SESSION_MERGED"
+  | "SESSION_UNMERGED";
 
 /**
  * Parameters for creating an audit log entry.

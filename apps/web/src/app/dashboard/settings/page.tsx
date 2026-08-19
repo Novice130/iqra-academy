@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import TimeZoneCard from "./TimeZoneCard";
+import DeleteAccountCard from "./DeleteAccountCard";
 
 export default function SettingsPage() {
   const [name, setName] = useState("Syed Amer");
@@ -138,6 +139,9 @@ export default function SettingsPage() {
           ))}
         </div>
       </section>
+
+      {/* App Store Review 5.1.1(v): the way out has to be in the app. */}
+      <DeleteAccountCard />
 
       <div className="flex justify-end">
         <button

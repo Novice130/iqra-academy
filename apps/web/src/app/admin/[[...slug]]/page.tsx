@@ -16,11 +16,26 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { canAccessAdmin, adminResources, adminBranding, adminMeta } from "@/lib/admin";
+import { canAccessAdmin, adminResources, adminMeta } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
 import { users, sessions } from "@/db/schema";
 import { sql, eq, inArray } from "drizzle-orm";
 import { getRoomServiceClient } from "@/lib/livekit";
+
+
+/**
+ * Which table names have a real page behind them.
+ *
+ * Everything in `adminResources` used to render as a link to
+ * `/admin/tables/<name>`, and not one of those routes was ever built — the
+ * whole panel was a wall of dead links. A card with no destination now renders
+ * as plain text saying so, which is worse-looking and considerably more
+ * honest. Add an entry here as each page gets built.
+ */
+const TABLE_PAGES: Record<string, string> = {
+  users: "/admin/users",
+  invoices: "/admin/invoices",
+};
 
 /**
  * Server-side admin panel page.
@@ -38,7 +53,7 @@ export default async function AdminPage() {
 
   // Verify admin role
   const dbUser = await db.query.users.findFirst({
-    where: eq(users.email, session.user.email),
+    where: eq(users.id, session.user.id),
     columns: { role: true },
   });
 
@@ -191,28 +206,32 @@ export default async function AdminPage() {
               gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
               gap: "12px",
             }}>
-              {group.tables.map((table) => (
-                <a
-                  key={table}
-                  href={`/admin/tables/${table}`}
-                  style={{
-                    background: "#1e293b",
-                    borderRadius: "8px",
-                    padding: "16px",
-                    border: "1px solid #334155",
-                    textDecoration: "none",
-                    color: "#e2e8f0",
-                    transition: "border-color 0.2s",
-                  }}
-                >
-                  <div style={{ fontSize: "14px", fontWeight: 500 }}>
-                    {table.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase())}
-                  </div>
-                  <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                    {table}
-                  </div>
-                </a>
-              ))}
+              {group.tables.map((table) => {
+                const href = TABLE_PAGES[table];
+                const label = table.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+                const boxStyle: React.CSSProperties = {
+                  background: "#1e293b",
+                  borderRadius: "8px",
+                  padding: "16px",
+                  border: href ? "1px solid #10b981" : "1px solid #334155",
+                  textDecoration: "none",
+                  color: href ? "#e2e8f0" : "#64748b",
+                  display: "block",
+                };
+                const body = (
+                  <>
+                    <div style={{ fontSize: "14px", fontWeight: 500 }}>{label}</div>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
+                      {href ? table : `${table} · no page yet`}
+                    </div>
+                  </>
+                );
+                return href ? (
+                  <a key={table} href={href} style={boxStyle}>{body}</a>
+                ) : (
+                  <div key={table} style={boxStyle}>{body}</div>
+                );
+              })}
             </div>
           </section>
         ))}
@@ -235,12 +254,7 @@ export default async function AdminPage() {
             gap: "12px",
           }}>
             {[
-              { label: "🔍 View Audit Logs", href: "/admin/tables/audit_logs", desc: "Security & compliance" },
-              { label: "💳 Manage Subscriptions", href: "/admin/tables/subscriptions", desc: "Billing & plans" },
-              { label: "📊 CRM Sync Events", href: "/admin/tables/crm_sync_events", desc: "CRM integration status" },
-              { label: "🎓 Lesson Content", href: "/admin/tables/lesson_content", desc: "Curriculum management" },
-              { label: "📅 Teacher Availability", href: "/admin/tables/teacher_availability", desc: "Schedule management" },
-              { label: "📧 Push Subscriptions", href: "/admin/tables/push_subscriptions", desc: "Notification management" },
+              { label: "👥 People & Roles", href: "/admin/users", desc: "Make someone a teacher" },
             ].map((action) => (
               <a
                 key={action.label}

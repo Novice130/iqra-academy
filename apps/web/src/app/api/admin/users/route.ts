@@ -12,9 +12,16 @@ import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
 import { eq, and, isNull, ilike, or, desc } from "drizzle-orm";
 import { users } from "@/db/schema";
-import { requireRole } from "@/lib/rbac";
-import { handleApiError, ConflictError } from "@/lib/errors";
+import { requireRole, ROLE_HIERARCHY } from "@/lib/rbac";
+import {
+  handleApiError,
+  ConflictError,
+  NotFoundError,
+  ForbiddenError,
+  BusinessRuleError,
+} from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
+import { notify } from "@/lib/notify";
 
 const createUserSchema = z.object({
   email: z.string().email(),
@@ -26,8 +33,15 @@ const createUserSchema = z.object({
 const updateUserSchema = z.object({
   userId: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
-  role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN"]).optional(),
-  phone: z.string().optional(),
+  /**
+   * Every role is accepted here on purpose. The privilege ceiling below is
+   * what rejects an over-reach, rather than a zod enum — encoding the policy
+   * in the parser meant a SUPER_ADMIN could not do their own job, while an
+   * ORG_ADMIN could still demote one.
+   */
+  role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]).optional(),
+  /** Empty string clears the number. Absent leaves it alone. */
+  phone: z.string().max(40).optional(),
 });
 
 /** GET /api/admin/users — list all org users */
@@ -62,6 +76,11 @@ export async function GET(request: NextRequest) {
             name: users.name,
             role: users.role,
             phone: users.phone,
+            /**
+             * Shown in the admin table because a teacher with no zone is the
+             * exact condition that makes their availability unusable.
+             */
+            timezone: users.timezone,
             createdAt: users.createdAt,
             emailVerified: users.emailVerified,
           })
@@ -116,7 +135,21 @@ export async function POST(request: NextRequest) {
   });
 }
 
-/** PATCH /api/admin/users — update a user */
+/**
+ * PATCH /api/admin/users — update a user, including their role.
+ *
+ * The three guards below are the reason this handler is longer than it looks
+ * like it should be:
+ *
+ *   1. **No self-demotion.** The only ORG_ADMIN setting their own role to
+ *      STUDENT locks every human out of /admin, and there is no in-app way
+ *      back — the recovery is a hand-written SQL statement against Neon.
+ *   2. **A privilege ceiling.** Without it an ORG_ADMIN can demote a
+ *      SUPER_ADMIN in their org. Both the target's current role and the role
+ *      being granted must sit at or below the caller's own level.
+ *   3. **Soft-deleted users stay deleted.** GET filters them; this did not, so
+ *      a role change quietly resurrected a deleted user's permissions.
+ */
 export async function PATCH(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -128,27 +161,85 @@ export async function PATCH(request: NextRequest) {
       const data = updateUserSchema.parse(body);
 
       const updates: Record<string, unknown> = {};
-      if (data.name) updates.name = data.name;
-      if (data.role) updates.role = data.role;
-      if (data.phone) updates.phone = data.phone;
+      // `!== undefined`, not truthiness: "" is how the UI clears a phone
+      // number, and truthiness silently dropped it.
+      if (data.name !== undefined) updates.name = data.name;
+      if (data.role !== undefined) updates.role = data.role;
+      if (data.phone !== undefined) updates.phone = data.phone === "" ? null : data.phone;
 
-      return await withRLS(ctx, async (tx) => {
+      if (Object.keys(updates).length === 0) {
+        throw new BusinessRuleError("Nothing to update.");
+      }
+
+      const callerLevel = ROLE_HIERARCHY[ctx.role];
+
+      if (data.role && data.userId === ctx.userId && data.role !== ctx.role) {
+        throw new ForbiddenError(
+          "You can't change your own role. Ask another admin to do it."
+        );
+      }
+
+      const result = await withRLS(ctx, async (tx) => {
+        // Read the target first: the ceiling depends on the role they hold
+        // now, not only on the one being granted.
+        const target = await tx.query.users.findFirst({
+          where: and(
+            eq(users.id, data.userId),
+            eq(users.orgId, ctx.orgId),
+            isNull(users.deletedAt)
+          ),
+          columns: { id: true, role: true, name: true, email: true },
+        });
+        if (!target) throw new NotFoundError("User");
+
+        if (ROLE_HIERARCHY[target.role] > callerLevel) {
+          throw new ForbiddenError("You can't modify someone above your own role.");
+        }
+        if (data.role && ROLE_HIERARCHY[data.role] > callerLevel) {
+          throw new ForbiddenError("You can't grant a role above your own.");
+        }
+
         const [user] = await tx
           .update(users)
           .set(updates)
-          .where(eq(users.id, data.userId))
+          .where(
+            and(
+              eq(users.id, data.userId),
+              eq(users.orgId, ctx.orgId),
+              isNull(users.deletedAt)
+            )
+          )
           .returning();
+
+        if (!user) throw new NotFoundError("User");
 
         await logAudit({
           orgId: ctx.orgId, actorId: ctx.userId,
           action: data.role ? "ROLE_CHANGED" : "USER_UPDATED",
           target: `user:${user.id}`,
-          metadata: { changes: data },
+          metadata: { changes: data, previousRole: target.role },
           ipAddress: getClientIp(request.headers),
         });
 
-        return NextResponse.json({ user });
+        return { user, becameTeacher: data.role === "TEACHER" && target.role !== "TEACHER" };
       });
+
+      // Deliberately AFTER the transaction commits. notify() makes an HTTP
+      // round trip to Resend and to FCM; awaiting that inside withRLS would
+      // hold a Postgres interactive transaction open for the length of a
+      // network call, on a Worker.
+      if (result.becameTeacher) {
+        await notify({
+          orgId: ctx.orgId,
+          userIds: [result.user.id],
+          type: "ROLE_GRANTED",
+          title: "You're now a teacher at Novice Tutor",
+          body: "Set the weekly hours you're available, so students can book you.",
+          path: "/dashboard/teacher/availability",
+        });
+      }
+
+      return NextResponse.json({ user: result.user });
     } catch (error) {
       return handleApiError(error);
     }

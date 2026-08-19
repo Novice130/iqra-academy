@@ -39,7 +39,7 @@ export default async function AttendancePage() {
     // `user.additionalFields`, so it is always undefined and every role check
     // against it silently fails open to STUDENT.
     const dbUser = await db.query.users.findFirst({
-      where: eq(users.email, session.user.email),
+      where: eq(users.id, session.user.id),
       columns: { id: true, role: true, orgId: true },
     });
     if (!dbUser) redirect("/login");

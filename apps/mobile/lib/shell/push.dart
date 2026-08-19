@@ -103,7 +103,7 @@ class PushService {
           final callId = extra['callId'];
           final sessionId = extra['sessionId'];
           if (callId is String) await CallService.instance.accept(callId);
-          if (sessionId is String) {
+          if (_isValidSessionId(sessionId)) {
             _pendingPath = '/dashboard/session/$sessionId?answer=1';
           }
         }
@@ -149,7 +149,7 @@ class PushService {
           if (callId != null) await CallService.instance.accept(callId);
           // ?answer=1 — straight into the call, no device picker. Tapping
           // Join on a ringing phone already said everything it needs to.
-          if (sessionId != null) {
+          if (_isValidSessionId(sessionId)) {
             _deepLinkController.add('/dashboard/session/$sessionId?answer=1');
           }
           break;
@@ -163,11 +163,21 @@ class PushService {
     });
   }
 
+  /// Session ids are cuid2s: lowercase letters and digits. Anything else in a
+  /// push payload is not a session id, and nothing untrusted belongs in a URL
+  /// path the WebView will load.
+  static bool _isValidSessionId(Object? value) {
+    return value is String &&
+        value.isNotEmpty &&
+        value.length <= 64 &&
+        RegExp(r'^[a-z0-9]+$').hasMatch(value);
+  }
+
   String? _pathOf(RemoteMessage m) {
     final path = m.data['path'];
     if (path is String && path.startsWith('/')) return path;
     final sessionId = m.data['sessionId'];
-    if (sessionId is String && sessionId.isNotEmpty) {
+    if (_isValidSessionId(sessionId)) {
       return '/dashboard/session/$sessionId';
     }
     return null;

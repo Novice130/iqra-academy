@@ -125,11 +125,18 @@ class GoogleSignInBridge {
   }
 
   /// JSON-encodes a string for safe interpolation into evaluated JavaScript.
+  ///
+  /// Escapes everything that can terminate the string literal or break out of
+  /// the JSON value: backslash, quote, both JS line terminators (\r, \n), and
+  /// the Unicode line separators JS also treats as terminators.
   static String _jsString(String value) {
     final escaped = value
         .replaceAll(r'\', r'\\')
         .replaceAll('"', r'\"')
-        .replaceAll('\n', r'\n');
+        .replaceAll('\r', r'\r')
+        .replaceAll('\n', r'\n')
+        .replaceAll('\u2028', r'\u2028')
+        .replaceAll('\u2029', r'\u2029');
     return '"$escaped"';
   }
 }

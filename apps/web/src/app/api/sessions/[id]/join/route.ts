@@ -67,7 +67,21 @@ export async function GET(
       if (!session) throw new NotFoundError("Session");
       if (!user) throw new NotFoundError("User");
 
-      const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(user.role);
+      // This class was combined into another one (see lib/class-merge.ts).
+      // The row still exists, cancelled, holding its own history — but the
+      // class it stood for happens elsewhere now. Anyone arriving on an old
+      // link, an old push notification or a bookmark follows the pointer.
+      // Checked before the room resolver, which reasons about time slots and
+      // would send them to a room nobody else is in.
+      if (session.mergedIntoId) {
+        return NextResponse.json({ redirectSessionId: session.mergedIntoId });
+      }
+
+      // An admin can join only their own org's sessions. SUPER_ADMIN is the
+      // only role allowed across orgs.
+      const isAdmin =
+        user.role === "SUPER_ADMIN" ||
+        (user.role === "ORG_ADMIN" && user.orgId === session.orgId);
       const isTeacher = session.teacherId === ctx.userId || isAdmin;
       let isStudent = session.bookings.some((b: any) => b.userId === ctx.userId);
       const isInstantMeeting = session.consumesQuota === false && session.title?.startsWith("Instant Meeting");

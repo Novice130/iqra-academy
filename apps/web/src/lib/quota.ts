@@ -17,11 +17,17 @@
  * - Each booking is a withdrawal
  * - Remaining = 4 - COUNT(bookings this week)
  *
- * SIBLINGS PLAN HANDLING:
- * The Siblings plan gives 4 classes/week PER CHILD, not per account.
+ * FAMILY PLAN HANDLING:
+ * A family plan gives 4 classes/week PER CHILD, not per account.
  * So a family with 3 kids gets 12 total classes/week (4 × 3).
  * We track entitlements per-child by using `studentProfileId` on the
  * entitlements table.
+ *
+ * That used to mean the SIBLINGS tier alone. Since migration 0004 the GROUP
+ * tier is also a family plan (2 students, $120), so both go through the
+ * per-child path — see isPerChildPlan below. Getting this wrong is not a
+ * cosmetic bug: a two-child family would have shared one ledger of 4 and been
+ * refused their sixth class of the week.
  *
  * RACE CONDITIONS:
  * What if two browser tabs try to book at the same time?
@@ -42,6 +48,16 @@ import {
   studentProfiles,
 } from "@/db/schema";
 import { startOfWeek, endOfWeek } from "date-fns";
+
+/**
+ * Does this tier hand each child their own weekly allowance?
+ *
+ * True for every multi-student family plan. One place to ask, because the
+ * answer is repeated at each quota decision and they must not drift apart.
+ */
+export function isPerChildPlan(tier: string): boolean {
+  return tier === "SIBLINGS" || tier === "GROUP";
+}
 
 /**
  * Result of a quota check. Contains all the information needed to
@@ -112,7 +128,7 @@ export async function getQuotaStatus(
     };
   }
 
-  const isSiblingsPlan = subscription.plan.tier === "SIBLINGS";
+  const perChild = isPerChildPlan(subscription.plan.tier);
 
   // Step 2: Count bookings this week
   // For Siblings plan with profileId: count only that child's bookings
@@ -126,7 +142,7 @@ export async function getQuotaStatus(
   ];
 
   // For Siblings plan, filter by specific child profile
-  if (isSiblingsPlan && studentProfileId) {
+  if (perChild && studentProfileId) {
     bookingConditions.push(
       eq(bookings.studentProfileId, studentProfileId)
     );
@@ -150,7 +166,7 @@ export async function getQuotaStatus(
     .insert(entitlements)
     .values({
       subscriptionId,
-      studentProfileId: isSiblingsPlan ? studentProfileId : null,
+      studentProfileId: perChild ? studentProfileId : null,
       weekStartDate: weekStart,
       totalClasses: totalAllowed,
       usedClasses: usedThisWeek,
@@ -275,7 +291,7 @@ export async function consumeQuota(
       return true;
     }
 
-    const isSiblingsPlan = subscription.plan.tier === "SIBLINGS";
+    const perChild = isPerChildPlan(subscription.plan.tier);
 
     const now = new Date();
     const weekStart = startOfWeek(now, { weekStartsOn: 1 });
@@ -290,7 +306,7 @@ export async function consumeQuota(
       lte(sessions.scheduledEnd, weekEnd),
     ];
 
-    if (isSiblingsPlan && studentProfileId) {
+    if (perChild && studentProfileId) {
       bookingConditions.push(eq(bookings.studentProfileId, studentProfileId));
     }
 
@@ -320,7 +336,7 @@ export async function consumeQuota(
       .insert(entitlements)
       .values({
         subscriptionId,
-        studentProfileId: isSiblingsPlan ? studentProfileId : null,
+        studentProfileId: perChild ? studentProfileId : null,
         weekStartDate: weekStart,
         totalClasses: subscription.plan.classesPerWeek,
         usedClasses: usedThisWeek + 1,

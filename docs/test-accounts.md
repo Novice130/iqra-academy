@@ -24,8 +24,7 @@ what time it is — one student sharing the teacher's zone is the control. See
 `timezones.md`.
 
 **The password is not in this repo.** It comes from `TEST_ACCOUNT_PASSWORD` at
-creation time. The older `create-users.ts` has real passwords committed in the
-file; don't copy that pattern, and treat those accounts as compromised-by-repo-access.
+creation time.
 
 Existing accounts are reported and skipped, never reset — re-running will not
 lock anyone out.

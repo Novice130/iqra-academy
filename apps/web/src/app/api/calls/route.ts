@@ -45,6 +45,13 @@ export async function POST(request: NextRequest) {
       if (!teacher) throw new NotFoundError("Teacher");
       if (!studentProfile) throw new NotFoundError("Student");
 
+      // The student's org is where the session must live, and a caller can
+      // only ring their own org's students — SUPER_ADMIN spans orgs.
+      if (ctx.role !== "SUPER_ADMIN" && studentProfile.orgId !== ctx.orgId) {
+        throw new ForbiddenError("You can only call students in your own organization.");
+      }
+      const sessionOrgId = studentProfile.orgId;
+
       let sessionId: string;
       let roomName: string;
       let token: string | null = null;
@@ -54,7 +61,7 @@ export async function POST(request: NextRequest) {
           where: eq(sessions.id, existingSessionId),
         });
         if (!existingSession) throw new NotFoundError("Session");
-        if (existingSession.teacherId !== ctx.userId && !["ORG_ADMIN", "SUPER_ADMIN"].includes(ctx.role)) {
+        if (existingSession.teacherId !== ctx.userId && !(ctx.role === "SUPER_ADMIN" || (ctx.role === "ORG_ADMIN" && ctx.orgId === existingSession.orgId))) {
           throw new ForbiddenError("Not your session.");
         }
         if (!existingSession.videoRoomName) throw new ForbiddenError("Session has no active room.");
@@ -86,7 +93,7 @@ export async function POST(request: NextRequest) {
 
         await db.insert(sessions).values({
           id: sessionId,
-          orgId: ctx.orgId || "seed_org_iqra_academy",
+          orgId: sessionOrgId,
           teacherId: ctx.userId,
           type: "INDIVIDUAL",
           status: "IN_PROGRESS",
@@ -109,7 +116,7 @@ export async function POST(request: NextRequest) {
       const callId = createId();
       await db.insert(callInvites).values({
         id: callId,
-        orgId: ctx.orgId || "seed_org_iqra_academy",
+        orgId: sessionOrgId,
         sessionId,
         callerId: ctx.userId,
         calleeId: studentProfile.userId,
