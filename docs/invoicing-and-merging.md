@@ -117,3 +117,46 @@ npx drizzle-kit migrate       # or psql -f drizzle/000N_*.sql against Neon
 recorded timezone. Those hours are genuinely unknowable — the column defaulted
 to `America/New_York` while the teacher entering them sat in Asia/Kolkata — and
 an empty calendar is better than a student booking a guessed hour.
+
+## Not verified against a database
+
+Everything above was built on 2026-08-20 and shipped in commit `532b99c`. It
+compiles and lints clean and **has never run against real rows**.
+
+`apps/web/.env` no longer holds `DATABASE_URL` — it was rotated out after the
+security review (`SECURITY-ROTATION-CHECKLIST.md` §2). The live value exists
+only as a Cloudflare Worker secret, and **Cloudflare never hands a secret value
+back**: `npx wrangler secret list` proves it is set and cannot show it. So the
+string has to come from the Neon console.
+
+Until it does, none of this can be checked and the migrations cannot be
+applied:
+
+```sh
+cd apps/web
+echo 'DATABASE_URL="postgresql://…"' >> .env    # Neon console → neondb
+npx drizzle-kit migrate                          # 0002 → 0005, in order
+```
+
+Worth doing first, once there is a connection: check whether `0002`–`0004`
+already landed (`sessions.merged_into_id`, `invoices.issued_by_id`,
+`teacher_time_off`) before running anything, since they were written by hand
+and may have been applied by hand too.
+
+## The numbers, and where to change them
+
+These were chosen while building, not handed down. All of them are one
+constant with a comment explaining the choice.
+
+| Rule | Value | Where |
+| --- | --- | --- |
+| "Back to back" | ≤ 30 minutes apart, overlaps included | `CONSECUTIVE_GAP_MS`, `lib/class-merge.ts` |
+| Most students in a merged class | 4 | `MAX_CLASS_SIZE`, same file |
+| How far ahead merges are suggested | 21 days | `CANDIDATE_HORIZON_MS`, same file |
+| Invoice due date default | 7 days out | `DEFAULT_DUE_DAYS`, `api/admin/invoices` |
+| Invoice period default | 30 days from the start | `DEFAULT_PERIOD_DAYS`, same file |
+| Duplicate guard | same family + same `period_start`, still unpaid | same file |
+
+The invoice email wording is `sendInvoiceEmail()` in `lib/email.ts` and was
+not touched — it is as it was originally written, now with something calling
+it.

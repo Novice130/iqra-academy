@@ -165,6 +165,17 @@ nothing asks for.
 
 A privacy policy URL is mandatory. It has to be a real, reachable page.
 
+## If somebody else is driving the build
+
+They need two strings from you, and **not** the `.p8` — that file is a
+credential, and anyone holding it can ship builds as you:
+
+- `APP_STORE_CONNECT_KEY_ID` — the ten characters in the key's name
+- `APP_STORE_CONNECT_ISSUER_ID` — the UUID at the top of the same page
+
+The key file itself stays on the Mac that builds, at
+`~/.appstoreconnect/private_keys/`, and never enters the repo.
+
 ## Order to do it in
 
 1. Enrol (§1). Everything waits on this.
