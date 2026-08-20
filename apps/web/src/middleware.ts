@@ -9,6 +9,18 @@ import type { NextRequest } from "next/server";
  * CSP notes (do not tighten without testing in a real class):
  * - `wasm-unsafe-eval` — MediaPipe Tasks Vision (background segmentation)
  *   instantiates WebAssembly from a runtime-fetched model.
+ * - `script-src 'unsafe-inline'` — not optional, however much it wants to be.
+ *   The App Router hands the client its server-rendered payload through inline
+ *   `self.__next_f.push(...)` scripts. Without this the browser blocks every
+ *   one of them, nothing hydrates, and production serves a white page on top
+ *   of perfectly good HTML — which is what shipped on 2026-08-20 and took the
+ *   live site down. `next dev` bootstraps differently and does NOT reproduce
+ *   it, so this line cannot be judged from localhost.
+ *
+ *   The stronger fix is a per-request nonce, which Next stamps onto its own
+ *   script tags. Not used here because a nonce makes every page dynamic, and
+ *   this site's landing page is static and cached at the edge. Revisit that
+ *   trade before tightening this back up.
  * - `worker-src blob:` — MediaPipe spins its inference up in a blob worker.
  * - `style-src 'unsafe-inline'` — React `style={{}}` props and LiveKit
  *   component styles are style *attributes*, which CSP only allows via
@@ -19,7 +31,7 @@ import type { NextRequest } from "next/server";
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": [
     "default-src 'self'",
-    "script-src 'self' 'wasm-unsafe-eval'",
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
     "worker-src 'self' blob:",
     "connect-src 'self' https://cdn.jsdelivr.net wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
