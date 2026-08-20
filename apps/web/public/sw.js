@@ -51,12 +51,32 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     (async () => {
-      const cached = await caches.match(request);
-      if (cached) return cached;
+      // Every cache operation below is best-effort. When the disk is full,
+      // `cache.put` rejects part-way through a write and Cache Storage can
+      // start handing back entries that no longer load. An unguarded read of
+      // one of those serves a broken JS chunk: the server-rendered HTML
+      // paints, hydration dies on it, and the user gets a white page on a
+      // site whose server is perfectly healthy. Falling back to the network
+      // is always correct here — these assets are content-hashed, so the
+      // cache is a speed optimisation and never a source of truth.
+      try {
+        const cached = await caches.match(request);
+        if (cached) return cached;
+      } catch {
+        // Unreadable cache. Go to the network.
+      }
+
       const response = await fetch(request);
       if (response.ok) {
-        const cache = await caches.open(STATIC_CACHE);
-        cache.put(request, response.clone());
+        try {
+          const cache = await caches.open(STATIC_CACHE);
+          // Awaited so a failed write is caught here rather than surfacing as
+          // an unhandled rejection inside the worker.
+          await cache.put(request, response.clone());
+        } catch {
+          // Out of disk or over quota. Serving the response is what matters;
+          // storing it is not.
+        }
       }
       return response;
     })()
