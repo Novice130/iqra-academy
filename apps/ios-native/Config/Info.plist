@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Everything else in this app's Info.plist is generated from build
+	  settings (GENERATE_INFOPLIST_FILE); this file exists only for the keys
+	  that are dictionaries, which build settings cannot express.
+
+	  NSAllowsLocalNetworking permits plain HTTP to localhost, .local names
+	  and IP literals — nothing else. It is what lets a debug build talk to
+	  `npm run dev` on a laptop. It is deliberately not
+	  NSAllowsArbitraryLoads: that would turn off transport security for
+	  novicetutor.com too, and App Review asks for a justification for it.
+	-->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+</dict>
+</plist>
