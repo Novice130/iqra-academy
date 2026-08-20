@@ -229,12 +229,11 @@ export async function POST(request: NextRequest) {
         const type =
           roster.length <= 1 ? "INDIVIDUAL" : families.size === 1 ? "SIBLINGS" : "GROUP";
 
+        const mergedTitle = names.length > 0 ? `Class — ${names.join(", ")}` : keep.title;
+
         const [survivor] = await tx
           .update(sessions)
-          .set({
-            type,
-            title: names.length > 0 ? `Class — ${names.join(", ")}` : keep.title,
-          })
+          .set({ type, title: mergedTitle })
           .where(eq(sessions.id, keep.id))
           .returning();
 
@@ -262,6 +261,14 @@ export async function POST(request: NextRequest) {
           affected,
           teacher,
           previousType: keep.type,
+          // A title is written by a person; a type is derived from a roster.
+          // Overwriting the survivor's title here is right while the classes
+          // are combined, but the old string is not recoverable from anything
+          // else, so it goes in the log beside previousType. `mergedTitle` is
+          // what DELETE compares against to tell "nobody touched this since"
+          // from "somebody renamed it deliberately".
+          previousTitle: keep.title,
+          mergedTitle,
           studentCount: roster.length,
         };
       });
@@ -277,6 +284,8 @@ export async function POST(request: NextRequest) {
           intoSessionId: result.survivor.id,
           movedBookingIds: result.movedBookingIds,
           previousType: result.previousType,
+          previousTitle: result.previousTitle,
+          mergedTitle: result.mergedTitle,
           studentCount: result.studentCount,
         },
         ipAddress: getClientIp(request.headers),
@@ -390,11 +399,25 @@ export async function DELETE(request: NextRequest) {
           .orderBy(desc(auditLogs.createdAt))
           .limit(1);
 
-        const movedBookingIds = Array.isArray(
-          (entry?.metadata as { movedBookingIds?: unknown } | null)?.movedBookingIds
-        )
-          ? ((entry!.metadata as { movedBookingIds: string[] }).movedBookingIds)
+        const merged = (entry?.metadata ?? null) as {
+          movedBookingIds?: unknown;
+          previousTitle?: unknown;
+          mergedTitle?: unknown;
+        } | null;
+
+        const movedBookingIds = Array.isArray(merged?.movedBookingIds)
+          ? (merged!.movedBookingIds as string[])
           : [];
+
+        // What the survivor was called before the merge renamed it, and what
+        // the merge renamed it to. Both absent on a merge performed before
+        // these were recorded — that case falls back to deriving a title,
+        // which is what this route always did.
+        const hadTitle = merged !== null && "previousTitle" in merged;
+        const previousTitle =
+          typeof merged?.previousTitle === "string" ? merged.previousTitle : null;
+        const mergedTitle =
+          typeof merged?.mergedTitle === "string" ? merged.mergedTitle : null;
 
         if (movedBookingIds.length === 0) {
           throw new BusinessRuleError(
@@ -419,9 +442,23 @@ export async function DELETE(request: NextRequest) {
           .where(eq(sessions.id, absorbed.id))
           .returning();
 
-        // The survivor's type and title were derived from a roster that has
-        // just changed, so derive them again rather than restoring the old
-        // strings — students may have been added since.
+        // The survivor's type was derived from a roster that has just
+        // changed, so derive it again — it is a billing fact, and deriving it
+        // is what keeps it honest when students were added since.
+        //
+        // The title is the opposite: a person wrote it, and merging replaced
+        // it with a generated one. Deriving it again leaves "Class — Aisha"
+        // where "Qaidah, Tuesdays" used to be, and the original is then gone
+        // for good. So it is restored from the merge's audit entry — but only
+        // when the survivor still carries the exact string the merge wrote.
+        //
+        // If it does not, somebody renamed the class while it was combined.
+        // That title is theirs, so it is left exactly as it is: restoring the
+        // pre-merge one would undo their edit, and generating a fresh one
+        // would throw it away just as surely.
+        //
+        // Only a merge performed before any of this was recorded falls back
+        // to deriving a title, because for those there is nothing to restore.
         const roster = await tx
           .select({
             userId: bookings.userId,
@@ -439,12 +476,18 @@ export async function DELETE(request: NextRequest) {
         const type =
           roster.length <= 1 ? "INDIVIDUAL" : families.size === 1 ? "SIBLINGS" : "GROUP";
 
+        const untouched = mergedTitle !== null && survivor.title === mergedTitle;
+        const title = hadTitle
+          ? untouched
+            ? previousTitle
+            : survivor.title
+          : names.length > 0
+            ? `Class — ${names.join(", ")}`
+            : survivor.title;
+
         const [survivorAfter] = await tx
           .update(sessions)
-          .set({
-            type,
-            title: names.length > 0 ? `Class — ${names.join(", ")}` : survivor.title,
-          })
+          .set({ type, title })
           .where(eq(sessions.id, survivor.id))
           .returning();
 
