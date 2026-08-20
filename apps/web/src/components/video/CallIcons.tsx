@@ -143,3 +143,29 @@ export const VolumeOffIcon = (p: P) => (
     <path d="M21 9.5l-5 5" />
   </svg>
 );
+
+/**
+ * Three bars that bob while somebody is talking (animation lives in
+ * globals.css so it can be disabled under prefers-reduced-motion).
+ */
+export const SpeakingBarsIcon = ({ className = '' }: { className?: string }) => (
+  <svg viewBox="0 0 12 12" className={className} aria-hidden="true">
+    {[
+      { x: 1, delay: '0s' },
+      { x: 5, delay: '0.15s' },
+      { x: 9, delay: '0.3s' },
+    ].map(({ x, delay }) => (
+      <rect
+        key={x}
+        className="nt-speak-bar"
+        x={x}
+        y={2}
+        width={2}
+        height={8}
+        rx={1}
+        fill="currentColor"
+        style={{ animationDelay: delay, transformOrigin: `${x + 1}px 6px` }}
+      />
+    ))}
+  </svg>
+);

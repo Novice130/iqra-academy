@@ -16,8 +16,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { isTrackReference, type TrackReferenceOrPlaceholder } from '@livekit/components-core';
-import { VideoTrack } from '@livekit/components-react';
-import { MicOffIcon, MoreIcon } from './CallIcons';
+import { VideoTrack, useIsSpeaking } from '@livekit/components-react';
+import { MicOffIcon, MoreIcon, SpeakingBarsIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
 
 /** Wide enough for "Spotlight for everyone" on one line, narrow enough for a phone. */
@@ -136,6 +136,16 @@ export default function VideoTile({
     };
   }, [menuOpen, renaming, confirmRemove]);
 
+  /**
+   * Who is talking, per participant rather than per room — the tile has to
+   * light up on its own, including the avatar tile of somebody whose camera
+   * is off, which used to be the only thing you had to go on and wasn't
+   * there at all. Muted people are excluded: LiveKit can still report a
+   * moment of speech as a mic mutes, and a "speaking" ring on a muted tile
+   * reads as a bug.
+   */
+  const isSpeaking = useIsSpeaking(trackRef.participant) && !micMuted;
+
   const hasVideo = isTrackReference(trackRef) && !cameraOff;
   const hasActions =
     !!actions &&
@@ -169,6 +179,10 @@ export default function VideoTile({
         background: '#0b0c0f',
         outline: isSpotlighted ? '2px solid #8ab4f8' : undefined,
         outlineOffset: '-2px',
+        // Inset shadow rather than a second outline: spotlight already owns
+        // `outline`, and a border would shift the video by a pixel.
+        boxShadow: isSpeaking ? 'inset 0 0 0 3px #34c98a' : undefined,
+        transition: 'box-shadow 120ms ease-out',
       }}
     >
       {hasVideo ? (
@@ -183,7 +197,18 @@ export default function VideoTile({
         <div className="w-full h-full flex items-center justify-center">
           <div
             className="rounded-full flex items-center justify-center font-semibold text-white"
-            style={{ width: '22%', aspectRatio: '1', minWidth: 40, maxWidth: 96, background: '#3c4043', fontSize: '1.4em' }}
+            style={{
+              width: '22%',
+              aspectRatio: '1',
+              minWidth: 40,
+              maxWidth: 96,
+              background: '#3c4043',
+              fontSize: '1.4em',
+              // A halo around the initial is the only movement on a
+              // camera-off tile, so it is what tells you who is talking.
+              boxShadow: isSpeaking ? '0 0 0 3px #34c98a, 0 0 0 10px rgba(52,201,138,0.22)' : undefined,
+              transition: 'box-shadow 120ms ease-out',
+            }}
           >
             {(name || '?').charAt(0).toUpperCase()}
           </div>
@@ -196,7 +221,15 @@ export default function VideoTile({
         style={{ background: 'rgba(0,0,0,0.55)' }}
       >
         {micMuted && <MicOffIcon className="w-3.5 h-3.5 shrink-0" />}
-        <span className="text-[11px] text-white truncate" style={{ color: micMuted ? '#f6a6a0' : '#fff' }}>
+        {isSpeaking && (
+          <span className="shrink-0 flex" style={{ color: '#34c98a' }}>
+            <SpeakingBarsIcon className="w-3.5 h-3.5" />
+          </span>
+        )}
+        <span
+          className="text-[11px] text-white truncate"
+          style={{ color: micMuted ? '#f6a6a0' : isSpeaking ? '#7ee2b8' : '#fff' }}
+        >
           {name}
           {isLocal ? ' (you)' : ''}
         </span>

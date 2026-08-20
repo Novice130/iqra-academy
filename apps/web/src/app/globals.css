@@ -532,3 +532,19 @@ body {
     50% { opacity: 0.35; }
   }
 }
+
+/* Speaking indicator on a video tile: three bars that bob while somebody is
+   talking. Purely decorative — the green ring around the tile and the
+   coloured name carry the same information for anyone who has motion
+   turned off. */
+@keyframes nt-speak-bar {
+  0%, 100% { transform: scaleY(0.35); }
+  50%      { transform: scaleY(1); }
+}
+.nt-speak-bar {
+  transform-origin: center;
+  animation: nt-speak-bar 0.7s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nt-speak-bar { animation: none; transform: scaleY(0.8); }
+}

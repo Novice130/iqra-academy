@@ -412,7 +412,21 @@ export default function CustomVideoConference({
   initialEffect,
 }: CustomVideoConferenceProps) {
   const layoutContext = useCreateLayoutContext();
-  const tracks = useTracks([Track.Source.Camera, Track.Source.ScreenShare], { onlySubscribed: false });
+  // `withPlaceholder` on the camera is what makes somebody who never turned
+  // their camera on still appear. Passing bare sources returns only real
+  // publications, so a student who joined muted-and-dark published no camera
+  // track, had no entry here, and therefore had no tile — you could hear them
+  // and see nothing. A placeholder is a participant + source with no
+  // publication; VideoTile already renders that as the initial avatar.
+  // Screen share stays placeholder-free, or every participant would conjure
+  // an empty screen-share tile.
+  const tracks = useTracks(
+    [
+      { source: Track.Source.Camera, withPlaceholder: true },
+      { source: Track.Source.ScreenShare, withPlaceholder: false },
+    ],
+    { onlySubscribed: false }
+  );
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const metadata = useLiveRoomMetadata();
   const { muteTrack, askToUnmute, askForCamera, rename, removeParticipant } = useHostControls(sessionId);
