@@ -23,49 +23,69 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
-import { sessions, users, bookings, studentProfiles, sessionAttendance } from "@/db/schema";
+import { sessions, bookings, studentProfiles, sessionAttendance } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName, getRoomServiceClient, makeIdentity } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { resolveClassRoom } from "@/lib/class-room";
 import { ringClassStudents } from "@/lib/class-ring";
+import { afterResponse } from "@/lib/after-response";
+import { createTimings, withTimings } from "@/lib/server-timing";
 import { createId } from "@paralleldrive/cuid2";
 
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  return withDb(async () => {
+  // HTTP, not the WebSocket pool. Nothing in this route or anything it calls
+  // — resolveClassRoom, ringClassStudents, requireAuth, Better Auth's own
+  // session lookup — ever opens a transaction, so the pool's only effect here
+  // was to charge every join a TLS + WebSocket handshake before the first
+  // query could run. That handshake is on the critical path between a student
+  // tapping Join and seeing video. If anything in this call graph ever needs
+  // `db.transaction(...)` or `withRLS`, this has to go back to `withDb`.
+  return withHttpDb(async () => {
+    // Every response below carries a Server-Timing breakdown, so a real join
+    // on a real connection reports where its seconds went. Measuring this
+    // route from a laptop can't separate database time from the user's own
+    // trip to the edge; this can. Read it in DevTools' Network panel, on the
+    // join request, under Timing.
+    const timings = createTimings();
+
     try {
-      const authResult = await requireAuth(request);
-      if (authResult instanceof NextResponse) return authResult;
+      const authResult = await timings.track("auth", requireAuth(request));
+      if (authResult instanceof NextResponse) return withTimings(authResult, timings);
       const ctx = authResult;
       const { id: sessionId } = await params;
 
-      const [session, user] = await Promise.all([
+      // One query, not three. This route is on the critical path between
+      // tapping Join and seeing video, and every Neon round trip here is
+      // ~500ms of a student staring at a spinner — measured at ~4s for this
+      // function before a token was even minted.
+      //
+      // `requireAuth` has already read this user's row, so `ctx` stands in
+      // for the second lookup that used to sit in this Promise.all, and the
+      // class teacher — who may not be the caller, since an admin can join to
+      // observe — comes back through the `teacher` relation rather than as a
+      // follow-up query that had to wait for `session` to resolve first.
+      const session = await timings.track(
+        "load",
         db.query.sessions.findFirst({
           where: eq(sessions.id, sessionId),
-          with: { bookings: true },
-        }),
-        db.query.users.findFirst({
-          where: eq(users.id, ctx.userId),
-        }),
-      ]);
-
-      // The class teacher, who may not be the person making this request —
-      // an admin can be joining to observe.
-      const sessionTeacher = session
-        ? await db.query.users.findFirst({
-            where: eq(users.id, session.teacherId),
-            columns: { email: true, name: true },
-          })
-        : undefined;
+          with: {
+            bookings: true,
+            teacher: { columns: { email: true, name: true } },
+          },
+        })
+      );
 
       if (!session) throw new NotFoundError("Session");
-      if (!user) throw new NotFoundError("User");
+
+      const user = { email: ctx.email, name: ctx.name, role: ctx.role, orgId: ctx.orgId };
+      const sessionTeacher = session.teacher ?? undefined;
 
       // This class was combined into another one (see lib/class-merge.ts).
       // The row still exists, cancelled, holding its own history — but the
@@ -74,7 +94,7 @@ export async function GET(
       // Checked before the room resolver, which reasons about time slots and
       // would send them to a room nobody else is in.
       if (session.mergedIntoId) {
-        return NextResponse.json({ redirectSessionId: session.mergedIntoId });
+        return withTimings(NextResponse.json({ redirectSessionId: session.mergedIntoId }), timings);
       }
 
       // An admin can join only their own org's sessions. SUPER_ADMIN is the
@@ -88,7 +108,7 @@ export async function GET(
 
       // Where is this class actually happening? Everyone asks the same
       // question and gets the same answer, so nobody opens a second room.
-      const resolution = await resolveClassRoom(session);
+      const resolution = await timings.track("resolve", resolveClassRoom(session));
       const isTheRoom = resolution.session.id === sessionId && resolution.kind !== "too-early";
 
       // Auto-book on the way in for an instant meeting, for a class this
@@ -134,18 +154,21 @@ export async function GET(
         // The class lives on another row — the teacher's group class, an
         // instant meeting, or simply whichever sibling row got picked as
         // canonical. Follow it.
-        return NextResponse.json({ redirectSessionId: resolution.session.id });
+        return withTimings(NextResponse.json({ redirectSessionId: resolution.session.id }), timings);
       }
 
       if (resolution.kind === "too-early") {
         // Not due yet. This is the only case that still holds someone
         // outside: opening a room hours ahead of a class helps nobody.
-        return NextResponse.json({
-          waiting: true,
-          sessionTitle: session.title,
-          teacherName: sessionTeacher?.name || null,
-          scheduledStart: session.scheduledStart?.toISOString() ?? null,
-        });
+        return withTimings(
+          NextResponse.json({
+            waiting: true,
+            sessionTitle: session.title,
+            teacherName: sessionTeacher?.name || null,
+            scheduledStart: session.scheduledStart?.toISOString() ?? null,
+          }),
+          timings
+        );
       }
 
       const roomName = generateRoomName(sessionId);
@@ -260,7 +283,7 @@ export async function GET(
       //
       // Not gated on `isAttending`: an observing admin gets the same
       // `email#random` identity and duplicates themselves the same way.
-      if (isConnecting) await dropStaleConnections();
+      if (isConnecting) await timings.track("sweep", dropStaleConnections());
 
       // Minted here rather than inside the token so the attendance row can name
       // the exact connection it belongs to. That is what lets the
@@ -310,7 +333,47 @@ export async function GET(
           .onConflictDoNothing();
       };
 
-      const [token] = await Promise.all([
+      // Deferred, not awaited — see lib/after-response.
+      //
+      // The teacher arriving is what rings the class. Gated on `connecting=1`
+      // like the attendance write, for the same reason: this route is also hit
+      // on page mount, and a teacher who opens a class and then sits on the
+      // device picker has not started it.
+      //
+      // Only the *owning* teacher — an admin dropping in to observe must not
+      // summon a class. Re-ringing on reconnect is handled inside
+      // ringClassStudents, which matters now that a teacher who drops off
+      // comes straight back through here.
+      //
+      // A push per booked student used to sit between the teacher tapping Join
+      // and their own token coming back, which is the one person in the class
+      // who should never be waiting on it.
+      if (isConnecting && isOwningTeacher) {
+        afterResponse(
+          ringClassStudents({
+            canonical: session,
+            roomName,
+            teacherId: ctx.userId,
+            teacherName: user?.name || "Your teacher",
+          })
+        );
+      }
+
+      // Seed the spotlight whoever opens the room — it always names the class
+      // teacher, so a student opening early still lands everyone on the
+      // teacher once they arrive.
+      //
+      // Also deferred: it is two or three LiveKit round trips, and the client
+      // does not need it to connect. The response already carries
+      // `teacherIdentity` precisely so a client can focus the teacher before
+      // any spotlight metadata lands, and ensureSpotlight's own backfill is
+      // written to cope with a room that got auto-created first — which is the
+      // same race whether it runs before the response or just after it.
+      if (isAttending) {
+        afterResponse(ensureSpotlight());
+      }
+
+      const [token] = await timings.track("token", Promise.all([
         generateLiveKitToken({
           roomName,
           userName: user?.name || "Participant",
@@ -319,27 +382,6 @@ export async function GET(
           identity,
         }),
         isConnecting ? recordJoin().catch(() => {}) : Promise.resolve(),
-        // The teacher arriving is what rings the class. Gated on
-        // `connecting=1` like the attendance write, for the same reason: this
-        // route is also hit on page mount, and a teacher who opens a class and
-        // then sits on the device picker has not started it.
-        //
-        // Only the *owning* teacher — an admin dropping in to observe must not
-        // summon a class. Re-ringing on reconnect is handled inside
-        // ringClassStudents, which matters now that a teacher who drops off
-        // comes straight back through here.
-        isConnecting && isOwningTeacher
-          ? ringClassStudents({
-              canonical: session,
-              roomName,
-              teacherId: ctx.userId,
-              teacherName: user?.name || "Your teacher",
-            }).catch(() => {})
-          : Promise.resolve(),
-        // Seed the spotlight whoever opens the room — it always names the
-        // class teacher, so a student opening early still lands everyone on
-        // the teacher once they arrive.
-        isAttending ? ensureSpotlight() : Promise.resolve(),
         shouldMarkStarted
           ? db
               .update(sessions)
@@ -352,9 +394,9 @@ export async function GET(
               .set({ videoRoomName: roomName })
               .where(eq(sessions.id, sessionId))
           : Promise.resolve(),
-      ]);
+      ]));
 
-      return NextResponse.json({
+      return withTimings(NextResponse.json({
         roomName,
         token,
         serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
@@ -373,9 +415,9 @@ export async function GET(
         // teacher's class gets moderator *controls*, but is not the host.
         // Leaving must not end the class for the teacher still teaching it.
         isHost: isOwningTeacher,
-      });
+      }), timings);
     } catch (error) {
-      return handleApiError(error);
+      return withTimings(handleApiError(error), timings);
     }
   });
 }

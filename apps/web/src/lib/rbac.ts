@@ -45,6 +45,13 @@ export interface AuthContext {
   role: UserRole;
   /** The user's email (for audit logging) */
   email: string;
+  /**
+   * The user's display name. Carried here so routes that need it — anything
+   * putting a human name in front of another user, like the LiveKit token —
+   * don't have to re-read the row this function has already fetched. That
+   * second read was costing a full Neon round trip per request.
+   */
+  name: string | null;
   /** Whether this session is an impersonation session */
   isImpersonating: boolean;
   /** If impersonating, the original admin's user ID */
@@ -106,6 +113,7 @@ export async function getAuthContext(
         orgId: true,
         role: true,
         email: true,
+        name: true,
       },
     });
 
@@ -122,6 +130,7 @@ export async function getAuthContext(
       orgId: user.orgId,
       role: user.role as UserRole,
       email: user.email,
+      name: user.name ?? null,
       isImpersonating,
       originalUserId,
     };

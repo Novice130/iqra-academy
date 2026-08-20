@@ -101,38 +101,55 @@ export type RoomResolution =
 export async function resolveClassRoom(session: SessionRow): Promise<RoomResolution> {
   const now = Date.now();
 
+  // Is this class due? Pure arithmetic on a row we already hold, so it costs
+  // nothing and it tells us up front whether the sibling query below can
+  // possibly be needed.
+  const start = session.scheduledStart?.getTime() ?? now;
+  const inJoinWindow = now >= start - EARLY_JOIN_MS && now <= start + LATE_JOIN_MS;
+
   // 1. Anything of this teacher's already running wins outright, whether it's
   //    this row, a sibling, or an instant meeting they spun up instead.
-  const live = await db.query.sessions.findFirst({
-    where: and(
-      eq(sessions.teacherId, session.teacherId),
-      eq(sessions.status, "IN_PROGRESS"),
-      gt(sessions.actualStart, new Date(now - LIVE_WINDOW_MS))
-    ),
-    orderBy: [asc(sessions.actualStart)],
-  });
+  //
+  // 2. And, when the class is due, the sibling list that decides which row is
+  //    canonical. These two used to run one after the other, which put a
+  //    second database round trip on the path between tapping Join and seeing
+  //    video for every join that actually opens a room — the common case.
+  //    They do not depend on each other, so they go together and the result is
+  //    chosen afterwards. When the class isn't due the sibling query is still
+  //    skipped entirely; nothing speculative is issued.
+  const [live, siblings] = await Promise.all([
+    db.query.sessions.findFirst({
+      where: and(
+        eq(sessions.teacherId, session.teacherId),
+        eq(sessions.status, "IN_PROGRESS"),
+        gt(sessions.actualStart, new Date(now - LIVE_WINDOW_MS))
+      ),
+      orderBy: [asc(sessions.actualStart)],
+    }),
+    inJoinWindow
+      ? db.query.sessions.findMany({
+          where: and(
+            eq(sessions.teacherId, session.teacherId),
+            ne(sessions.status, "CANCELLED"),
+            ne(sessions.status, "COMPLETED"),
+            gte(sessions.scheduledStart, new Date(start - SIBLING_WINDOW_MS)),
+            lte(sessions.scheduledStart, new Date(start + SIBLING_WINDOW_MS))
+          ),
+          orderBy: [asc(sessions.scheduledStart), asc(sessions.id)],
+        })
+      : Promise.resolve([] as SessionRow[]),
+  ]);
+
+  // Precedence is unchanged: a live room still beats everything else.
   if (live) return { kind: "live", session: live };
 
-  // 2. Nothing running. Is this class due?
-  const start = session.scheduledStart?.getTime() ?? now;
-  if (now < start - EARLY_JOIN_MS || now > start + LATE_JOIN_MS) {
+  if (!inJoinWindow) {
     return { kind: "too-early", session };
   }
 
   // 3. Pick one row for the whole occurrence, the same way for everybody, so
   //    two students arriving at once can't open two rooms. Earliest slot wins,
   //    ties broken by id — arbitrary but identical for every caller.
-  const siblings = await db.query.sessions.findMany({
-    where: and(
-      eq(sessions.teacherId, session.teacherId),
-      ne(sessions.status, "CANCELLED"),
-      ne(sessions.status, "COMPLETED"),
-      gte(sessions.scheduledStart, new Date(start - SIBLING_WINDOW_MS)),
-      lte(sessions.scheduledStart, new Date(start + SIBLING_WINDOW_MS))
-    ),
-    orderBy: [asc(sessions.scheduledStart), asc(sessions.id)],
-  });
-
   const canonical = siblings[0] ?? session;
   return { kind: "openable", session: canonical };
 }
