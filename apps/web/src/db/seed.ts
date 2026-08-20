@@ -25,7 +25,7 @@
  */
 
 import "dotenv/config";  // Load .env before anything else
-import { db } from "../lib/db";
+import { db, withDb } from "../lib/db";
 import {
   organizations,
   users,
@@ -207,12 +207,15 @@ async function seed() {
       maxStudents: 20,
       sessionType: "WEBINAR" as const,
     },
+    // The three paid tiers are family sizes, not class formats — see
+    // drizzle/0004_family_plans.sql for why the enum labels stayed put while
+    // their meanings moved. GROUP is "two students from one family" now.
     {
       id: PLAN_INDIVIDUAL_ID,
       orgId: ORG_ID,
       tier: "INDIVIDUAL" as const,
-      name: "1:1 Premium",
-      description: "Private 1-on-1 sessions with a teacher. 4 classes per week.",
+      name: "One Student",
+      description: "Private 1-on-1 Quran classes. 4 classes a week, 30 minutes each.",
       priceInCents: 7000,
       classesPerWeek: 4,
       maxStudents: 1,
@@ -222,28 +225,44 @@ async function seed() {
       id: PLAN_GROUP_ID,
       orgId: ORG_ID,
       tier: "GROUP" as const,
-      name: "Group Class",
-      description: "Small group sessions with up to 3 students. 4 classes per week.",
-      priceInCents: 5000,
+      name: "Two Students",
+      description: "Two students from the same family. 4 classes a week each, 30 minutes.",
+      priceInCents: 12000,
       classesPerWeek: 4,
-      maxStudents: 3,
-      sessionType: "GROUP" as const,
+      maxStudents: 2,
+      sessionType: "SIBLINGS" as const,
     },
     {
       id: PLAN_SIBLINGS_ID,
       orgId: ORG_ID,
       tier: "SIBLINGS" as const,
-      name: "Family Plan",
-      description: "Up to 3 children under one account. 4 classes per week per child.",
-      priceInCents: 10000,
+      name: "Three Students",
+      description: "Three students from the same family. 4 classes a week each, 30 minutes.",
+      priceInCents: 15000,
       classesPerWeek: 4,
       maxStudents: 3,
       sessionType: "SIBLINGS" as const,
     },
   ];
 
+  // Prices and sizes move (0004 remapped every paid tier); ids do not. An
+  // upsert keeps a re-seed from leaving a database on retired pricing, which
+  // onConflictDoNothing quietly did.
   for (const plan of plansData) {
-    await db.insert(plans).values(plan).onConflictDoNothing();
+    await db
+      .insert(plans)
+      .values(plan)
+      .onConflictDoUpdate({
+        target: plans.id,
+        set: {
+          name: plan.name,
+          description: plan.description,
+          priceInCents: plan.priceInCents,
+          classesPerWeek: plan.classesPerWeek,
+          maxStudents: plan.maxStudents,
+          sessionType: plan.sessionType,
+        },
+      });
   }
 
   // ── 5. Subscriptions ─────────────────────────────────────────────────────
@@ -410,8 +429,10 @@ async function seed() {
   console.log("\n💡 Login as any seed user (all passwords are managed by Better Auth).");
 }
 
-// Run the seed
-seed()
+// `db` resolves per-request through AsyncLocalStorage, so a script has to
+// open its own scope the same way a route handler does — without this every
+// query throws "Database accessed outside of withDb()".
+withDb(seed)
   .then(() => process.exit(0))
   .catch((error) => {
     console.error("❌ Seed failed:", error);

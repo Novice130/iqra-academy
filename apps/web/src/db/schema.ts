@@ -506,6 +506,9 @@ export const invoices = pgTable(
     index("invoices_user_idx").on(t.userId),
     index("invoices_stripe_idx").on(t.stripeInvoiceId),
     index("invoices_status_idx").on(t.status),
+    // The admin list is the only screen that reads this table, and it always
+    // reads it newest-first for one org.
+    index("invoices_org_created_idx").on(t.orgId, t.createdAt.desc()),
   ]
 );
 
@@ -607,6 +610,8 @@ export const teacherAvailability = pgTable(
   (t) => [
     index("teacher_availability_org_idx").on(t.orgId),
     index("teacher_availability_teacher_idx").on(t.teacherId),
+    // How slot generation actually filters: active rows for one org on one day.
+    index("teacher_availability_active_idx").on(t.orgId, t.isActive, t.dayOfWeek),
   ]
 );
 
@@ -742,6 +747,9 @@ export const sessions = pgTable(
     index("sessions_org_idx").on(t.orgId),
     index("sessions_teacher_idx").on(t.teacherId),
     index("sessions_start_idx").on(t.scheduledStart),
+    // One teacher's day in order — what merge-candidate detection reads, and
+    // the only query that needs both columns together.
+    index("sessions_teacher_start_idx").on(t.teacherId, t.scheduledStart),
   ]
 );
 
