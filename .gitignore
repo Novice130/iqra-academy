@@ -58,3 +58,8 @@ apps/web/.ds-css/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Firebase config — carries the project's API keys, and each app in the
+# project gets its own. Not a secret in the .p8 sense, but not ours to publish.
+GoogleService-Info.plist
+google-services.json

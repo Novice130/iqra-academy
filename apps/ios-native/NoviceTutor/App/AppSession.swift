@@ -21,6 +21,12 @@ final class AppSession {
 
     private(set) var phase: Phase = .restoring
 
+    /// Set when the *last* restore failed on the network rather than on
+    /// authorisation. The sign-in screen shows it, because "you are signed
+    /// out" and "your phone has no signal" look identical otherwise and only
+    /// one of them is worth typing a password over.
+    private(set) var restoreError: String?
+
     var user: CurrentUser? {
         if case .signedIn(let user) = phase { return user }
         return nil
@@ -28,30 +34,47 @@ final class AppSession {
 
     func restore() async {
         do {
+            restoreError = nil
             phase = .signedIn(try await APIClient.shared.me())
+            await PushService.shared.requestAuthorizationAndRegister()
         } catch APIError.unauthorized {
+            restoreError = nil
             phase = .signedOut
         } catch {
             // A network failure at launch is not a signed-out state, but the
             // app cannot show a schedule it could not load either. Signed out
-            // is the honest place to land: the sign-in screen reports the
-            // real error when the person tries.
+            // is where it has to land — with the reason carried across, so the
+            // screen can say "couldn't reach Novice Tutor" instead of silently
+            // implying the session ended.
+            restoreError = error.localizedDescription
             phase = .signedOut
         }
     }
 
+
     func signIn(email: String, password: String) async throws {
+        restoreError = nil
         try await APIClient.shared.signIn(email: email, password: password)
         phase = .signedIn(try await APIClient.shared.me())
+        // Asked for now rather than at launch: there is a schedule behind the
+        // alert to explain what would be worth notifying about.
+        await PushService.shared.requestAuthorizationAndRegister()
     }
 
     func signUp(name: String, email: String, password: String) async throws {
+        restoreError = nil
         try await APIClient.shared.signUp(name: name, email: email, password: password)
         phase = .signedIn(try await APIClient.shared.me())
+        await PushService.shared.requestAuthorizationAndRegister()
     }
 
     func signOut() async {
+        // Before the session ends: the delete is authorised by the cookie, and
+        // a phone left registered would keep ringing for somebody who signed
+        // out of it.
+        await PushService.shared.unregister()
         try? await APIClient.shared.signOut()
+        restoreError = nil
         phase = .signedOut
     }
 

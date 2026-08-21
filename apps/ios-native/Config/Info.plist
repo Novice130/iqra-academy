@@ -13,6 +13,38 @@
 	  NSAllowsArbitraryLoads: that would turn off transport security for
 	  novicetutor.com too, and App Review asks for a justification for it.
 	-->
+	<!--
+	  Export compliance. The app uses only HTTPS and the standard encryption
+	  iOS provides; it ships no cryptography of its own. Declaring it here
+	  answers the question once instead of on every single upload.
+	-->
+	<!--
+	  Audio only. Not `voip`: that mode exists so a PushKit push can wake a
+	  terminated app straight into CallKit, and since iOS 13 a voip push that
+	  is not reported to CallKit immediately kills the app. This app has
+	  neither, so voip would be an unused declaration App Review asks about.
+	  `audio` is what keeps the lesson audible when a student locks the phone
+	  or checks a message. Video suspends on its own — iOS forbids background
+	  capture, and the LiveKit SDK stops publishing the camera anyway.
+	-->
+	<!--
+	  The launch screen, spelled out rather than generated. The generated one
+	  is plain `systemBackground` — white on a light-mode phone — while the
+	  first SwiftUI frame is near-black, so every cold launch flashed white
+	  before the app appeared. `UIColorName` names a colour in the asset
+	  catalog; the generation build setting silently ignored it.
+	-->
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+	</array>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

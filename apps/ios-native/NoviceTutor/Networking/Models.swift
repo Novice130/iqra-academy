@@ -55,10 +55,12 @@ struct ClassSession: Codable, Identifiable, Sendable {
 
     /// The window the join button is live in. The server decides for real —
     /// this only keeps the app from offering a button that will be refused.
-    /// Ten minutes early matches `lib/class-room.ts`.
+    /// An hour early matches `EARLY_JOIN_MS` in `lib/class-room.ts`; a tighter
+    /// number here hides the button for fifty minutes the server would have
+    /// allowed, and the person has no way to tell that from a broken app.
     func isJoinable(now: Date = .now) -> Bool {
         guard status == .scheduled || status == .inProgress else { return false }
-        let opens = scheduledStart.addingTimeInterval(-10 * 60)
+        let opens = scheduledStart.addingTimeInterval(-60 * 60)
         let closes = scheduledEnd.addingTimeInterval(30 * 60)
         return now >= opens && now <= closes
     }
@@ -109,23 +111,52 @@ struct JoinGrant: Decodable, Sendable {
     let teacherName: String?
 }
 
-/// The join endpoint answers 200 with one of two different bodies: a grant,
-/// or — when the class was merged into another — only the id of the class to
-/// ask for instead. Decoding straight into ``JoinGrant`` would fail on the
-/// second, so the two cases are separated before either is read.
+/// What the server says about a class that has not opened yet.
+struct JoinWaiting: Decodable, Sendable {
+    let sessionTitle: String?
+    let teacherName: String?
+    /// Nullable on the server, so optional here.
+    let scheduledStart: Date?
+}
+
+/// The join endpoint answers 200 with one of *three* different bodies: a
+/// grant, the id of the class to ask for instead (when this one was merged
+/// into another), or a note that the class is not open yet. Decoding straight
+/// into ``JoinGrant`` fails on the other two, so each is recognised before any
+/// of them is read.
+///
+/// Probe order matters, and so does the shape of each probe: the
+/// discriminating field must be required and non-optional. ``JoinWaiting`` is
+/// all-optional, so a grant body would satisfy it — which is why `waiting`
+/// itself is checked through a separate one-field struct first.
 enum JoinOutcome: Decodable, Sendable {
     case grant(JoinGrant)
     case redirect(sessionId: String)
+    case waiting(JoinWaiting)
 
     private struct Redirect: Decodable { let redirectSessionId: String }
+    private struct WaitingFlag: Decodable { let waiting: Bool }
 
     init(from decoder: Decoder) throws {
         if let redirect = try? Redirect(from: decoder) {
             self = .redirect(sessionId: redirect.redirectSessionId)
             return
         }
+        if let flag = try? WaitingFlag(from: decoder), flag.waiting {
+            self = .waiting(try JoinWaiting(from: decoder))
+            return
+        }
         self = .grant(try JoinGrant(from: decoder))
     }
+}
+
+/// The outcome of asking to join, once redirects have been followed.
+enum JoinResult: Sendable {
+    /// The canonical session id travels with the answer: a merge redirect
+    /// means the room lives on a different row, and leaving or ending has to
+    /// name that row, not the one the person tapped.
+    case grant(JoinGrant, sessionId: String)
+    case waiting(JoinWaiting, sessionId: String)
 }
 
 // MARK: - Auth payloads
@@ -181,14 +212,24 @@ extension APIClient {
     /// One hop and no more: a redirect that points at another merged row
     /// would mean the server holds a cycle, and chasing it would hang the app
     /// instead of showing the person an error.
-    func join(sessionId: String) async throws -> (grant: JoinGrant, sessionId: String) {
-        switch try await joinOutcome(sessionId: sessionId) {
+    ///
+    /// `connecting` is not cosmetic. It is what makes the server evict this
+    /// person's stale connections, open their attendance row, and — for a
+    /// teacher — ring every booked student. Send it only on the request whose
+    /// token is actually handed to LiveKit: on a speculative one it would
+    /// evict the connection the person is currently sitting in.
+    func join(sessionId: String, connecting: Bool) async throws -> JoinResult {
+        switch try await joinOutcome(sessionId: sessionId, connecting: connecting) {
         case .grant(let grant):
-            return (grant, sessionId)
+            return .grant(grant, sessionId: sessionId)
+        case .waiting(let waiting):
+            return .waiting(waiting, sessionId: sessionId)
         case .redirect(let next):
-            switch try await joinOutcome(sessionId: next) {
+            switch try await joinOutcome(sessionId: next, connecting: connecting) {
             case .grant(let grant):
-                return (grant, next)
+                return .grant(grant, sessionId: next)
+            case .waiting(let waiting):
+                return .waiting(waiting, sessionId: next)
             case .redirect:
                 throw APIError.server(
                     status: 200,
@@ -199,7 +240,61 @@ extension APIClient {
         }
     }
 
-    private func joinOutcome(sessionId: String) async throws -> JoinOutcome {
-        try await get("/api/sessions/\(sessionId)/join", as: JoinOutcome.self)
+    private func joinOutcome(sessionId: String, connecting: Bool) async throws -> JoinOutcome {
+        try await get(
+            "/api/sessions/\(sessionId)/join",
+            query: connecting ? [URLQueryItem(name: "connecting", value: "1")] : [],
+            as: JoinOutcome.self
+        )
     }
+
+    /// Closes this connection's attendance row.
+    ///
+    /// The identity names the *connection*, not the person: someone in the
+    /// class from a phone and a laptop has two open rows, and leaving on one
+    /// must not close the other.
+    func leave(sessionId: String, identity: String) async throws {
+        struct Body: Encodable { let identity: String }
+        try await post("/api/sessions/\(sessionId)/leave", body: Body(identity: identity))
+    }
+
+    /// Ends the class for everyone. Only ever from the host's deliberate tap —
+    /// never from a disconnect, a backgrounded app, or a dismissed view.
+    func endClass(sessionId: String) async throws {
+        struct Empty: Encodable {}
+        try await post("/api/sessions/\(sessionId)/end", body: Empty())
+    }
+
+    // MARK: - Account
+
+    func accountDeletability() async throws -> AccountDeletability {
+        try await get("/api/me/account")
+    }
+
+    /// Irreversible. Cancels upcoming classes and anonymises the account.
+    func deleteAccount() async throws {
+        struct Body: Encodable { let confirm = "DELETE" }
+        try await delete("/api/me/account", body: Body())
+    }
+
+    // MARK: - Push
+
+    func registerDevice(token: String) async throws {
+        struct Body: Encodable {
+            let token: String
+            let platform = "ios"
+        }
+        try await post("/api/devices", body: Body(token: token))
+    }
+
+    func unregisterDevice(token: String) async throws {
+        struct Body: Encodable { let token: String }
+        try await delete("/api/devices", body: Body(token: token))
+    }
+}
+
+/// `GET /api/me/account` — whether this account may delete itself.
+struct AccountDeletability: Decodable, Sendable {
+    let role: String
+    let canDelete: Bool
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Debug builds. `development` is the sandbox APNs environment; a build
+	  signed with it cannot receive a push sent to production and vice versa,
+	  which is the usual reason "push works on my phone but not from the
+	  store". The release file next to this one says `production`.
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

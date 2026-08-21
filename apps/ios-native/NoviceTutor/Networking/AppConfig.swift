@@ -34,9 +34,17 @@ enum AppConfig {
         #endif
     }
 
-    /// `https://novicetutor.com/api/...`
-    static func url(_ path: String) -> URL {
+    /// `https://novicetutor.com/api/...`, optionally with a query string.
+    ///
+    /// The query cannot be appended to `path`: `appendingPathComponent`
+    /// percent-encodes `?` into `%3F`, so `"/api/x?connecting=1"` would ask for
+    /// a path that does not exist and come back 404 with nothing to explain it.
+    static func url(_ path: String, query: [URLQueryItem] = []) -> URL {
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        return origin.appendingPathComponent(trimmed)
+        let base = origin.appendingPathComponent(trimmed)
+        guard !query.isEmpty else { return base }
+        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
+        components?.queryItems = query
+        return components?.url ?? base
     }
 }

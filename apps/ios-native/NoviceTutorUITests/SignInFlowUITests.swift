@@ -11,6 +11,11 @@ import XCTest
 /// Requires a server on `NT_ORIGIN` (default `http://localhost:3000`) with
 /// the standing test accounts. Start it with
 /// `BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000 npm run dev`.
+///
+/// `NT_PASSWORD` has no default and the tests skip without it. The password
+/// used to sit here as a literal, which made a real account's credentials
+/// public to anyone with the repository — `docs/test-accounts.md` says the
+/// password is not in this repo, and that is only true now.
 final class SignInFlowUITests: XCTestCase {
     private var origin: String {
         ProcessInfo.processInfo.environment["NT_ORIGIN"] ?? "http://localhost:3000"
@@ -18,12 +23,20 @@ final class SignInFlowUITests: XCTestCase {
     private var email: String {
         ProcessInfo.processInfo.environment["NT_EMAIL"] ?? "teststudent1@test.com"
     }
-    private var password: String {
-        ProcessInfo.processInfo.environment["NT_PASSWORD"] ?? "NoviceTest123"
+    private var password: String? {
+        ProcessInfo.processInfo.environment["NT_PASSWORD"]
     }
 
     override func setUp() {
         continueAfterFailure = false
+    }
+
+    /// Skips rather than fails: a run without credentials has proved nothing,
+    /// and a red test that means "you did not set an environment variable"
+    /// teaches everyone to ignore red tests.
+    private func requirePassword() throws -> String {
+        try XCTSkipIf(password == nil, "Set NT_PASSWORD to run the sign-in tests.")
+        return password!
     }
 
     private func launchApp() -> XCUIApplication {
@@ -36,6 +49,7 @@ final class SignInFlowUITests: XCTestCase {
     }
 
     func testSignInShowsClasses() throws {
+        let password = try requirePassword()
         let app = launchApp()
 
         let emailField = app.textFields["Email"]
@@ -83,6 +97,7 @@ final class SignInFlowUITests: XCTestCase {
     }
 
     func testAccountTabShowsWhoIsSignedIn() throws {
+        let password = try requirePassword()
         let app = launchApp()
 
         let emailField = app.textFields["Email"]

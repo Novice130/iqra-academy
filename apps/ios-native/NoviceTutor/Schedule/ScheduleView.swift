@@ -6,6 +6,7 @@ struct ScheduleView: View {
     @Environment(AppSession.self) private var session
     @State private var model: ScheduleViewModel
     @State private var joining: ClassSession?
+    @State private var push = PushService.shared
 
     init(user: CurrentUser) {
         self.user = user
@@ -27,11 +28,17 @@ struct ScheduleView: View {
             .navigationTitle(user.role.isStaff ? "Your classes" : "Classes")
             .refreshable { await model.load(session: session) }
             .task { await model.load(session: session) }
-            // A class that started while the app was closed only shows up if
-            // the screen asks again on return.
-            .task(id: joining?.id) { }
+            // A tapped notification can land before this screen exists, so the
+            // class it asked for is parked and collected here rather than
+            // pushed at whatever happens to be on screen.
+            .task(id: push.pendingSessionId) { await openTappedNotification() }
         }
-        .fullScreenCover(item: $joining) { classSession in
+        .fullScreenCover(item: $joining, onDismiss: {
+            // Leaving a class changes what the list should say — the class is
+            // now in progress, or over. Asking again on the way back is the
+            // only thing that makes the row agree with what just happened.
+            Task { await model.load(session: session) }
+        }) { classSession in
             CallScreen(classSession: classSession)
         }
     }
@@ -83,6 +90,24 @@ struct ScheduleView: View {
         }
     }
 
+    /// Opens the class a notification named.
+    ///
+    /// The list is reloaded first: the push is very often the *reason* this
+    /// class is now joinable, so the row for it may not be in hand yet. If it
+    /// still is not there — an old notification, a cancelled class — nothing
+    /// happens, which is better than opening a call screen that can only fail.
+    private func openTappedNotification() async {
+        guard let sessionId = push.pendingSessionId else { return }
+        _ = push.takePendingSessionId()
+
+        if !model.sessions.contains(where: { $0.id == sessionId }) {
+            await model.load(session: session)
+        }
+        if let match = model.sessions.first(where: { $0.id == sessionId }) {
+            joining = match
+        }
+    }
+
     /// "Today" and "Tomorrow" carry more than a date does, and they are the
     /// two a person is actually looking for.
     private func dayLabel(_ day: Date) -> String {
@@ -129,6 +154,24 @@ private struct ClassRow: View {
     let join: () -> Void
 
     var body: some View {
+        // The whole row is the target, not the pill.
+        //
+        // The pill on its own was 34pt tall — under Apple's 44pt minimum, and
+        // a poor target on the phone in a child's hand this is actually used
+        // on. A row-sized target is also what the rest of iOS does with a list
+        // of things you open.
+        Group {
+            if classSession.isJoinable() {
+                Button(action: join) { content }
+                    .buttonStyle(.plain)
+            } else {
+                content
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    private var content: some View {
         HStack(spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(classSession.scheduledStart.formatted(date: .omitted, time: .shortened))
@@ -146,13 +189,17 @@ private struct ClassRow: View {
             Spacer()
 
             if classSession.isJoinable() {
-                Button("Join", action: join)
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
+                Text("Join")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 16)
+                    .frame(height: 40)
+                    .background(Theme.accent, in: Capsule())
             } else if classSession.status == .cancelled {
                 Text("Cancelled").font(.caption).foregroundStyle(.secondary)
             }
         }
-        .padding(.vertical, 4)
+        // So the gap either side of the pill is part of the target too.
+        .contentShape(Rectangle())
     }
 }

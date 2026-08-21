@@ -28,6 +28,20 @@ export async function GET(request: NextRequest) {
       const ctx = authResult;
 
       return await withRLS(ctx, async (tx) => {
+        // Ordered by when the class *is*, not by when it was booked, and
+        // filtered to the ones still ahead.
+        //
+        // The old query took the 50 most recently created bookings and left
+        // the client to drop the past ones. For a family that has been here a
+        // year, all 50 of those are history, and the app showed them an empty
+        // schedule — the same thing it shows somebody with no classes at all.
+        // The limit has to be applied to the rows that will actually be
+        // rendered, which means the filter belongs here. Drizzle's relational
+        // query cannot filter a parent row on a joined column, so this reads a
+        // wider window and narrows it in memory — 200 bookings is about four
+        // years of weekly classes, and the 50 that survive are what ships.
+        const cutoff = new Date(Date.now() - 60 * 60 * 1000);
+
         const result = await tx.query.bookings.findMany({
           where: and(eq(bookings.userId, ctx.userId), eq(bookings.orgId, ctx.orgId)),
           with: {
@@ -40,7 +54,7 @@ export async function GET(request: NextRequest) {
             },
           },
           orderBy: desc(bookings.createdAt),
-          limit: 50,
+          limit: 200,
         });
 
         // Get quota status for active subscription
@@ -57,7 +71,15 @@ export async function GET(request: NextRequest) {
           quota = await getQuotaStatus(subscription.id, ctx.userId, ctx.orgId);
         }
 
-        return NextResponse.json({ bookings: result, quota });
+        const upcoming = result
+          .filter((booking) => booking.session && booking.session.scheduledEnd > cutoff)
+          .sort(
+            (a, b) =>
+              a.session.scheduledStart.getTime() - b.session.scheduledStart.getTime()
+          )
+          .slice(0, 50);
+
+        return NextResponse.json({ bookings: upcoming, quota });
       });
     } catch (error) {
       return handleApiError(error);

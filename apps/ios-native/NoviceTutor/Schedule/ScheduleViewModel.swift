@@ -11,7 +11,6 @@ import Observation
 final class ScheduleViewModel {
     private(set) var sessions: [ClassSession] = []
     private(set) var live: LiveClass?
-    private(set) var quota: QuotaStatus?
     private(set) var error: String?
     private(set) var loading = false
 
@@ -56,7 +55,6 @@ final class ScheduleViewModel {
                 async let liveNow = APIClient.shared.liveClass()
                 let loaded = try await bookings
                 sessions = loaded.bookings.map(\.session)
-                quota = loaded.quota
                 live = try await liveNow
             }
         } catch APIError.unauthorized {

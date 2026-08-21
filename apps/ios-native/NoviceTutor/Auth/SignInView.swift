@@ -9,7 +9,9 @@ struct SignInView: View {
     @State private var password = ""
     @State private var error: String?
     @State private var working = false
+    #if DEBUG
     @State private var showingDeveloperSettings = false
+    #endif
 
     @FocusState private var focus: Field?
 
@@ -51,6 +53,17 @@ struct SignInView: View {
                             .font(.footnote)
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else if let restoreError = session.restoreError {
+                        // Not a failed sign-in — the app could not reach the
+                        // server at all when it launched. Saying so stops
+                        // somebody retyping a password that was never wrong.
+                        Label(
+                            "Couldn't reach Novice Tutor. \(restoreError)",
+                            systemImage: "wifi.exclamationmark"
+                        )
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                     }
 
                     Button(action: submit) {
@@ -78,7 +91,9 @@ struct SignInView: View {
             .scrollDismissesKeyboard(.interactively)
         }
         .preferredColorScheme(.dark)
+        #if DEBUG
         .sheet(isPresented: $showingDeveloperSettings) { DeveloperSettingsView() }
+        #endif
         .onSubmit(advance)
     }
 
@@ -88,9 +103,14 @@ struct SignInView: View {
                 .font(.largeTitle.bold())
                 .foregroundStyle(.white)
                 // Four taps on the title open the screen that points the app
-                // at a laptop. Not a gesture anybody finds by accident, and it
-                // keeps a developer control out of the shipping UI.
+                // at a laptop. Debug builds only — in a release build the
+                // override is ignored anyway, so leaving the screen reachable
+                // would offer a person a setting that silently does nothing,
+                // which is exactly the non-public functionality App Review
+                // objects to.
+                #if DEBUG
                 .onTapGesture(count: 4) { showingDeveloperSettings = true }
+                #endif
             Text(mode == .signIn ? "Sign in to see your classes." : "Create an account to book your first class.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.7))
@@ -146,8 +166,9 @@ struct SignInView: View {
     }
 }
 
-/// Points a debug build at a laptop instead of production. Not compiled into
-/// a release build's behaviour — ``AppConfig`` ignores the override there.
+#if DEBUG
+/// Points a debug build at a laptop instead of production. Not compiled into a
+/// release build at all.
 struct DeveloperSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var origin = AppConfig.devOriginOverride?.absoluteString ?? ""
@@ -188,3 +209,4 @@ struct DeveloperSettingsView: View {
         }
     }
 }
+#endif

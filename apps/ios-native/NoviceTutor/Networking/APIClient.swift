@@ -28,8 +28,14 @@ actor APIClient {
         let configuration = URLSessionConfiguration.default
         configuration.httpCookieAcceptPolicy = .always
         configuration.httpShouldSetCookies = true
+        // Wait for a network that is coming back, but not forever. Without a
+        // resource timeout this defaults to seven days: an origin that refuses
+        // the connection leaves `/api/me` pending, and the app sits on its
+        // launch screen — a black screen with a spinner and no way out — for
+        // as long as the person is willing to look at it.
         configuration.waitsForConnectivity = true
         configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 45
         session = URLSession(configuration: configuration)
 
         decoder = JSONDecoder()
@@ -58,8 +64,12 @@ actor APIClient {
 
     // MARK: - Requests
 
-    func get<Response: Decodable>(_ path: String, as: Response.Type = Response.self) async throws -> Response {
-        try await send(request(path, method: "GET"))
+    func get<Response: Decodable>(
+        _ path: String,
+        query: [URLQueryItem] = [],
+        as: Response.Type = Response.self
+    ) async throws -> Response {
+        try await send(request(path, method: "GET", query: query))
     }
 
     func post<Body: Encodable, Response: Decodable>(
@@ -80,8 +90,15 @@ actor APIClient {
         return try await sendRaw(request)
     }
 
-    private func request(_ path: String, method: String) -> URLRequest {
-        var request = URLRequest(url: AppConfig.url(path))
+    @discardableResult
+    func delete<Body: Encodable>(_ path: String, body: Body) async throws -> Data {
+        var request = request(path, method: "DELETE")
+        request.httpBody = try encoder.encode(body)
+        return try await sendRaw(request)
+    }
+
+    private func request(_ path: String, method: String, query: [URLQueryItem] = []) -> URLRequest {
+        var request = URLRequest(url: AppConfig.url(path, query: query))
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
