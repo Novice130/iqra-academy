@@ -24,7 +24,12 @@ Outcome wanted: no `exceededResources` in the 14:00 UTC class window, and the
 iOS build proven on real hardware so the App Store submission is not the weakest
 version of the app.
 
-## 1. Finish the `withHttpDb` sweep (web deploy)
+## 1. Finish the `withHttpDb` sweep (web deploy) — DONE 2026-08-23
+
+Both routes below are on `withHttpDb` and deployed (Worker version
+`898502fc`). Kept for the reasoning, which still applies to the next handler
+anyone is tempted to wrap in `withDb`. What is still open now lives in
+`docs/next-up.md`.
 
 The rule, from `docs/worker-limits.md` and the doc comment in
 `apps/web/src/lib/db.ts:77`: **`withDb()` only for handlers that open a
