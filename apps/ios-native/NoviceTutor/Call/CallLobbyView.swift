@@ -1,74 +1,130 @@
 import SwiftUI
 
 /// The class is real, it just has not opened yet.
-///
-/// The server, not the app, decides when a class opens, and it answers a
-/// too-early join with a description of what the person is waiting for. Making
-/// that a proper screen matters more than it looks: outside the join window
-/// this is the whole app as far as the person in front of it is concerned.
 struct CallLobbyView: View {
     let waiting: JoinWaiting
     let onRetry: () async -> Void
     let onClose: () -> Void
 
     @State private var now = Date.now
+    @State private var isPulsing = false
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
-        VStack(spacing: 18) {
-            Image(systemName: "clock")
-                .font(.system(size: 44))
-                .foregroundStyle(Theme.accent)
+        VStack(spacing: 24) {
+            // Radar pulsing clock icon
+            ZStack {
+                Circle()
+                    .stroke(Theme.accent.opacity(isPulsing ? 0 : 0.4), lineWidth: 8)
+                    .scaleEffect(isPulsing ? 1.5 : 1.0)
+                    .frame(width: 80, height: 80)
 
-            Text(waiting.sessionTitle ?? "Your class")
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(.white)
-                .multilineTextAlignment(.center)
+                Circle()
+                    .fill(Theme.accentGradient)
+                    .frame(width: 80, height: 80)
+                    .shadow(color: Theme.accent.opacity(0.4), radius: 16, y: 6)
 
-            if let teacher = waiting.teacherName {
-                Text("with \(teacher)")
-                    .foregroundStyle(.white.opacity(0.7))
+                Image(systemName: "clock.badge.checkmark.fill")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(.white)
+            }
+            .padding(.bottom, 4)
+
+            VStack(spacing: 8) {
+                Text(waiting.sessionTitle ?? "Your Quran Class")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+
+                if let teacher = waiting.teacherName {
+                    HStack(spacing: 6) {
+                        Image(systemName: "person.circle.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.accentSecondary)
+
+                        Text("with \(teacher)")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
             }
 
             if let start = waiting.scheduledStart {
-                VStack(spacing: 6) {
+                VStack(spacing: 8) {
                     Text(start, format: .dateTime.weekday(.wide).hour().minute())
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
+
                     if start > now {
-                        Text("Starts in \(countdown(to: start))")
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.7))
-                            .monospacedDigit()
+                        HStack(spacing: 6) {
+                            Image(systemName: "hourglass.bottomhalf.filled")
+                                .font(.caption)
+                            Text("Starts in \(countdown(to: start))")
+                                .font(.footnote.weight(.semibold))
+                                .monospacedDigit()
+                        }
+                        .foregroundStyle(Theme.accentSecondary)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(.white.opacity(0.08), in: Capsule())
                     }
                 }
-                .padding(.top, 4)
+                .padding(.vertical, 8)
             }
 
-            Text("The room opens shortly before the class starts.")
+            Text("The classroom opens shortly before class time. Please stay on this screen.")
                 .font(.footnote)
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
+                .padding(.horizontal, 24)
 
-            HStack(spacing: 12) {
-                Button("Try again") { Task { await onRetry() } }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                Button("Close", action: onClose)
-                    .buttonStyle(.bordered)
-                    .tint(.white)
+            HStack(spacing: 14) {
+                Button {
+                    Theme.haptic(.medium)
+                    Task { await onRetry() }
+                } label: {
+                    Label("Check Room", systemImage: "arrow.clockwise")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .frame(height: 48)
+                        .background(Theme.accentGradient, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+
+                Button(action: {
+                    Theme.haptic(.light)
+                    onClose()
+                }) {
+                    Text("Close")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .padding(.horizontal, 20)
+                        .frame(height: 48)
+                        .background(.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
-            .padding(.top, 6)
+            .padding(.top, 8)
         }
-        .padding(28)
+        .padding(32)
+        .background {
+            RoundedRectangle(cornerRadius: 24, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.3), radius: 24, y: 12)
+        }
+        .padding(.horizontal, 20)
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.5).repeatForever(autoreverses: false)) {
+                isPulsing = true
+            }
+        }
         .onReceive(tick) { instant in
             let wasBefore = waiting.scheduledStart.map { now < $0 } ?? false
             now = instant
-            // The moment the class time passes, ask once without being asked —
-            // the person is already staring at the screen waiting for exactly
-            // this, and making them tap is making them guess.
             if let start = waiting.scheduledStart, wasBefore, instant >= start {
                 Task { await onRetry() }
             }

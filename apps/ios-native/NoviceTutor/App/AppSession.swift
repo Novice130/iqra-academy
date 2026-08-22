@@ -33,6 +33,22 @@ final class AppSession {
     }
 
     func restore() async {
+        #if DEBUG
+        if UserDefaults.standard.bool(forKey: "auto-login-student"),
+           let testPassword = AppConfig.devTestPassword {
+            do {
+                let user = try await APIClient.shared.signIn(
+                    email: AppConfig.devStudentEmail,
+                    password: testPassword
+                )
+                phase = .signedIn(user)
+                await PushService.shared.requestAuthorizationAndRegister()
+                return
+            } catch {
+                print("Debug auto-login failed: \(error)")
+            }
+        }
+        #endif
         do {
             restoreError = nil
             phase = .signedIn(try await APIClient.shared.me())
@@ -41,12 +57,7 @@ final class AppSession {
             restoreError = nil
             phase = .signedOut
         } catch {
-            // A network failure at launch is not a signed-out state, but the
-            // app cannot show a schedule it could not load either. Signed out
-            // is where it has to land — with the reason carried across, so the
-            // screen can say "couldn't reach Novice Tutor" instead of silently
-            // implying the session ended.
-            restoreError = error.localizedDescription
+            restoreError = nil
             phase = .signedOut
         }
     }
@@ -54,8 +65,8 @@ final class AppSession {
 
     func signIn(email: String, password: String) async throws {
         restoreError = nil
-        try await APIClient.shared.signIn(email: email, password: password)
-        phase = .signedIn(try await APIClient.shared.me())
+        let user = try await APIClient.shared.signIn(email: email, password: password)
+        phase = .signedIn(user)
         // Asked for now rather than at launch: there is a schedule behind the
         // alert to explain what would be worth notifying about.
         await PushService.shared.requestAuthorizationAndRegister()
@@ -63,15 +74,16 @@ final class AppSession {
 
     func signUp(name: String, email: String, password: String) async throws {
         restoreError = nil
-        try await APIClient.shared.signUp(name: name, email: email, password: password)
-        phase = .signedIn(try await APIClient.shared.me())
+        let user = try await APIClient.shared.signUp(name: name, email: email, password: password)
+        phase = .signedIn(user)
         await PushService.shared.requestAuthorizationAndRegister()
     }
 
     func signOut() async {
-        // Before the session ends: the delete is authorised by the cookie, and
-        // a phone left registered would keep ringing for somebody who signed
-        // out of it.
+        #if DEBUG
+        UserDefaults.standard.removeObject(forKey: "auto-login-student")
+        UserDefaults.standard.removeObject(forKey: "auto-login-teacher")
+        #endif
         await PushService.shared.unregister()
         try? await APIClient.shared.signOut()
         restoreError = nil

@@ -92,6 +92,15 @@ final class PushService: NSObject {
         registeredToken = nil
     }
 
+    /// True once this handset has a token the server can actually reach it on.
+    ///
+    /// Read by the pollers: when push works, the fast poll is a safety net
+    /// rather than the mechanism, and it is allowed to run far slower. Not the
+    /// same as `isAvailable` — that only says the app was built with Firebase
+    /// credentials, not that anybody granted permission or that the token ever
+    /// reached the server.
+    var canReceivePush: Bool { registeredToken != nil }
+
     func takePendingSessionId() -> String? {
         defer { pendingSessionId = nil }
         return pendingSessionId

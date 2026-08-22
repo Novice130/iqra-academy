@@ -26,6 +26,13 @@
 	  `audio` is what keeps the lesson audible when a student locks the phone
 	  or checks a message. Video suspends on its own — iOS forbids background
 	  capture, and the LiveKit SDK stops publishing the camera anyway.
+
+	  `remote-notification` is what lets a silent push reach app code at all.
+	  Without it a `content-available` payload is delivered to nothing, and the
+	  server's "the class is over" message — which carries no alert on purpose,
+	  because nobody wants a banner about a lesson they were not in — would
+	  simply never arrive. It is the seam that makes the live-class card an
+	  interrupt rather than a clock.
 	-->
 	<!--
 	  The launch screen, spelled out rather than generated. The generated one
@@ -42,6 +49,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>remote-notification</string>
 	</array>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>

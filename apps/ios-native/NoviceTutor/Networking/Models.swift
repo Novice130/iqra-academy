@@ -91,7 +91,26 @@ struct LiveClass: Codable, Sendable {
     let startedAt: Date?
 }
 
-struct LiveClassResponse: Decodable, Sendable { let live: LiveClass? }
+/// How long the phone may wait before asking anything again.
+///
+/// Decided entirely by the server, which is the only party that knows when the
+/// answer could next change — see `apps/web/src/lib/poll-cadence.ts`. It
+/// carries the *ring* cadence too, even though that belongs to a different
+/// endpoint: `calls/incoming` is the frequent poll, and giving it a schedule
+/// lookup of its own would have added a query to the very request this whole
+/// mechanism exists to make rarer.
+///
+/// Optional throughout, so a build talking to an older server keeps the
+/// intervals it used to hardcode.
+struct PollCadence: Decodable, Sendable {
+    let liveSeconds: Double?
+    let ringSeconds: Double?
+}
+
+struct LiveClassResponse: Decodable, Sendable {
+    let live: LiveClass?
+    let poll: PollCadence?
+}
 
 /// A teacher's own list, from `/api/teachers/sessions`.
 struct TeacherSessionsResponse: Decodable, Sendable { let sessions: [ClassSession] }
@@ -172,6 +191,11 @@ struct SignUpRequest: Encodable, Sendable {
     let name: String
 }
 
+struct AuthResponse: Decodable, Sendable {
+    let token: String?
+    let user: CurrentUser?
+}
+
 // MARK: - Endpoints
 
 extension APIClient {
@@ -179,19 +203,21 @@ extension APIClient {
         try await get("/api/me", as: MeResponse.self).user
     }
 
-    func signIn(email: String, password: String) async throws {
+    func signIn(email: String, password: String) async throws -> CurrentUser {
         try await post("/api/auth/sign-in/email", body: SignInRequest(email: email, password: password))
+        return try await me()
     }
 
-    func signUp(name: String, email: String, password: String) async throws {
+    func signUp(name: String, email: String, password: String) async throws -> CurrentUser {
         try await post("/api/auth/sign-up/email", body: SignUpRequest(email: email, password: password, name: name))
+        return try await me()
     }
 
     func signOut() async throws {
         // The session is a database row, so it ends server-side first. Only
         // then is the local cookie worth dropping.
         struct Empty: Encodable {}
-        try await post("/api/auth/sign-out", body: Empty())
+        try? await post("/api/auth/sign-out", body: Empty())
         clearCookies()
     }
 
@@ -203,8 +229,10 @@ extension APIClient {
         try await get("/api/teachers/sessions", as: TeacherSessionsResponse.self).sessions
     }
 
-    func liveClass() async throws -> LiveClass? {
-        try await get("/api/students/live-class", as: LiveClassResponse.self).live
+    /// Returns the whole response, not just `live`: the cadence hint riding
+    /// alongside it is the point of the call as much as the answer is.
+    func liveClass() async throws -> LiveClassResponse {
+        try await get("/api/students/live-class", as: LiveClassResponse.self)
     }
 
     /// Asks for a room, following at most one merge redirect.
@@ -291,10 +319,42 @@ extension APIClient {
         struct Body: Encodable { let token: String }
         try await delete("/api/devices", body: Body(token: token))
     }
+
+    // MARK: - Incoming Calls & Ringing
+
+    func incomingCall() async throws -> IncomingCall? {
+        let resp: IncomingCallResponse = try await get("/api/calls/incoming")
+        return resp.call
+    }
+
+    func acceptCall(id: String) async throws -> String {
+        struct AcceptResponse: Decodable {
+            let sessionId: String?
+        }
+        struct Empty: Encodable {}
+        let resp: AcceptResponse = try await post("/api/calls/\(id)/accept", body: Empty())
+        return resp.sessionId ?? ""
+    }
+
+    func declineCall(id: String) async {
+        struct Empty: Encodable {}
+        _ = try? await post("/api/calls/\(id)/decline", body: Empty())
+    }
 }
 
 /// `GET /api/me/account` — whether this account may delete itself.
 struct AccountDeletability: Decodable, Sendable {
     let role: String
     let canDelete: Bool
+}
+
+/// Live incoming direct call from teacher
+struct IncomingCall: Codable, Identifiable, Sendable, Equatable {
+    let id: String
+    let sessionId: String
+    let callerName: String
+}
+
+private struct IncomingCallResponse: Decodable {
+    let call: IncomingCall?
 }

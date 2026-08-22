@@ -19,10 +19,13 @@ struct NoviceTutorApp: App {
         #endif
     }
 
+    @AppStorage("app_appearance") private var appearance: String = AppAppearance.system.rawValue
+
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environment(session)
+                .preferredColorScheme(AppAppearance(rawValue: appearance)?.colorScheme)
                 .task {
                     await session.restore()
                 }
@@ -30,12 +33,18 @@ struct NoviceTutorApp: App {
     }
 }
 
-/// Only here for the APNs token.
+/// The APNs token, and the silent pushes that arrive on it.
 ///
 /// SwiftUI has no hook for `didRegisterForRemoteNotificationsWithDeviceToken`,
 /// and Firebase needs that token handed to it to exchange for an FCM one.
 /// Method swizzling would do it, but an explicit delegate is one less thing
 /// that silently stops working after an SDK update.
+///
+/// The silent-push handler below is the other half. A visible notification
+/// arrives through `UNUserNotificationCenterDelegate` in `PushService`; a
+/// data-only one — "the class you are being offered has ended" — has no UI and
+/// lands here instead. It needs `remote-notification` in `UIBackgroundModes`
+/// to be delivered at all; see `Config/Info.plist`.
 final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(
         _: UIApplication,
@@ -51,6 +60,36 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         guard PushService.isAvailable else { return }
         Messaging.messaging().apnsToken = deviceToken
+    }
+
+    /// A push with no alert in it. The payload's `type` says what changed.
+    ///
+    /// Best-effort by nature: iOS throttles background pushes and drops them
+    /// entirely for an app the person force-quit. Everything here is also
+    /// discovered by the pollers eventually — this is what makes it feel
+    /// immediate when it works, not what makes it correct.
+    func application(
+        _: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        let type = userInfo["type"] as? String
+
+        MainActor.assumeIsolated {
+            switch type {
+            case "CLASS_ENDED":
+                LiveClassMonitor.shared.classEnded()
+            case "CALL_ENDED":
+                IncomingCallManager.shared.callEnded()
+            default:
+                // Something happened and we were not told what. Ask, rather
+                // than guess — and force it past the coalescing window, since
+                // a push is exactly the evidence that the held answer is old.
+                LiveClassMonitor.shared.wake(force: true)
+            }
+        }
+
+        completionHandler(.newData)
     }
 
     func application(

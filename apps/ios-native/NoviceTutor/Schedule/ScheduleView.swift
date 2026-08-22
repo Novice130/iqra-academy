@@ -4,6 +4,7 @@ struct ScheduleView: View {
     let user: CurrentUser
 
     @Environment(AppSession.self) private var session
+    @Environment(\.colorScheme) private var colorScheme
     @State private var model: ScheduleViewModel
     @State private var joining: ClassSession?
     @State private var push = PushService.shared
@@ -15,39 +16,51 @@ struct ScheduleView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if model.loading {
-                    ProgressView()
+            ZStack {
+                Color(uiColor: .systemGroupedBackground).ignoresSafeArea()
+
+                Group {
+                    if model.loading && model.sessions.isEmpty {
+                        VStack(spacing: 16) {
+                            ProgressView()
+                                .controlSize(.large)
+                                .tint(Theme.accent)
+                            Text("Loading your classes…")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else if model.byDay.isEmpty {
-                    emptyState
-                } else {
-                    list
+                    } else if model.byDay.isEmpty && model.live == nil {
+                        emptyState
+                    } else {
+                        contentList
+                    }
                 }
             }
-            .navigationTitle(user.role.isStaff ? "Your classes" : "Classes")
-            .refreshable { await model.load(session: session) }
+            .navigationTitle(user.role.isStaff ? "Your Classes" : "Classes")
+            .refreshable {
+                Theme.haptic(.light)
+                await model.load(session: session)
+            }
             .task { await model.load(session: session) }
-            // A tapped notification can land before this screen exists, so the
-            // class it asked for is parked and collected here rather than
-            // pushed at whatever happens to be on screen.
             .task(id: push.pendingSessionId) { await openTappedNotification() }
         }
         .fullScreenCover(item: $joining, onDismiss: {
-            // Leaving a class changes what the list should say — the class is
-            // now in progress, or over. Asking again on the way back is the
-            // only thing that makes the row agree with what just happened.
             Task { await model.load(session: session) }
         }) { classSession in
             CallScreen(classSession: classSession)
         }
     }
 
-    private var list: some View {
-        List {
-            if let live = model.live {
-                Section {
-                    LiveNowRow(live: live) {
+    // MARK: - List Content
+
+    private var contentList: some View {
+        ScrollView {
+            LazyVStack(spacing: 20) {
+                // 1. Live Now Hero Card (if teacher is in session)
+                if let live = model.live {
+                    LiveHeroCard(live: live) {
+                        Theme.haptic(.medium)
                         joining = ClassSession(
                             id: live.sessionId,
                             title: live.title,
@@ -58,44 +71,97 @@ struct ScheduleView: View {
                             teacher: .init(name: live.teacherName)
                         )
                     }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
                 }
-            }
 
-            if let error = model.error {
-                Section {
-                    Label(error, systemImage: "wifi.exclamationmark")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
+                // 2. Connectivity / Sync warning
+                if let error = model.error {
+                    HStack(spacing: 10) {
+                        Image(systemName: "wifi.exclamationmark")
+                            .foregroundStyle(.orange)
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .padding(14)
+                    .background {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(Color.orange.opacity(0.1))
+                    }
+                    .padding(.horizontal, 16)
                 }
-            }
 
-            ForEach(model.byDay, id: \.day) { group in
-                Section(dayLabel(group.day)) {
-                    ForEach(group.classes) { classSession in
-                        ClassRow(classSession: classSession) { joining = classSession }
+                // 3. Classes Grouped By Day
+                ForEach(model.byDay, id: \.day) { group in
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 8) {
+                            Text(dayLabel(group.day))
+                                .font(.title3.weight(.bold))
+                                .foregroundStyle(.primary)
+
+                            if Calendar.current.isDateInToday(group.day) {
+                                Text("TODAY")
+                                    .font(.caption2.weight(.heavy))
+                                    .foregroundStyle(Theme.accent)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Theme.accent.opacity(0.12), in: Capsule())
+                            }
+                        }
+                        .padding(.horizontal, 20)
+
+                        VStack(spacing: 12) {
+                            ForEach(group.classes) { classSession in
+                                ModernClassCard(classSession: classSession) {
+                                    Theme.haptic(.medium)
+                                    joining = classSession
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
                     }
                 }
             }
+            .padding(.vertical, 12)
         }
-        .listStyle(.insetGrouped)
     }
+
+    // MARK: - Empty State
 
     private var emptyState: some View {
-        ContentUnavailableView {
-            Label("No classes yet", systemImage: "calendar")
-        } description: {
-            Text(user.role.isStaff
-                 ? "Classes you are teaching will appear here."
-                 : "Once your classes are booked they'll show up here.")
+        VStack(spacing: 16) {
+            ZStack {
+                Circle()
+                    .fill(Theme.accent.opacity(0.12))
+                    .frame(width: 84, height: 84)
+
+                Image(systemName: "calendar.badge.clock")
+                    .font(.system(size: 38))
+                    .foregroundStyle(Theme.accent)
+            }
+
+            VStack(spacing: 6) {
+                Text("No Classes Scheduled")
+                    .font(.title3.weight(.bold))
+                    .foregroundStyle(.primary)
+
+                Text(user.role.isStaff
+                     ? "Classes you are teaching will appear here automatically."
+                     : "Once your lessons are booked, they will show up here.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 40)
+            }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.vertical, 60)
     }
 
-    /// Opens the class a notification named.
-    ///
-    /// The list is reloaded first: the push is very often the *reason* this
-    /// class is now joinable, so the row for it may not be in hand yet. If it
-    /// still is not there — an old notification, a cancelled class — nothing
-    /// happens, which is better than opening a call screen that can only fail.
+    // MARK: - Notification Handler
+
     private func openTappedNotification() async {
         guard let sessionId = push.pendingSessionId else { return }
         _ = push.takePendingSessionId()
@@ -108,98 +174,181 @@ struct ScheduleView: View {
         }
     }
 
-    /// "Today" and "Tomorrow" carry more than a date does, and they are the
-    /// two a person is actually looking for.
     private func dayLabel(_ day: Date) -> String {
         let calendar = Calendar.current
         if calendar.isDateInToday(day) { return "Today" }
         if calendar.isDateInTomorrow(day) { return "Tomorrow" }
-        return day.formatted(.dateTime.weekday(.wide).month().day())
+        return day.formatted(.dateTime.weekday(.wide).month(.abbreviated).day())
     }
 }
 
-/// A class the teacher is already in. Rendered above everything because it is
-/// the only row with a deadline attached to it.
-private struct LiveNowRow: View {
+// MARK: - Hero Live Card
+
+private struct LiveHeroCard: View {
     let live: LiveClass
     let join: () -> Void
 
-    var body: some View {
-        HStack(spacing: 12) {
-            Circle()
-                .fill(Theme.live)
-                .frame(width: 10, height: 10)
-                .overlay(Circle().stroke(Theme.live.opacity(0.35), lineWidth: 6))
+    @State private var isPulsing = false
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(live.teacherName) is in class now")
-                    .font(.subheadline.weight(.semibold))
-                Text(live.title ?? "Your class has started")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+    var body: some View {
+        VStack(spacing: 14) {
+            HStack(alignment: .top, spacing: 12) {
+                // Live indicator radar
+                ZStack {
+                    Circle()
+                        .stroke(Theme.live.opacity(isPulsing ? 0 : 0.6), lineWidth: 6)
+                        .scaleEffect(isPulsing ? 1.6 : 1.0)
+                        .frame(width: 14, height: 14)
+
+                    Circle()
+                        .fill(Theme.live)
+                        .frame(width: 14, height: 14)
+                }
+                .padding(.top, 4)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text("LIVE CLASSROOM")
+                            .font(.caption2.weight(.heavy))
+                            .foregroundStyle(Theme.live)
+                        Spacer()
+                    }
+
+                    Text(live.teacherName)
+                        .font(.headline.weight(.bold))
+                        .foregroundStyle(.primary)
+
+                    Text(live.title ?? "Lesson in progress")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
             }
 
-            Spacer()
-
-            Button("Join", action: join)
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.live)
+            Button(action: join) {
+                HStack(spacing: 8) {
+                    Image(systemName: "video.fill")
+                        .font(.subheadline.weight(.semibold))
+                    Text("Join Class Now")
+                        .font(.headline.weight(.bold))
+                }
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .foregroundStyle(.white)
+                .background(Theme.liveGradient, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .shadow(color: Theme.live.opacity(0.35), radius: 8, y: 4)
+            }
         }
-        .padding(.vertical, 4)
+        .padding(18)
+        .background {
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                        .stroke(Theme.live.opacity(0.4), lineWidth: 1.5)
+                }
+                .shadow(color: Theme.live.opacity(0.12), radius: 16, y: 6)
+        }
+        .onAppear {
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false)) {
+                isPulsing = true
+            }
+        }
     }
 }
 
-private struct ClassRow: View {
+// MARK: - Modern Class Card
+
+private struct ModernClassCard: View {
     let classSession: ClassSession
     let join: () -> Void
 
     var body: some View {
-        // The whole row is the target, not the pill.
-        //
-        // The pill on its own was 34pt tall — under Apple's 44pt minimum, and
-        // a poor target on the phone in a child's hand this is actually used
-        // on. A row-sized target is also what the rest of iOS does with a list
-        // of things you open.
-        Group {
-            if classSession.isJoinable() {
-                Button(action: join) { content }
-                    .buttonStyle(.plain)
-            } else {
-                content
-            }
-        }
-        .padding(.vertical, 4)
-    }
+        Button(action: {
+            if classSession.isJoinable() { join() }
+        }) {
+            HStack(spacing: 16) {
+                // Time Column
+                VStack(alignment: .center, spacing: 2) {
+                    Text(classSession.scheduledStart.formatted(date: .omitted, time: .shortened))
+                        .font(.system(.subheadline, design: .rounded).weight(.bold))
+                        .foregroundStyle(.primary)
+                        .monospacedDigit()
 
-    private var content: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(classSession.scheduledStart.formatted(date: .omitted, time: .shortened))
-                    .font(.headline)
-                    .monospacedDigit()
-                Text(classSession.displayTitle)
-                    .font(.subheadline)
-                if let teacher = classSession.teacher?.name {
-                    Text(teacher)
-                        .font(.caption)
+                    Text("Class")
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
                 }
-            }
+                .frame(width: 64)
+                .padding(.vertical, 8)
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color(uiColor: .tertiarySystemGroupedBackground))
+                }
 
-            Spacer()
+                // Details
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(classSession.displayTitle)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
 
-            if classSession.isJoinable() {
-                Text("Join")
-                    .font(.subheadline.weight(.semibold))
+                    if let teacher = classSession.teacher?.name {
+                        HStack(spacing: 5) {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Theme.accent)
+
+                            Text(teacher)
+                                .font(.caption.weight(.medium))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                // Action / Status Pill
+                if classSession.isJoinable() {
+                    HStack(spacing: 4) {
+                        Text("Join")
+                            .font(.subheadline.weight(.bold))
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.bold))
+                    }
                     .foregroundStyle(.white)
                     .padding(.horizontal, 16)
-                    .frame(height: 40)
-                    .background(Theme.accent, in: Capsule())
-            } else if classSession.status == .cancelled {
-                Text("Cancelled").font(.caption).foregroundStyle(.secondary)
+                    .padding(.vertical, 8)
+                    .background(Theme.accentGradient, in: Capsule())
+                    .shadow(color: Theme.accent.opacity(0.3), radius: 6, y: 3)
+                } else if classSession.status == .cancelled {
+                    Text("Cancelled")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Color.secondary.opacity(0.12), in: Capsule())
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(Color.secondary.opacity(0.4))
+                }
+            }
+            .padding(14)
+            .background {
+                RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                            .stroke(
+                                classSession.isJoinable() ? Theme.accent.opacity(0.3) : Color.primary.opacity(0.04),
+                                lineWidth: 1
+                            )
+                    }
+                    .shadow(color: Color.black.opacity(0.03), radius: 8, y: 3)
             }
         }
-        // So the gap either side of the pill is part of the target too.
-        .contentShape(Rectangle())
+        .buttonStyle(.plain)
+        .disabled(!classSession.isJoinable())
     }
 }

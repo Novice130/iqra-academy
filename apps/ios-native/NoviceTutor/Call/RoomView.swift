@@ -6,6 +6,7 @@ struct RoomView: View {
     let grant: JoinGrant
     let sessionId: String
     let grants: MediaPermissions.Grants
+    let choices: PreJoinChoices
     let onExit: (CallController.Ended) -> Void
 
     @State private var controller: CallController
@@ -16,14 +17,21 @@ struct RoomView: View {
         grant: JoinGrant,
         sessionId: String,
         grants: MediaPermissions.Grants,
+        choices: PreJoinChoices,
         onExit: @escaping (CallController.Ended) -> Void
     ) {
         self.grant = grant
         self.sessionId = sessionId
         self.grants = grants
+        self.choices = choices
         self.onExit = onExit
         _controller = State(
-            initialValue: CallController(grant: grant, sessionId: sessionId, grants: grants)
+            initialValue: CallController(
+                grant: grant,
+                sessionId: sessionId,
+                grants: grants,
+                choices: choices
+            )
         )
     }
 

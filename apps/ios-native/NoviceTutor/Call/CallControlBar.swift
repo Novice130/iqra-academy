@@ -1,12 +1,6 @@
 import SwiftUI
 
 /// Mic, camera, flip, and the way out.
-///
-/// The red button is the only difference between a teacher and everyone else:
-/// the owning teacher ends the class for the room, anybody else — including an
-/// admin observing — only leaves. One tap, no confirmation sheet; the web
-/// client removed its own sheet because a teacher trying to end a class at the
-/// end of a lesson does not want to be asked twice.
 struct CallControlBar: View {
     let micOn: Bool
     let cameraOn: Bool
@@ -27,38 +21,68 @@ struct CallControlBar: View {
                 on: micOn,
                 disabled: micDenied,
                 label: micOn ? "Mute microphone" : "Unmute microphone",
-                action: onToggleMic
+                action: {
+                    Theme.haptic(.light)
+                    onToggleMic()
+                }
             )
+
             circle(
                 systemName: cameraOn ? "video.fill" : "video.slash.fill",
                 on: cameraOn,
                 disabled: cameraDenied,
                 label: cameraOn ? "Turn camera off" : "Turn camera on",
-                action: onToggleCamera
+                action: {
+                    Theme.haptic(.light)
+                    onToggleCamera()
+                }
             )
+
             if canFlipCamera {
                 circle(
                     systemName: "arrow.triangle.2.circlepath.camera",
                     on: true,
                     disabled: !cameraOn,
                     label: "Switch camera",
-                    action: onFlipCamera
+                    action: {
+                        Theme.haptic(.light)
+                        onFlipCamera()
+                    }
                 )
             }
 
-            Button(action: onExit) {
-                Label(isHost ? "End class" : "Leave", systemImage: "phone.down.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .frame(height: 56)
-                    .background(Color.red, in: Capsule())
+            Button {
+                Theme.haptic(.heavy)
+                onExit()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "phone.down.fill")
+                        .font(.system(size: 16, weight: .bold))
+                    Text(isHost ? "End" : "Leave")
+                        .font(.subheadline.weight(.bold))
+                }
+                .foregroundStyle(.white)
+                .padding(.horizontal, 20)
+                .frame(height: 56)
+                .background {
+                    Capsule()
+                        .fill(LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.1, blue: 0.1)], startPoint: .top, endPoint: .bottom))
+                        .shadow(color: Color.red.opacity(0.4), radius: 8, y: 3)
+                }
             }
             .accessibilityLabel(isHost ? "End class for everyone" : "Leave class")
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: Capsule())
+        .background {
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay {
+                    Capsule()
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                }
+                .shadow(color: Color.black.opacity(0.35), radius: 16, y: 6)
+        }
         .environment(\.colorScheme, .dark)
     }
 
@@ -71,12 +95,17 @@ struct CallControlBar: View {
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 20, weight: .medium))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(.white)
-                // 56pt: the web control bar's own floor, and comfortably past
-                // Apple's 44pt minimum with a glove or a child's hand.
                 .frame(width: 56, height: 56)
-                .background(on ? Color.white.opacity(0.16) : Color.red.opacity(0.85), in: Circle())
+                .background {
+                    Circle()
+                        .fill(on ? Color.white.opacity(0.18) : Color.red.opacity(0.85))
+                        .overlay {
+                            Circle()
+                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        }
+                }
         }
         .disabled(disabled)
         .opacity(disabled ? 0.4 : 1)

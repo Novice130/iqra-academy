@@ -10,9 +10,17 @@ import Observation
 @MainActor
 final class ScheduleViewModel {
     private(set) var sessions: [ClassSession] = []
-    private(set) var live: LiveClass?
     private(set) var error: String?
     private(set) var loading = false
+
+    /// Not stored here. The live class is polled by `LiveClassMonitor` so that
+    /// it clears itself when the teacher ends the class — this screen used to
+    /// hold the answer from whenever it last appeared, forever.
+    private let liveMonitor = LiveClassMonitor.shared
+
+    /// Staff are already in the room they are teaching; the ribbon is a
+    /// student's way of finding a class that started early.
+    var live: LiveClass? { user.role.isStaff ? nil : liveMonitor.live }
 
     private let user: CurrentUser
 
@@ -44,18 +52,16 @@ final class ScheduleViewModel {
     func load(session: AppSession) async {
         loading = sessions.isEmpty
         error = nil
+        if !user.role.isStaff {
+            // Ahead of the list, and on its own: pairing the two in one
+            // `try await` meant a bookings failure skipped the live answer.
+            await liveMonitor.refreshNow()
+        }
         do {
             if user.role.isStaff {
                 sessions = try await APIClient.shared.teacherSessions()
-                // Staff are already in the room they are teaching; the ribbon
-                // is a student's way of finding a class that started early.
-                live = nil
             } else {
-                async let bookings = APIClient.shared.studentBookings()
-                async let liveNow = APIClient.shared.liveClass()
-                let loaded = try await bookings
-                sessions = loaded.bookings.map(\.session)
-                live = try await liveNow
+                sessions = try await APIClient.shared.studentBookings().bookings.map(\.session)
             }
         } catch APIError.unauthorized {
             session.sessionExpired()

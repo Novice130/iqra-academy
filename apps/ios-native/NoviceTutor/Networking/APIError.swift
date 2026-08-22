@@ -24,8 +24,12 @@ enum APIError: LocalizedError {
             return "Your session has ended. Please sign in again."
         case .server(_, let message, _):
             return message
-        case .transport:
+        case .transport(let error):
+            #if DEBUG
+            return "Connection error: \(error.localizedDescription)"
+            #else
             return "Can't reach Novice Tutor. Check your connection and try again."
+            #endif
         case .decoding:
             return "Something went wrong reading the response."
         }

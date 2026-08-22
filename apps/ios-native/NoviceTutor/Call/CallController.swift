@@ -62,16 +62,25 @@ final class CallController {
     /// be told the class ended.
     private var isLeaving = false
     private let grants: MediaPermissions.Grants
+    /// What the device check chose. A permission is what you *may* publish;
+    /// this is what you asked to publish.
+    private let choices: PreJoinChoices
     private var shim: DelegateShim?
     private var spotlightBase: String?
 
     var micDenied: Bool { !grants.microphone }
     var cameraDenied: Bool { !grants.camera }
 
-    init(grant: JoinGrant, sessionId: String, grants: MediaPermissions.Grants) {
+    init(
+        grant: JoinGrant,
+        sessionId: String,
+        grants: MediaPermissions.Grants,
+        choices: PreJoinChoices
+    ) {
         self.grant = grant
         self.sessionId = sessionId
         self.grants = grants
+        self.choices = choices
 
         let shim = DelegateShim()
         self.shim = shim
@@ -81,7 +90,7 @@ final class CallController {
         // every track regardless of how large it is actually being drawn.
         room = Room(
             delegate: shim,
-            connectOptions: ConnectOptions(enableMicrophone: grants.microphone),
+            connectOptions: ConnectOptions(enableMicrophone: grants.microphone && choices.micOn),
             roomOptions: RoomOptions(
                 defaultCameraCaptureOptions: CameraCaptureOptions(
                     position: .front,
@@ -117,7 +126,7 @@ final class CallController {
         status = .live
         spotlightBase = Self.spotlight(in: room.metadata)
 
-        if grants.camera {
+        if grants.camera, choices.cameraOn {
             _ = try? await room.localParticipant.setCamera(enabled: true)
         }
         canFlipCamera = (try? await CameraCapturer.canSwitchPosition()) ?? false

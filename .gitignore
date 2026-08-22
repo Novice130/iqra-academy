@@ -63,3 +63,10 @@ apps/web/.ds-css/
 # project gets its own. Not a secret in the .p8 sense, but not ours to publish.
 GoogleService-Info.plist
 google-services.json
+
+# Xcode build output. `xcodebuild` without -derivedDataPath drops it beside the
+# project, and it is gigabytes of machine-specific intermediates.
+apps/ios-native/DerivedData/
+
+# Scratch space for agent runs — notes and transcripts, never source.
+.agents/

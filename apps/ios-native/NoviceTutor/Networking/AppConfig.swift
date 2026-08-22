@@ -34,17 +34,50 @@ enum AppConfig {
         #endif
     }
 
-    /// `https://novicetutor.com/api/...`, optionally with a query string.
+    #if DEBUG
+    /// The standing test account's password, if this machine has been told it.
     ///
-    /// The query cannot be appended to `path`: `appendingPathComponent`
-    /// percent-encodes `?` into `%3F`, so `"/api/x?connecting=1"` would ask for
-    /// a path that does not exist and come back 404 with nothing to explain it.
+    /// Never a literal in the repository. It used to be one, in nine places
+    /// across the sign-in screen, the public home screen and `AppSession` —
+    /// which published a real account's credentials to anyone with a checkout,
+    /// exactly what the comment at the top of `SignInFlowUITests` says was
+    /// fixed there. `#if DEBUG` kept it out of shipped builds; it did not keep
+    /// it out of git.
+    ///
+    /// Supply it either way:
+    ///   - `NT_PASSWORD` in the environment (Xcode scheme, or
+    ///     `XCUIApplication.launchEnvironment` from a UI test), or
+    ///   - `xcrun simctl launch booted com.novicetutor.app -dev.testPassword <pw>`
+    ///
+    /// `nil` hides every quick sign-in shortcut rather than offering a button
+    /// that silently fails.
+    static var devTestPassword: String? {
+        if let env = ProcessInfo.processInfo.environment["NT_PASSWORD"], !env.isEmpty {
+            return env
+        }
+        guard let stored = UserDefaults.standard.string(forKey: "dev.testPassword"),
+              !stored.isEmpty else { return nil }
+        return stored
+    }
+
+    /// The accounts those shortcuts sign in as. Emails are not secrets.
+    static let devStudentEmail = "teststudent1@test.com"
+    static let devTeacherEmail = "testteacher@test.com"
+    #endif
+
+    /// `https://novicetutor.com/api/...`, optionally with a query string.
     static func url(_ path: String, query: [URLQueryItem] = []) -> URL {
         let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        let base = origin.appendingPathComponent(trimmed)
-        guard !query.isEmpty else { return base }
-        var components = URLComponents(url: base, resolvingAgainstBaseURL: false)
-        components?.queryItems = query
-        return components?.url ?? base
+        let originStr = origin.absoluteString.hasSuffix("/")
+            ? String(origin.absoluteString.dropLast())
+            : origin.absoluteString
+        let fullUrlStr = "\(originStr)/\(trimmed)"
+        guard var components = URLComponents(string: fullUrlStr) else {
+            return URL(string: fullUrlStr) ?? origin
+        }
+        if !query.isEmpty {
+            components.queryItems = query
+        }
+        return components.url ?? (URL(string: fullUrlStr) ?? origin)
     }
 }

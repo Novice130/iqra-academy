@@ -23,19 +23,22 @@ actor APIClient {
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
+    private var authToken: String?
 
     init() {
+        authToken = UserDefaults.standard.string(forKey: "auth.session_token")
         let configuration = URLSessionConfiguration.default
         configuration.httpCookieAcceptPolicy = .always
         configuration.httpShouldSetCookies = true
-        // Wait for a network that is coming back, but not forever. Without a
-        // resource timeout this defaults to seven days: an origin that refuses
-        // the connection leaves `/api/me` pending, and the app sits on its
-        // launch screen — a black screen with a spinner and no way out — for
-        // as long as the person is willing to look at it.
-        configuration.waitsForConnectivity = true
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 45
+        configuration.waitsForConnectivity = false
+        // Nothing this client asks for is worth a stale answer: the endpoints
+        // are all "what is true right now". Left on the default policy, a
+        // response with no cache headers can be served from URLSession's disk
+        // cache — which is one of the ways a class the teacher had already
+        // ended kept being offered on the home screen.
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.timeoutIntervalForRequest = 10
+        configuration.timeoutIntervalForResource = 15
         session = URLSession(configuration: configuration)
 
         decoder = JSONDecoder()
@@ -62,6 +65,15 @@ actor APIClient {
         }
     }
 
+    func setAuthToken(_ token: String?) {
+        self.authToken = token
+        if let token {
+            UserDefaults.standard.set(token, forKey: "auth.session_token")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "auth.session_token")
+        }
+    }
+
     // MARK: - Requests
 
     func get<Response: Decodable>(
@@ -70,6 +82,11 @@ actor APIClient {
         as: Response.Type = Response.self
     ) async throws -> Response {
         try await send(request(path, method: "GET", query: query))
+    }
+
+    /// For callers that only care whether the request worked.
+    func get(_ path: String, query: [URLQueryItem] = []) async throws {
+        _ = try await sendRaw(request(path, method: "GET", query: query))
     }
 
     func post<Body: Encodable, Response: Decodable>(
@@ -116,17 +133,30 @@ actor APIClient {
     }
 
     private func sendRaw(_ request: URLRequest) async throws -> Data {
+        #if DEBUG
+        print("[APIClient] Sending \(request.httpMethod ?? "GET") \(request.url?.absoluteString ?? "")")
+        if let body = request.httpBody, let str = String(data: body, encoding: .utf8) {
+            print("[APIClient] Body: \(str)")
+        }
+        #endif
         let data: Data
         let response: URLResponse
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            #if DEBUG
+            print("[APIClient] Error: \(error)")
+            #endif
             throw APIError.transport(error)
         }
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.transport(URLError(.badServerResponse))
         }
+
+        #if DEBUG
+        print("[APIClient] Status \(http.statusCode) for \(request.url?.path ?? "")")
+        #endif
 
         guard (200..<300).contains(http.statusCode) else {
             if http.statusCode == 401 { throw APIError.unauthorized }
