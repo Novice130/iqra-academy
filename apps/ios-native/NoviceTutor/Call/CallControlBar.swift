@@ -1,6 +1,16 @@
 import SwiftUI
 
-/// Mic, camera, flip, and the way out.
+/// The floating bar: the four things people reach for mid-lesson, and the way
+/// out.
+///
+/// Everything else — people, chat, spotlight, volume, background blur, audio
+/// output — is behind **More**, as a sheet. That is not tidiness: at 402pt a
+/// row of circular buttons runs out of width at five, and a bar that scrolls
+/// sideways during a class is a bar nobody can hit. The bar stays at five and
+/// the sheet takes the rest.
+///
+/// Widths are deliberate: 52pt circles with 10pt gaps and a ~104pt end button
+/// leave the whole bar inside 402pt with room either side.
 struct CallControlBar: View {
     let micOn: Bool
     let cameraOn: Bool
@@ -8,14 +18,17 @@ struct CallControlBar: View {
     let micDenied: Bool
     let cameraDenied: Bool
     let isHost: Bool
+    /// Drawn as a dot on More, which is where chat lives.
+    let unread: Int
 
     let onToggleMic: () -> Void
     let onToggleCamera: () -> Void
     let onFlipCamera: () -> Void
+    let onMore: () -> Void
     let onExit: () -> Void
 
     var body: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 10) {
             circle(
                 systemName: micOn ? "mic.fill" : "mic.slash.fill",
                 on: micOn,
@@ -51,6 +64,18 @@ struct CallControlBar: View {
                 )
             }
 
+            circle(
+                systemName: "ellipsis",
+                on: true,
+                disabled: false,
+                label: unread > 0 ? "More, \(unread) unread messages" : "More",
+                badge: unread > 0,
+                action: {
+                    Theme.haptic(.light)
+                    onMore()
+                }
+            )
+
             Button {
                 Theme.haptic(.heavy)
                 onExit()
@@ -62,8 +87,8 @@ struct CallControlBar: View {
                         .font(.subheadline.weight(.bold))
                 }
                 .foregroundStyle(.white)
-                .padding(.horizontal, 20)
-                .frame(height: 56)
+                .padding(.horizontal, 18)
+                .frame(height: 52)
                 .background {
                     Capsule()
                         .fill(LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.1, blue: 0.1)], startPoint: .top, endPoint: .bottom))
@@ -72,7 +97,7 @@ struct CallControlBar: View {
             }
             .accessibilityLabel(isHost ? "End class for everyone" : "Leave class")
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background {
             Capsule()
@@ -91,13 +116,14 @@ struct CallControlBar: View {
         on: Bool,
         disabled: Bool,
         label: String,
+        badge: Bool = false,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: 19, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
+                .frame(width: 52, height: 52)
                 .background {
                     Circle()
                         .fill(on ? Color.white.opacity(0.18) : Color.red.opacity(0.85))
@@ -105,6 +131,15 @@ struct CallControlBar: View {
                             Circle()
                                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
                         }
+                }
+                .overlay(alignment: .topTrailing) {
+                    if badge {
+                        Circle()
+                            .fill(Theme.accent)
+                            .frame(width: 12, height: 12)
+                            .overlay { Circle().stroke(Color.black.opacity(0.35), lineWidth: 1) }
+                            .offset(x: 2, y: -2)
+                    }
                 }
         }
         .disabled(disabled)

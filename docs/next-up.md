@@ -3,9 +3,10 @@
 Written 2026-08-23, after the polling change shipped (`043fa96`, `e9d6388`,
 `8b3567b`, deployed as Worker version `898502fc`).
 
-Nothing in this file is started. It is deliberately a plan, not a progress
-report — the testing work in particular should begin from a clean session
-rather than inherit anyone's assumptions about what already works.
+Item 3 is now largely built (see its section). Everything else in this file is
+still a plan, not a progress report — the testing work in particular should
+begin from a clean session rather than inherit anyone's assumptions about what
+already works.
 
 ---
 
@@ -141,11 +142,15 @@ Worth confirming the key id matches.
 
 ## 3. iOS call screen — bring it up to the web's feature set, and make it look native
 
-This is the biggest single gap in the app, and it is a product problem as much
-as an engineering one: the iOS call screen has four buttons, and the web call
-screen has roughly fifteen capabilities.
+**Built on 2026-08-23, unverified against a live class.** It compiles in Debug
+and Release and it renders — see "What was built" below for what exists, what
+was deliberately left, and what still has to be watched happen in a real room.
 
-### What iOS has today
+This was the biggest single gap in the app, and a product problem as much as an
+engineering one: the iOS call screen had four buttons, and the web call screen
+has roughly fifteen capabilities.
+
+### What iOS had before this
 
 `Call/CallControlBar.swift`, in full: mic toggle, camera toggle, flip camera,
 hang up.
@@ -202,6 +207,76 @@ Two existing constraints to honour, both learned the hard way:
 - `project_teacher_leave_vs_disconnect`: only a deliberate "End class" may end
   the class. A backgrounded app, a dropped connection, or a dismissed sheet
   must never call `/end`.
+
+### What was built
+
+Files added: `Call/ParticipantTile.swift`, `Call/CallMoreSheet.swift`,
+`Call/CallPrompts.swift`, `Call/CallChat.swift`, `Call/CallScreenGallery.swift`,
+`Networking/CallAPI.swift`, `App/OrientationGate.swift`. Rewritten:
+`CallController`, `CallStageView`, `CallControlBar`, `RoomView`.
+
+| Capability | Where it is on iOS now |
+|---|---|
+| Background blur | Settings tab of the More sheet — the SDK's own `BackgroundBlurVideoProcessor` |
+| Screen share — **receiving** | `CallStageView`, letterboxed, with the faces in a filmstrip |
+| Chat | Chat tab; LiveKit text streams on `lk.chat` plus the legacy `lk-chat-topic` packet, deduped by id |
+| People panel | People tab, with the host menu on each row |
+| Per-participant volume | People tab, host only, debounced 250ms, gain curve mirrored from `lib/audio-gain.ts` |
+| Spotlight | People tab, host only, optimistic then reconciled from room metadata |
+| Layout switching | Settings tab — speaker/grid, per viewer, defaulting to grid for a host |
+| Host: mute / ask to unmute / ask for camera / remove | People tab menu; the two "ask" ones publish on the web's own topic strings |
+| Guest admission | A banner over the video, plus a section in the People tab; polls `/guests` every 10s, host only |
+| Solo inactivity prompt | `SoloInactivityPrompt`, same 30/45-minute and 60-second numbers as the web |
+| Device pickers | Camera is the flip button; audio output is the system `AVRoutePickerView` in Settings |
+
+The look: full-bleed video, a draggable self tile that snaps to the nearest
+corner, a floating `.ultraThinMaterial` bar that hides after four seconds and
+returns on a tap, speaking rings, mute badges, and landscape.
+
+Two things worth knowing before touching it again:
+
+- **The app is portrait everywhere except a call.** `Info.plist` already listed
+  the landscape orientations, but nothing rotated: `App/OrientationGate.swift`
+  plus an `AppDelegate` override is what actually permits it, and `RoomView`
+  opens and closes that gate. Closing it actively rotates back, or a phone left
+  on its side would hold a portrait-only screen sideways.
+- **A landscape screenshot of the simulator draws the app rotated whether or
+  not the app rotated.** Do not chase that: `CallGalleryUITests` asserts on
+  window frames instead, and the gallery prints the size it was laid out in.
+
+### Looking at it without a class
+
+`Call/CallScreenGallery.swift` (debug builds only) draws the whole call screen
+from made-up people — no LiveKit, no API:
+
+```
+xcrun simctl launch booted com.novicetutor.app -dev.callGallery 1
+xcrun simctl launch booted com.novicetutor.app -dev.callGallery 1 -dev.callGalleryLayout grid
+xcodebuild -project apps/ios-native/NoviceTutor.xcodeproj -scheme NoviceTutor \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -only-testing:NoviceTutorUITests/CallGalleryUITests test
+```
+
+The test attaches portrait and landscape screenshots of both layouts and fails
+if the End button leaves the window.
+
+### What was deliberately left
+
+- **Publishing a screen share.** It needs a Broadcast Upload Extension and an
+  App Group, which need the paid team; receiving one works today. This is the
+  one item from the table above that is not on iOS.
+- **Background *replacement*.** The SDK ships blur only; an image background
+  means writing the segmentation compositing by hand.
+- **Renaming a participant.** The route exists (`POST /participant`); no iOS
+  caller, because the case for it is a guest link on a laptop.
+
+### What has not been watched happen
+
+None of it has been through a real room — that is item 5, and it should start
+fresh. The specific things a build cannot answer: whether a host's mute
+actually silences the tile, whether "ask to unmute" reaches the right
+connection, whether the room-wide volume matches what the web hears, and
+whether chat sent from iOS appears in the web client's panel (and the reverse).
 
 ---
 

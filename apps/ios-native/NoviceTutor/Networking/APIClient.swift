@@ -107,6 +107,12 @@ actor APIClient {
         return try await sendRaw(request)
     }
 
+    /// For a DELETE that says what it is deleting in the query string.
+    @discardableResult
+    func delete(_ path: String, query: [URLQueryItem] = []) async throws -> Data {
+        try await sendRaw(request(path, method: "DELETE", query: query))
+    }
+
     @discardableResult
     func delete<Body: Encodable>(_ path: String, body: Body) async throws -> Data {
         var request = request(path, method: "DELETE")

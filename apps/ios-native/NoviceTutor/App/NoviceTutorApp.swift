@@ -54,6 +54,19 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
         return true
     }
 
+    /// Portrait everywhere but the call screen. See ``OrientationGate``.
+    ///
+    /// `Info.plist` lists the landscape orientations because without them iOS
+    /// will not offer rotation at all; this is what keeps the rest of the app
+    /// upright anyway. Called on the main thread by UIKit, which is what makes
+    /// the isolation assumption safe.
+    func application(
+        _: UIApplication,
+        supportedInterfaceOrientationsFor _: UIWindow?
+    ) -> UIInterfaceOrientationMask {
+        MainActor.assumeIsolated { OrientationGate.mask }
+    }
+
     func application(
         _: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

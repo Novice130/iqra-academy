@@ -9,6 +9,19 @@ struct RootView: View {
     @State private var liveMonitor = LiveClassMonitor.shared
 
     var body: some View {
+        #if DEBUG
+        // A debug-only way to look at the call screen without a live class.
+        // See ``CallScreenGallery``.
+        if UserDefaults.standard.bool(forKey: "dev.callGallery") {
+            return AnyView(CallScreenGallery())
+        }
+        return AnyView(main)
+        #else
+        return main
+        #endif
+    }
+
+    private var main: some View {
         ZStack {
             switch session.phase {
             case .restoring:
