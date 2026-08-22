@@ -58,6 +58,25 @@ function patchStyledJsx() {
   }
 }
 
+// MediaPipe's segmentation assets are served from our own origin — the CSP in
+// src/middleware.ts deliberately does not allow the CDN they used to come from.
+// This build path calls @opennextjs/cloudflare directly rather than
+// `npm run build`, so the `prebuild` hook never fires and the copy has to
+// happen here too. Without it a deploy ships a call screen whose background
+// effects 404.
+console.log("🔨 Copying MediaPipe segmentation assets into public/...");
+{
+  const copy = spawnSync("node", ["scripts/copy-mediapipe.mjs"], {
+    stdio: "inherit",
+    cwd: root,
+    shell: true,
+  });
+  if (copy.status !== 0) {
+    console.error("❌ MediaPipe assets could not be staged — background effects would be dead on arrival.");
+    process.exit(1);
+  }
+}
+
 // Step 1: Patch @noble/ciphers directly
 console.log("🔨 Patching @noble/ciphers to fix ESM subpath export bug...");
 try {

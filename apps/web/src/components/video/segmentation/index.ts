@@ -44,6 +44,8 @@ export class BackgroundProcessor extends ProcessorWrapper<
       settings?: Partial<PipelineSettings>;
       /** Overrides the automatic pick. Only the bench passes this. */
       quality?: ModelQuality;
+      /** Called when an effect degrades — a wallpaper that would not load. */
+      onError?: (message: string) => void;
     }
   ) {
     super(
@@ -51,6 +53,7 @@ export class BackgroundProcessor extends ProcessorWrapper<
         ...toTransformerOptions(options),
         settings: options.settings,
         quality: options.quality,
+        onError: options.onError,
       }),
       'nt-background'
     );

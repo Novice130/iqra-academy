@@ -2,18 +2,28 @@
 
 /**
  * Pre-join screen — Google Meet's "ready to join?" step: a live self-preview
- * with the mic and camera toggles sitting on it, the device pickers next to
- * it, and a live mic level so you can see the microphone is actually picking
- * you up before the class starts.
+ * with every control sitting on the video itself, and a live mic level so you
+ * can see the microphone is actually picking you up before the class starts.
+ *
+ * One column, preview-first. The device pickers used to sit in a second column
+ * beside it, which meant that on a phone — where most of this app's students
+ * are — the preview was a postage stamp above a stack of dropdowns. They live
+ * behind the gear tile now, where they are reached about as often as they are
+ * needed.
  *
  * Everything here runs on raw getUserMedia, not LiveKit hooks: there is no
  * Room yet at this point in the flow. The choices are handed to the caller
  * and applied when the room connects — see LiveKitRoom.
+ *
+ * Inline styles, not classNames, for anything visual: the call screens have
+ * been broken twice by a utility class that silently never applied, and this
+ * one has to render correctly the first time on a phone that is about to be in
+ * a lesson. Same rule as IncomingCallOverlay.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LocalVideoTrack } from 'livekit-client';
-import { CameraIcon, CameraOffIcon, EffectsIcon, MicIcon, MicOffIcon } from './CallIcons';
+import { CameraIcon, CameraOffIcon, EffectsIcon, MicIcon, MicOffIcon, SettingsIcon } from './CallIcons';
 import {
   BackgroundEffectsContent,
   usePreviewBackgroundEffects,
@@ -78,6 +88,29 @@ function DeviceSelect({
   );
 }
 
+/**
+ * Phones get a portrait preview, desktops a 16:9 one.
+ *
+ * A landscape preview on a 360px phone is a 200px-tall strip with the controls
+ * sitting across the middle of your own face — and a phone camera is portrait
+ * anyway, so the 16:9 box was mostly letterboxing. The iOS device check uses
+ * the same 3:4. This is a media query in JavaScript because every visual value
+ * on this screen is an inline style; see the note at the top of the file.
+ */
+function useNarrowViewport() {
+  const [narrow, setNarrow] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 640px)');
+    const apply = () => setNarrow(query.matches);
+    apply();
+    query.addEventListener('change', apply);
+    return () => query.removeEventListener('change', apply);
+  }, []);
+
+  return narrow;
+}
+
 export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) {
   const [videoEnabled, setVideoEnabled] = useState(true);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -92,6 +125,9 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
 
   const [previewTrack, setPreviewTrack] = useState<LocalVideoTrack | null>(null);
   const [effectsOpen, setEffectsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [joinHeld, setJoinHeld] = useState(false);
+  const narrow = useNarrowViewport();
   const effects = usePreviewBackgroundEffects(previewTrack);
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -219,152 +255,377 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 sm:p-8" style={{ background: '#131417' }}>
-      <div className="w-full max-w-5xl grid lg:grid-cols-[1.4fr_1fr] gap-6 lg:gap-10 items-center">
-        {/* Preview */}
-        <div>
-          <div
-            className="relative w-full aspect-video rounded-2xl overflow-hidden flex items-center justify-center"
-            style={{ background: '#0b0c0f', border: '1px solid rgba(255,255,255,0.1)' }}
-          >
-            {videoEnabled ? (
-              // Mirrored, like every other call app — an un-mirrored
-              // self-view reads as "wrong" even though it's what others see.
-              <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
-            ) : (
-              <div className="flex flex-col items-center gap-3" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                <CameraOffIcon className="w-10 h-10" />
-                <span className="text-xs uppercase tracking-wider font-semibold">Camera is off</span>
-              </div>
-            )}
+    <div style={styles.page}>
+      <div style={styles.column}>
+        <header style={styles.header}>
+          <h1 style={styles.title}>Ready to join?</h1>
+          <p style={styles.subtitle}>Check your camera and microphone before the class starts.</p>
+        </header>
 
-            <div
-              className="absolute top-3 left-3 px-2.5 py-1 rounded-md text-xs"
-              style={{ background: 'rgba(0,0,0,0.55)', color: '#e8eaed' }}
-            >
-              {userName}
+        {/* The preview is the screen. Everything else floats on it. */}
+        <div style={{ ...styles.stage, aspectRatio: narrow ? '3 / 4' : '16 / 9', maxHeight: '62vh' }}>
+          {videoEnabled ? (
+            // Mirrored, like every other call app — an un-mirrored self-view
+            // reads as "wrong" even though it's what others see.
+            <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
+          ) : (
+            <div style={styles.cameraOff}>
+              <CameraOffIcon />
+              <span style={styles.cameraOffLabel}>Camera is off</span>
             </div>
-
-            {/* Mic level, only while the mic is live */}
-            {audioEnabled && (
-              <div
-                className="absolute top-3 right-3 flex items-center gap-1 px-2 py-1.5 rounded-md"
-                style={{ background: 'rgba(0,0,0,0.55)' }}
-              >
-                {[0, 1, 2, 3, 4].map((i) => (
-                  <span
-                    key={i}
-                    className="w-1 rounded-full transition-all"
-                    style={{
-                      height: 4 + i * 3,
-                      background: level * 5 > i ? '#8ab4f8' : 'rgba(255,255,255,0.25)',
-                    }}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Toggles sit on the preview, Meet-style */}
-            <div className="absolute bottom-4 left-0 right-0 flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => setAudioEnabled((v) => !v)}
-                aria-label={audioEnabled ? 'Turn off microphone' : 'Turn on microphone'}
-                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer"
-                style={{ background: audioEnabled ? 'rgba(255,255,255,0.16)' : '#ea4335', color: '#fff' }}
-              >
-                {audioEnabled ? <MicIcon /> : <MicOffIcon />}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setError(null);
-                  setVideoEnabled((v) => !v);
-                }}
-                aria-label={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
-                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer"
-                style={{ background: videoEnabled ? 'rgba(255,255,255,0.16)' : '#ea4335', color: '#fff' }}
-              >
-                {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
-              </button>
-              <button
-                type="button"
-                onClick={() => setEffectsOpen((v) => !v)}
-                aria-label="Background effects"
-                disabled={!videoEnabled}
-                className="w-12 h-12 rounded-full flex items-center justify-center cursor-pointer disabled:opacity-40"
-                style={{
-                  background: effectsOpen || effects.active ? '#8ab4f8' : 'rgba(255,255,255,0.16)',
-                  color: effectsOpen || effects.active ? '#202124' : '#fff',
-                }}
-              >
-                <EffectsIcon />
-              </button>
-            </div>
-
-            {effectsOpen && videoEnabled && (
-              <div
-                className="absolute inset-x-2 bottom-20 rounded-xl overflow-y-auto shadow-2xl"
-                style={{ background: 'rgba(32,33,36,0.97)', border: '1px solid rgba(255,255,255,0.14)', maxHeight: '70%' }}
-              >
-                <BackgroundEffectsContent effects={effects} />
-              </div>
-            )}
-          </div>
-
-          {error && (
-            <p
-              className="mt-3 text-xs rounded-lg px-3 py-2"
-              style={{ background: 'rgba(234,67,53,0.12)', border: '1px solid rgba(234,67,53,0.35)', color: '#f6a6a0' }}
-            >
-              {error}
-            </p>
           )}
-        </div>
 
-        {/* Settings + join */}
-        <div>
-          <h1 className="text-2xl font-semibold text-white">Ready to join?</h1>
-          <p className="text-sm mt-1 mb-6" style={{ color: 'rgba(255,255,255,0.5)' }}>
-            Check your camera and microphone before the class starts.
-          </p>
+          <div style={styles.nameChip}>{userName}</div>
 
-          <div className="space-y-3">
-            <DeviceSelect
-              label="Camera"
-              devices={cameras}
-              value={videoDeviceId}
-              onChange={setVideoDeviceId}
+          {/* Mic level, only while the mic is live */}
+          {audioEnabled && (
+            <div style={styles.meter}>
+              {[0, 1, 2, 3, 4].map((i) => (
+                <span
+                  key={i}
+                  style={{
+                    width: 3,
+                    borderRadius: 999,
+                    transition: 'background 120ms linear',
+                    height: 5 + i * 3,
+                    background: level * 5 > i ? '#43e3a0' : 'rgba(255,255,255,0.28)',
+                  }}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Panels sit above the tiles, and only one is ever open. */}
+          {effectsOpen && videoEnabled && (
+            <div style={styles.panel}>
+              <BackgroundEffectsContent effects={effects} />
+            </div>
+          )}
+
+          {settingsOpen && (
+            <div style={{ ...styles.panel, padding: '14px 14px 16px' }}>
+              <div style={styles.panelTitle}>Devices</div>
+              <div style={styles.deviceStack}>
+                <DeviceSelect
+                  label="Camera"
+                  devices={cameras}
+                  value={videoDeviceId}
+                  onChange={setVideoDeviceId}
+                  disabled={!videoEnabled}
+                />
+                <DeviceSelect
+                  label="Microphone"
+                  devices={mics}
+                  value={audioDeviceId}
+                  onChange={setAudioDeviceId}
+                  disabled={!audioEnabled}
+                />
+                <DeviceSelect
+                  label="Speaker"
+                  devices={speakers}
+                  value={audioOutputDeviceId}
+                  onChange={setAudioOutputDeviceId}
+                />
+              </div>
+            </div>
+          )}
+
+          <div style={styles.tileRow}>
+            <ControlTile
+              on={audioEnabled}
+              label={audioEnabled ? 'Turn off microphone' : 'Turn on microphone'}
+              onClick={() => setAudioEnabled((v) => !v)}
+            >
+              {audioEnabled ? <MicIcon /> : <MicOffIcon />}
+            </ControlTile>
+            <ControlTile
+              on={videoEnabled}
+              label={videoEnabled ? 'Turn off camera' : 'Turn on camera'}
+              onClick={() => {
+                setError(null);
+                setVideoEnabled((v) => !v);
+              }}
+            >
+              {videoEnabled ? <CameraIcon /> : <CameraOffIcon />}
+            </ControlTile>
+            <ControlTile
+              on
+              highlighted={effectsOpen || effects.active}
               disabled={!videoEnabled}
-            />
-            <DeviceSelect
-              label="Microphone"
-              devices={mics}
-              value={audioDeviceId}
-              onChange={setAudioDeviceId}
-              disabled={!audioEnabled}
-            />
-            <DeviceSelect
-              label="Speaker"
-              devices={speakers}
-              value={audioOutputDeviceId}
-              onChange={setAudioOutputDeviceId}
-            />
+              label="Background effects"
+              onClick={() => {
+                setSettingsOpen(false);
+                setEffectsOpen((v) => !v);
+              }}
+            >
+              <EffectsIcon />
+            </ControlTile>
+            <ControlTile
+              on
+              highlighted={settingsOpen}
+              label="Camera, microphone and speaker"
+              onClick={() => {
+                setEffectsOpen(false);
+                setSettingsOpen((v) => !v);
+              }}
+            >
+              <SettingsIcon />
+            </ControlTile>
           </div>
-
-          <button
-            onClick={join}
-            className="mt-7 w-full py-3.5 rounded-full font-semibold cursor-pointer transition-transform active:scale-[0.98]"
-            style={{ background: '#8ab4f8', color: '#202124' }}
-          >
-            Join Meeting
-          </button>
-
-          <p className="text-[11px] mt-3 text-center" style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Your background carries into the call.
-          </p>
         </div>
+
+        {error && <p style={styles.error}>{error}</p>}
+
+        <button
+          type="button"
+          onClick={join}
+          onPointerDown={() => setJoinHeld(true)}
+          onPointerUp={() => setJoinHeld(false)}
+          onPointerLeave={() => setJoinHeld(false)}
+          style={{ ...styles.join, ...(joinHeld ? styles.joinHeld : null) }}
+        >
+          Join Class
+        </button>
+
+        <p style={styles.footnote}>Your background carries into the call.</p>
       </div>
     </div>
   );
 }
+
+/**
+ * A control that sits on the video: translucent, lit along its top edge and
+ * casting a shadow onto the picture behind it, so it reads as a physical tile
+ * rather than a flat disc drawn on the frame.
+ *
+ * The recipe is the one the iOS control bar already uses (ultraThinMaterial, a
+ * hairline white rim, a shadow underneath) rather than a second invention, so
+ * the two apps look like the same product.
+ */
+function ControlTile({
+  on,
+  highlighted,
+  disabled,
+  label,
+  onClick,
+  children,
+}: {
+  on: boolean;
+  highlighted?: boolean;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  const [held, setHeld] = useState(false);
+
+  const surface: React.CSSProperties = !on
+    ? {
+        // Off is the one state that must be unmistakable at a glance.
+        background: 'linear-gradient(180deg, #f2564a 0%, #ea4335 55%, #c5342a 100%)',
+        border: '1px solid rgba(255,255,255,0.26)',
+        color: '#fff',
+      }
+    : highlighted
+      ? {
+          background: 'linear-gradient(180deg, rgba(67,227,160,0.95) 0%, rgba(52,201,138,0.92) 100%)',
+          border: '1px solid rgba(255,255,255,0.4)',
+          color: '#08331f',
+        }
+      : {
+          background: 'linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.10) 100%)',
+          border: '1px solid rgba(255,255,255,0.28)',
+          color: '#fff',
+        };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onPointerDown={() => setHeld(true)}
+      onPointerUp={() => setHeld(false)}
+      onPointerLeave={() => setHeld(false)}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      style={{
+        ...styles.tile,
+        ...surface,
+        opacity: disabled ? 0.4 : 1,
+        cursor: disabled ? 'default' : 'pointer',
+        transform: held && !disabled ? 'translateY(2px)' : 'translateY(0)',
+        boxShadow: held && !disabled ? TILE_SHADOW_HELD : TILE_SHADOW,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+/**
+ * Every colour, radius and shadow in one place, as inline style objects. See
+ * the note at the top of the file for why none of this is a utility class.
+ */
+const TILE_SIZE = 'clamp(52px, 13.5vw, 64px)';
+
+/** Swapped wholesale on press, so they live outside the style map. */
+const TILE_SHADOW =
+  '0 10px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -6px 12px rgba(0,0,0,0.16)';
+const TILE_SHADOW_HELD =
+  '0 3px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -4px 10px rgba(0,0,0,0.22)';
+
+const styles: Record<string, React.CSSProperties> = {
+  page: {
+    minHeight: '100dvh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '16px 14px calc(16px + env(safe-area-inset-bottom))',
+    background: 'radial-gradient(120% 90% at 50% -10%, #1d2430 0%, #131417 55%, #0c0d10 100%)',
+  },
+  column: {
+    width: '100%',
+    maxWidth: 820,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 14,
+  },
+  header: { textAlign: 'center' },
+  title: { fontSize: 'clamp(20px, 5vw, 26px)', fontWeight: 600, color: '#fff', margin: 0 },
+  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.5)', margin: '4px 0 0' },
+  stage: {
+    position: 'relative',
+    width: '100%',
+    aspectRatio: '16 / 9',
+    borderRadius: 24,
+    overflow: 'hidden',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: '#0b0c0f',
+    border: '1px solid rgba(255,255,255,0.10)',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+  },
+  video: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' },
+  cameraOff: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 10,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  cameraOffLabel: {
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    fontWeight: 600,
+  },
+  nameChip: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    padding: '5px 10px',
+    borderRadius: 10,
+    fontSize: 12,
+    color: '#e8eaed',
+    background: 'rgba(0,0,0,0.45)',
+    border: '1px solid rgba(255,255,255,0.14)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+  },
+  meter: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 3,
+    padding: '7px 9px',
+    borderRadius: 10,
+    background: 'rgba(0,0,0,0.45)',
+    border: '1px solid rgba(255,255,255,0.14)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+  },
+  panel: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    bottom: `calc(${TILE_SIZE} + 28px)`,
+    maxHeight: '68%',
+    overflowY: 'auto',
+    borderRadius: 18,
+    background: 'rgba(20,22,26,0.86)',
+    border: '1px solid rgba(255,255,255,0.16)',
+    backdropFilter: 'blur(20px) saturate(150%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(150%)',
+    boxShadow: '0 18px 44px rgba(0,0,0,0.55)',
+  },
+  panelTitle: {
+    fontSize: 11,
+    fontWeight: 600,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    color: 'rgba(255,255,255,0.45)',
+    marginBottom: 10,
+  },
+  deviceStack: { display: 'flex', flexDirection: 'column', gap: 10 },
+  tileRow: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 14,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 'clamp(8px, 2.5vw, 14px)',
+  },
+  tile: {
+    width: TILE_SIZE,
+    height: TILE_SIZE,
+    borderRadius: 999,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backdropFilter: 'blur(16px) saturate(160%)',
+    WebkitBackdropFilter: 'blur(16px) saturate(160%)',
+    transition: 'transform 90ms ease, box-shadow 90ms ease, background 140ms ease',
+  },
+  error: {
+    width: '100%',
+    fontSize: 12,
+    borderRadius: 12,
+    padding: '10px 12px',
+    margin: 0,
+    background: 'rgba(234,67,53,0.12)',
+    border: '1px solid rgba(234,67,53,0.35)',
+    color: '#f6a6a0',
+  },
+  // The site's green, turned up. --color-sage is the brand but it is a muted
+  // colour and a muted "go" button is a worse button; this is the same family
+  // as the speaking ring on the call screen and Theme.live on iOS.
+  join: {
+    width: 'min(380px, 100%)',
+    padding: '17px 28px',
+    marginTop: 2,
+    borderRadius: 18,
+    border: '1px solid rgba(255,255,255,0.34)',
+    fontSize: 17,
+    fontWeight: 700,
+    letterSpacing: '0.01em',
+    color: '#08331f',
+    cursor: 'pointer',
+    background: 'linear-gradient(160deg, #43e3a0 0%, #34c98a 45%, #10b981 100%)',
+    boxShadow:
+      '0 10px 24px rgba(52,201,138,0.38), 0 2px 0 rgba(255,255,255,0.35) inset, 0 -6px 14px rgba(4,84,58,0.35) inset',
+    transform: 'translateY(0)',
+    transition: 'transform 90ms ease, box-shadow 90ms ease',
+  },
+  joinHeld: {
+    transform: 'translateY(3px)',
+    boxShadow:
+      '0 3px 10px rgba(52,201,138,0.30), 0 1px 0 rgba(255,255,255,0.25) inset, 0 -4px 10px rgba(4,84,58,0.40) inset',
+  },
+  footnote: { fontSize: 11, color: 'rgba(255,255,255,0.35)', margin: 0, textAlign: 'center' },
+};

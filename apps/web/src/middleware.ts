@@ -9,6 +9,13 @@ import type { NextRequest } from "next/server";
  * CSP notes (do not tighten without testing in a real class):
  * - `wasm-unsafe-eval` — MediaPipe Tasks Vision (background segmentation)
  *   instantiates WebAssembly from a runtime-fetched model.
+ * - MediaPipe's WASM and model are served from **our own origin**
+ *   (`/mediapipe/...`, staged by `scripts/copy-mediapipe.mjs`) precisely so
+ *   this policy does not have to name a CDN. They used to come from
+ *   cdn.jsdelivr.net and storage.googleapis.com; when this policy shipped it
+ *   blocked the `<script>` tag MediaPipe injects for its WASM glue, and every
+ *   background effect died silently. Do not "fix" that by widening
+ *   `script-src` — put the file under `public/` instead.
  * - `script-src 'unsafe-inline'` — not optional, however much it wants to be.
  *   The App Router hands the client its server-rendered payload through inline
  *   `self.__next_f.push(...)` scripts. Without this the browser blocks every
@@ -25,7 +32,8 @@ import type { NextRequest } from "next/server";
  * - `style-src 'unsafe-inline'` — React `style={{}}` props and LiveKit
  *   component styles are style *attributes*, which CSP only allows via
  *   'unsafe-inline' in style-src (style-src-attr support is inconsistent).
- * - `connect-src wss:`/`https:` to LiveKit Cloud and the MediaPipe WASM CDN.
+ * - `connect-src wss:`/`https:` to LiveKit Cloud. Nothing else is dialled
+ *   cross-origin from a class; segmentation is same-origin now.
  * - `frame-ancestors 'self'` — the site is never legitimately framed.
  */
 const SECURITY_HEADERS: Record<string, string> = {
@@ -33,7 +41,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'",
     "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
     "worker-src 'self' blob:",
-    "connect-src 'self' https://cdn.jsdelivr.net wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com",
+    "connect-src 'self' wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob: data: https:",
     "font-src 'self' data: https://fonts.gstatic.com",
@@ -84,6 +92,6 @@ export const config = {
   matcher: [
     // Exclude static assets and images — these are served by the Worker's
     // asset binding and never need to enter middleware.
-    "/((?!_next/static|_next/image|favicon.ico|logo.png|sw.js|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|apk)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|logo.png|sw.js|mediapipe/|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?|apk|wasm|tflite)$).*)",
   ],
 };

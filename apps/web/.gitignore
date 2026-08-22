@@ -45,3 +45,8 @@ next-env.d.ts
 # Android APKs served at /app/download — build output, not source.
 # Rebuild per docs/mobile-app.md and copy into public/app/ before deploying.
 public/app/*.apk
+
+# MediaPipe WASM, copied out of node_modules by scripts/copy-mediapipe.mjs.
+# The committed .tflite next to it is deliberate; these 18MB are not.
+/public/mediapipe/wasm/
+/public/mediapipe/models/selfie_multiclass_256x256.tflite

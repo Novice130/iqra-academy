@@ -19,6 +19,7 @@ import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
 import ScreenSharePill from './ScreenSharePill';
+import SoloInactivityPrompt from './SoloInactivityPrompt';
 import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
@@ -758,6 +759,8 @@ export default function CustomVideoConference({
           )}
 
           {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
+
+          <SoloInactivityPrompt isHost={isHost} onLeaveOrEnd={onEndClassIntent} />
 
           <MediaRequestModal />
 

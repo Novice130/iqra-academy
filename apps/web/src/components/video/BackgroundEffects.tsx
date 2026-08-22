@@ -51,6 +51,8 @@ export type EffectSelection =
 export interface BackgroundEffects {
   supported: boolean;
   busy: boolean;
+  /** Set when an effect failed or degraded, so the panel can say so. */
+  error: string | null;
   selection: EffectSelection;
   /** True whenever anything other than "none" is applied. */
   active: boolean;
@@ -91,13 +93,144 @@ function saveEffect(selection: EffectSelection) {
   }
 }
 
-/** Turns a selection into the processor options the track expects. */
+/**
+ * Turns a selection into the processor options the track expects.
+ *
+ * An id that no longer matches a wallpaper resolves to `disabled`, not to an
+ * empty path: an empty string still reads as "an effect is active" inside the
+ * transformer but fails its own length check, which left the camera passing
+ * through raw while the UI insisted a background was on.
+ */
 export function toProcessorOptions(next: EffectSelection): BackgroundEffectOptions {
   if (next.kind === 'none') return { mode: 'disabled' };
   if (next.kind === 'blur') return { mode: 'background-blur', blurRadius: next.radius };
+  const wallpaper = WALLPAPERS.find((w) => w.id === next.id);
+  if (!wallpaper) return { mode: 'disabled' };
+  return { mode: 'virtual-background', imagePath: wallpaper.path };
+}
+
+/**
+ * One implementation behind both hooks, because they had drifted into two
+ * copies of the same bug.
+ *
+ * The bug: `select()` used to assign `processorRef.current` *after* awaiting
+ * `track.setProcessor()`, while a second effect — which had `selection` in its
+ * deps — would see a still-null ref in the same tick and build a processor of
+ * its own. `setProcessor` serialises on livekit-client's own lock and stops
+ * whatever was attached before, so one of the two was destroyed while the ref
+ * pointed at it. Every later `switchTo()` then reached a transformer whose
+ * pipeline was null and returned silently: the first background you picked
+ * stuck, and nothing after it did anything.
+ *
+ * Two rules keep it fixed. The ref is assigned *before* any await, and every
+ * mutation goes through one promise chain so two swatches tapped quickly cannot
+ * interleave.
+ */
+function useEffectsOnTrack(track: LocalVideoTrack | null, initial?: EffectSelection): BackgroundEffects {
+  // Lazy: loadSavedEffect() touches localStorage, so passing it eagerly ran a
+  // getItem + JSON.parse on every render of the conference.
+  const [selection, setSelection] = useState<EffectSelection>(
+    () => initial ?? loadSavedEffect() ?? { kind: 'none' }
+  );
+  const [supported, setSupported] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const processorRef = useRef<BackgroundProcessor | null>(null);
+  const selectionRef = useRef(selection);
+  const queueRef = useRef<Promise<void>>(Promise.resolve());
+  const pendingRef = useRef(0);
+
+  useEffect(() => {
+    setSupported(supportsBackgroundEffects());
+  }, []);
+
+  useEffect(() => {
+    selectionRef.current = selection;
+  }, [selection]);
+
+  const onError = useCallback((message: string) => setError(message), []);
+
+  /** Serialises processor work and reports failures instead of swallowing them. */
+  const run = useCallback((job: () => Promise<void>) => {
+    pendingRef.current += 1;
+    setBusy(true);
+    queueRef.current = queueRef.current
+      .then(job)
+      .catch((err) => {
+        // These used to be `.catch(() => {})`, which is why a CSP that blocked
+        // MediaPipe outright looked like nothing happening at all.
+        console.error('Background effect failed', err);
+        setError('That effect could not be applied.');
+      })
+      .finally(() => {
+        pendingRef.current -= 1;
+        if (pendingRef.current === 0) setBusy(false);
+      });
+  }, []);
+
+  /** Attach or re-point the processor. Never constructs a second one. */
+  const apply = useCallback(
+    async (target: LocalVideoTrack, options: BackgroundEffectOptions) => {
+      if (options.mode === 'disabled') {
+        if (processorRef.current) await target.stopProcessor();
+        processorRef.current = null;
+        return;
+      }
+      const existing = processorRef.current;
+      if (existing) {
+        // A republished track carries no processor even though the person still
+        // expects their background: re-attach the one we have rather than
+        // paying for a new segmenter.
+        if (target.getProcessor() !== existing) await target.setProcessor(existing);
+        await existing.switchTo(options);
+        return;
+      }
+      const processor = new BackgroundProcessor({ ...options, onError });
+      processorRef.current = processor;
+      await target.setProcessor(processor);
+    },
+    [onError]
+  );
+
+  // Keeps the effect attached to whatever camera track is currently live.
+  // Two cases: the effect was chosen on the pre-join screen and there was no
+  // room track yet, and the track being republished (camera toggled off and
+  // on, or a device switch). It reads the selection through a ref on purpose —
+  // with `selection` in its deps it fired on every pick and raced `select()`.
+  useEffect(() => {
+    if (!track) {
+      // The preview track is recreated wholesale; its processor went with it.
+      processorRef.current = null;
+      return;
+    }
+    const options = toProcessorOptions(selectionRef.current);
+    if (options.mode === 'disabled') return;
+    run(() => apply(track, options));
+  }, [track, run, apply]);
+
+  const select = useCallback(
+    (next: EffectSelection) => {
+      // Remember the choice even with the camera off, so turning the camera
+      // back on restores it via the effect above — and remember it for the
+      // next class too.
+      setSelection(next);
+      selectionRef.current = next;
+      saveEffect(next);
+      setError(null);
+      if (!track) return;
+      run(() => apply(track, toProcessorOptions(next)));
+    },
+    [track, run, apply]
+  );
+
   return {
-    mode: 'virtual-background',
-    imagePath: WALLPAPERS.find((w) => w.id === next.id)?.path ?? '',
+    supported,
+    busy,
+    error,
+    selection,
+    active: toProcessorOptions(selection).mode !== 'disabled',
+    select,
   };
 }
 
@@ -109,87 +242,9 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
   // pre-join screen was remembered but never applied: at mount there is no
   // published track yet, and nothing re-ran once there was one.
   const { localParticipant, cameraTrack } = useLocalParticipant();
-  // Lazy: loadSavedEffect() touches localStorage, so passing it eagerly ran a
-  // getItem + JSON.parse on every render of the conference.
-  const [selection, setSelection] = useState<EffectSelection>(
-    () => initial ?? loadSavedEffect() ?? { kind: 'none' }
-  );
-  const [supported, setSupported] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const processorRef = useRef<BackgroundProcessor | null>(null);
-
-  useEffect(() => {
-    setSupported(supportsBackgroundEffects());
-  }, []);
-
-  // Keeps the effect attached to whatever camera track is currently live.
-  // Two cases: the effect was chosen on the pre-join screen and there was no
-  // room track yet, and the track being republished (camera toggled off and
-  // on, or a device switch) — a fresh LocalVideoTrack carries no processor
-  // even though the user still expects their effect to be on.
-  useEffect(() => {
-    if (selection.kind === 'none') return;
-    const track = (cameraTrack?.track ??
-      localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
-    if (!track) return;
-
-    if (!processorRef.current) {
-      const processor = new BackgroundProcessor(toProcessorOptions(selection));
-      processorRef.current = processor;
-      track.setProcessor(processor).catch(() => {});
-      return;
-    }
-    if (track.getProcessor() !== processorRef.current) {
-      track.setProcessor(processorRef.current).catch(() => {});
-    }
-  }, [selection, cameraTrack, localParticipant]);
-
-  const select = useCallback(
-    (next: EffectSelection) => {
-      const track = (cameraTrack?.track ??
-        localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
-
-      // Remember the choice even with the camera off, so turning the camera
-      // back on restores it via the effect above — and remember it for the
-      // next class too.
-      setSelection(next);
-      saveEffect(next);
-      if (!track) return;
-
-      const target = toProcessorOptions(next);
-
-      setBusy(true);
-      (async () => {
-        try {
-          if (target.mode === 'disabled') {
-            if (processorRef.current) await track.stopProcessor();
-            processorRef.current = null;
-            return;
-          }
-          if (processorRef.current) {
-            await processorRef.current.switchTo(target);
-          } else {
-            const processor = new BackgroundProcessor(target);
-            await track.setProcessor(processor);
-            processorRef.current = processor;
-          }
-        } catch (err) {
-          console.error('Background effect failed', err);
-        } finally {
-          setBusy(false);
-        }
-      })();
-    },
-    [cameraTrack, localParticipant]
-  );
-
-  return {
-    supported,
-    busy,
-    selection,
-    active: selection.kind !== 'none',
-    select,
-  };
+  const track = (cameraTrack?.track ??
+    localParticipant.getTrackPublication(Track.Source.Camera)?.track) as LocalVideoTrack | undefined;
+  return useEffectsOnTrack(track ?? null, initial);
 }
 
 /**
@@ -198,62 +253,9 @@ export function useBackgroundEffects(initial?: EffectSelection): BackgroundEffec
  * anyone sees them, which is the whole point of a pre-join screen.
  */
 export function usePreviewBackgroundEffects(track: LocalVideoTrack | null): BackgroundEffects {
-  // Opens on whatever was used last, so the preview already looks the way
-  // the class will.
-  const [selection, setSelection] = useState<EffectSelection>(() => loadSavedEffect() ?? { kind: 'none' });
-  const [supported, setSupported] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const processorRef = useRef<BackgroundProcessor | null>(null);
-
-  useEffect(() => {
-    setSupported(supportsBackgroundEffects());
-  }, []);
-
-  // The preview track is recreated whenever the camera or device changes, so
-  // the processor has to be re-attached to the new one.
-  useEffect(() => {
-    processorRef.current = null;
-    if (!track || selection.kind === 'none') return;
-    const processor = new BackgroundProcessor(toProcessorOptions(selection));
-    processorRef.current = processor;
-    track.setProcessor(processor).catch(() => {});
-    // Only re-run for a genuinely new track; selection changes go through select().
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track]);
-
-  const select = useCallback(
-    (next: EffectSelection) => {
-      setSelection(next);
-      saveEffect(next);
-      if (!track) return;
-      const target = toProcessorOptions(next);
-      setBusy(true);
-      (async () => {
-        try {
-          if (target.mode === 'disabled') {
-            if (processorRef.current) await track.stopProcessor();
-            processorRef.current = null;
-            return;
-          }
-          if (processorRef.current) {
-            await processorRef.current.switchTo(target);
-          } else {
-            const processor = new BackgroundProcessor(target);
-            await track.setProcessor(processor);
-            processorRef.current = processor;
-          }
-        } catch (err) {
-          console.error('Preview background effect failed', err);
-        } finally {
-          setBusy(false);
-        }
-      })();
-    },
-    [track]
-  );
-
-  return { supported, busy, selection, active: selection.kind !== 'none', select };
+  return useEffectsOnTrack(track);
 }
+
 
 function Swatch({
   active,
@@ -275,7 +277,7 @@ function Swatch({
       title={label}
       className="relative aspect-video w-full rounded-lg overflow-hidden cursor-pointer bg-cover bg-center flex items-center justify-center"
       style={{
-        outline: active ? '2px solid #8ab4f8' : '1px solid rgba(255,255,255,0.14)',
+        outline: active ? '2px solid #34c98a' : '1px solid rgba(255,255,255,0.14)',
         outlineOffset: '-1px',
         ...style,
       }}
@@ -292,7 +294,7 @@ function Swatch({
 }
 
 export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffects }) {
-  const { selection, select, supported, busy } = effects;
+  const { selection, select, supported, busy, error } = effects;
 
   if (!supported) {
     return (
@@ -307,6 +309,14 @@ export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffec
       <div className="px-1 py-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
         Effects {busy && <span className="normal-case font-normal">· applying…</span>}
       </div>
+      {error && (
+        <div
+          className="mb-2 rounded-lg px-2.5 py-1.5 text-[11px]"
+          style={{ background: 'rgba(234,67,53,0.14)', color: '#f6a6a0' }}
+        >
+          {error}
+        </div>
+      )}
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
         <Swatch
           label="None"

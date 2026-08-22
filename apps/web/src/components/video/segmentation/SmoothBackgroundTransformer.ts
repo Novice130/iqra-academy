@@ -17,16 +17,33 @@ import { VideoTransformer } from '@livekit/track-processors';
 import type { VideoTransformerInitOptions } from '@livekit/track-processors';
 import { createPipeline, DEFAULT_SETTINGS, type Pipeline, type PipelineSettings } from './glPipeline';
 
-/** Pinned to the version `@livekit/track-processors` depends on. */
-const TASKS_VISION_VERSION = '0.10.14';
-const WASM_BASE = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${TASKS_VISION_VERSION}/wasm`;
+/**
+ * Both the WASM and the model are served from our own origin.
+ *
+ * They used to be fetched from cdn.jsdelivr.net and storage.googleapis.com,
+ * and that is what broke background effects: the CSP added on 2026-08-20
+ * (`src/middleware.ts`) allows scripts from `'self'` only, and MediaPipe loads
+ * its WASM glue by injecting a `<script>` tag. Nothing surfaced, because every
+ * caller swallowed the rejection.
+ *
+ * `scripts/copy-mediapipe.mjs` stages the WASM out of node_modules at build
+ * time, so it is always the `@mediapipe/tasks-vision` version pinned in
+ * package.json — which is the version `@livekit/track-processors` expects.
+ */
+const WASM_BASE = '/mediapipe/wasm';
 
 const MODELS = {
   /** 256x144, two classes. The cheap one; what the old pipeline always used. */
-  fast: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
-  /** 256x256, six classes. Cleaner hair and shoulders, ~3x the cost. */
-  detailed:
-    'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite',
+  fast: '/mediapipe/models/selfie_segmenter.tflite',
+  /**
+   * 256x256, six classes. Cleaner hair and shoulders, ~3x the cost.
+   *
+   * 16MB, and only `/debug/segmentation?model=detailed` ever asks for it, so it
+   * is not committed and not shipped: run the copy script with
+   * `MEDIAPIPE_DETAILED=1` to have it locally. In production this 404s, which
+   * is the correct outcome for a bench-only asset.
+   */
+  detailed: '/mediapipe/models/selfie_multiclass_256x256.tflite',
 } as const;
 
 export type ModelQuality = keyof typeof MODELS;
@@ -50,6 +67,13 @@ export type ModelQuality = keyof typeof MODELS;
  */
 export const DEFAULT_QUALITY: ModelQuality = 'fast';
 
+/**
+ * What a wallpaper degrades to when it cannot be loaded. Deliberately not
+ * "nothing": someone who picked a background wanted their room hidden, and the
+ * failure mode of showing it anyway is the one that matters.
+ */
+const FALLBACK_BLUR_RADIUS = 12;
+
 export interface SmoothBackgroundOptions extends Record<string, unknown> {
   /** Blur strength in output pixels. Ignored when `imagePath` is set. */
   blurRadius?: number;
@@ -58,6 +82,8 @@ export interface SmoothBackgroundOptions extends Record<string, unknown> {
   /** Neither set means pass the camera through untouched. */
   quality?: ModelQuality;
   settings?: Partial<PipelineSettings>;
+  /** Told when an effect degrades, so the UI can say so instead of lying. */
+  onError?: (message: string) => void;
 }
 
 export default class SmoothBackgroundTransformer extends VideoTransformer<SmoothBackgroundOptions> {
@@ -123,7 +149,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
       outputConfidenceMasks: true,
     });
 
-    this.applyMode();
+    await this.applyMode();
     if (this.options.settings) this.pipeline.setSettings(this.options.settings);
   }
 
@@ -135,7 +161,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.canvas = opts.outputCanvas;
     this.inputVideo = opts.inputElement;
     this.isDisabled = false;
-    this.applyMode();
+    await this.applyMode();
     if (this.options.settings) this.pipeline?.setSettings(this.options.settings);
   }
 
@@ -162,13 +188,25 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     const { imagePath, blurRadius } = this.options;
 
     if (typeof imagePath === 'string' && imagePath.length > 0) {
-      if (this.background?.path !== imagePath) {
-        const image = await loadImage(imagePath);
-        this.background?.image.close();
-        this.background = { path: imagePath, image };
+      try {
+        if (this.background?.path !== imagePath) {
+          const image = await loadImage(imagePath);
+          this.background?.image.close();
+          this.background = { path: imagePath, image };
+        }
+        this.pipeline.setMode({ kind: 'image', image: this.background.image });
+        return;
+      } catch (err) {
+        // Not `setMode(null)`. With an effect still nominally active that makes
+        // `render()` bail (see glPipeline.ts) and every frame passes through
+        // raw — so a wallpaper that failed to load would quietly broadcast the
+        // room it was chosen to hide. Blur instead, and say so.
+        console.error('Failed to load virtual background image:', err);
+        this.options.blurRadius = FALLBACK_BLUR_RADIUS;
+        this.pipeline.setMode({ kind: 'blur', radius: FALLBACK_BLUR_RADIUS });
+        this.options.onError?.('That background could not be loaded — blurred your camera instead.');
+        return;
       }
-      this.pipeline.setMode({ kind: 'image', image: this.background.image });
-      return;
     }
 
     if (typeof blurRadius === 'number') {
@@ -248,14 +286,45 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 }
 
 async function loadImage(path: string): Promise<ImageBitmap> {
-  const image = new Image();
-  image.crossOrigin = 'Anonymous';
-  await new Promise((resolve, reject) => {
-    image.onload = resolve;
-    image.onerror = reject;
-    image.src = path;
-  });
-  return createImageBitmap(image);
+  if (path.endsWith('.svg') || path.includes('.svg')) {
+    // For SVGs, fetch the text to create a data/blob URL to ensure all vector definitions/filters are loaded
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`Failed to fetch SVG at ${path}: ${res.statusText}`);
+    const svgText = await res.text();
+    const blob = new Blob([svgText], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+
+    try {
+      const img = new Image();
+      await new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = (e) => reject(new Error(`Failed to load SVG background at ${path}: ${e}`));
+        img.src = url;
+      });
+
+      const width = 1280;
+      const height = 720;
+      let canvas: HTMLCanvasElement | OffscreenCanvas;
+      if (typeof OffscreenCanvas !== 'undefined') {
+        canvas = new OffscreenCanvas(width, height);
+      } else {
+        canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const ctx = canvas.getContext('2d') as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
+      if (!ctx) throw new Error('Cannot get 2d context for SVG rasterization');
+      ctx.drawImage(img, 0, 0, width, height);
+      return await createImageBitmap(canvas);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  const res = await fetch(path);
+  if (!res.ok) throw new Error(`Failed to fetch image at ${path}: ${res.statusText}`);
+  const blob = await res.blob();
+  return await createImageBitmap(blob);
 }
 
 export { DEFAULT_SETTINGS };
