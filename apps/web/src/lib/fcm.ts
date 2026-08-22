@@ -354,6 +354,43 @@ export async function sendCallEndedPush(userIds: string[], callId: string): Prom
   });
 }
 
+/**
+ * The class is over — clear the "Join classroom now" card on every phone that
+ * is still offering it.
+ *
+ * Silent on purpose, on both platforms. A student who was never in the class
+ * does not need a banner telling them a lesson they missed has finished; the
+ * only job here is to take a stale card off a screen. The one that *is*
+ * user-visible is the ring at the start of class (`sendCallPush`).
+ *
+ * Best effort, and knowingly so: iOS throttles background pushes and drops
+ * them entirely for an app the user force-quit. The client's adaptive poll is
+ * what guarantees the card eventually goes; this is what makes it feel instant
+ * when it works.
+ */
+export async function sendClassEndedPush(userIds: string[], sessionId: string): Promise<number> {
+  return sendToDevices(userIds, (device) => {
+    const data = { type: "CLASS_ENDED", sessionId };
+
+    if (isIos(device)) {
+      return {
+        token: device.token,
+        data,
+        apns: {
+          headers: { "apns-priority": "5", "apns-push-type": "background" },
+          payload: { aps: { "content-available": 1 } },
+        },
+      };
+    }
+
+    return {
+      token: device.token,
+      data,
+      android: { priority: "HIGH", ttl: "300s" },
+    };
+  });
+}
+
 /** Remove one device (sign-out on that handset). */
 export async function removeDeviceToken(userId: string, token: string) {
   await db

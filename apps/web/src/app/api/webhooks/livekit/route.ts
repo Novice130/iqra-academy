@@ -29,6 +29,9 @@ import { db, withDb } from "@/lib/db";
 import { sessionAttendance, sessions, bookings, studentProfiles } from "@/db/schema";
 import { baseIdentity, isScreenShareIdentity, sessionIdFromRoomName } from "@/lib/livekit";
 import { closeAttendanceRows } from "@/lib/attendance";
+import { classRosterUserIds } from "@/lib/class-ring";
+import { sendClassEndedPush } from "@/lib/fcm";
+import { afterResponse } from "@/lib/after-response";
 import { users } from "@/db/schema";
 
 export const dynamic = "force-dynamic";
@@ -138,7 +141,7 @@ export async function POST(request: NextRequest) {
         case "participant_left":
           if (isPerson) await closeAttendanceRows({ sessionId, identity: identity!, at });
           break;
-        case "room_finished":
+        case "room_finished": {
           // The room is gone, so anybody still shown as present isn't. This
           // catches the last person out, whose own `participant_left` can be
           // lost in the same teardown that closed the room.
@@ -151,11 +154,32 @@ export async function POST(request: NextRequest) {
           // `emptyTimeout` (see the join route), or because the host ended it
           // deliberately, in which case /end already set this and the update
           // below matches nothing.
-          await db
+          const completed = await db
             .update(sessions)
             .set({ status: "COMPLETED", actualEnd: at })
-            .where(and(eq(sessions.id, sessionId), eq(sessions.status, "IN_PROGRESS")));
+            .where(and(eq(sessions.id, sessionId), eq(sessions.status, "IN_PROGRESS")))
+            .returning({
+              teacherId: sessions.teacherId,
+              scheduledStart: sessions.scheduledStart,
+            });
+
+          // Only when *this* update is what ended the class. The host pressing
+          // End already sent this push and already matched the row, so the
+          // returning list is empty here and nobody gets told twice.
+          if (completed[0]) {
+            const ended = completed[0];
+            afterResponse(
+              classRosterUserIds({
+                canonical: ended,
+                teacherId: ended.teacherId,
+                includeFinished: true,
+              }).then((userIds) =>
+                userIds.length ? sendClassEndedPush(userIds, sessionId) : 0
+              )
+            );
+          }
           break;
+        }
         default:
           break;
       }

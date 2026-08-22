@@ -17,10 +17,11 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { bookings, sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
+import { FALLBACK_CADENCE, pollCadenceFor } from "@/lib/poll-cadence";
 import { and, desc, eq, gt, inArray } from "drizzle-orm";
 
 /**
@@ -30,8 +31,33 @@ import { and, desc, eq, gt, inArray } from "drizzle-orm";
  */
 const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
 
+/**
+ * Never cached, anywhere. This answer is "is a class happening right now", and
+ * the iOS client goes through URLSession's on-disk cache by default — an
+ * endpoint with no cache directives is exactly the kind it will happily serve
+ * a heuristic stale copy of, which reads to a student as a class that will not
+ * go away.
+ */
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" };
+
+/**
+ * How long the phone should wait before asking anything again — this endpoint
+ * and the ring poll both. See `lib/poll-cadence.ts` for why the cadence for
+ * *both* pollers is decided here and rides on this one response.
+ *
+ * Never fatal: a cadence lookup that throws must not turn "is my class live?"
+ * into an error. The client falls back to the intervals it used to hardcode.
+ */
+async function cadence(userId: string, isLive: boolean) {
+  try {
+    return await pollCadenceFor(userId, isLive);
+  } catch {
+    return FALLBACK_CADENCE;
+  }
+}
+
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireAuth(request);
       if (authResult instanceof NextResponse) return authResult;
@@ -47,7 +73,11 @@ export async function GET(request: NextRequest) {
         .where(eq(bookings.userId, ctx.userId));
 
       const teacherIds = teacherRows.map((r) => r.teacherId);
-      if (teacherIds.length === 0) return NextResponse.json({ live: null });
+      if (teacherIds.length === 0)
+        return NextResponse.json(
+          { live: null, poll: await cadence(ctx.userId, false) },
+          { headers: NO_STORE }
+        );
 
       const liveSession = await db.query.sessions.findFirst({
         where: and(
@@ -58,21 +88,29 @@ export async function GET(request: NextRequest) {
         orderBy: [desc(sessions.actualStart)],
       });
 
-      if (!liveSession) return NextResponse.json({ live: null });
+      if (!liveSession)
+        return NextResponse.json(
+          { live: null, poll: await cadence(ctx.userId, false) },
+          { headers: NO_STORE }
+        );
 
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, liveSession.teacherId),
         columns: { name: true },
       });
 
-      return NextResponse.json({
-        live: {
-          sessionId: liveSession.id,
-          teacherName: teacher?.name || "Your teacher",
-          title: liveSession.title,
-          startedAt: liveSession.actualStart?.toISOString() ?? null,
+      return NextResponse.json(
+        {
+          live: {
+            sessionId: liveSession.id,
+            teacherName: teacher?.name || "Your teacher",
+            title: liveSession.title,
+            startedAt: liveSession.actualStart?.toISOString() ?? null,
+          },
+          poll: await cadence(ctx.userId, true),
         },
-      });
+        { headers: NO_STORE }
+      );
     } catch (error) {
       return handleApiError(error);
     }

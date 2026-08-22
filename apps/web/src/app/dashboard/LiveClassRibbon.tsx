@@ -14,7 +14,15 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 
-const POLL_INTERVAL_MS = 15000;
+/**
+ * Used until the server has answered once, and by nothing else.
+ *
+ * The cadence is the server's to choose — it is the only party that knows when
+ * the answer could next change (see `lib/poll-cadence.ts`). A fixed 15s here is
+ * what had every idle dashboard in the org asking four times a minute all day,
+ * which is a meaningful share of the load that produced the 1102s of 6-7 August.
+ */
+const FALLBACK_INTERVAL_MS = 15000;
 
 interface LiveClass {
   sessionId: string;
@@ -28,24 +36,44 @@ export default function LiveClassRibbon() {
 
   useEffect(() => {
     let cancelled = false;
+    // A self-rescheduling timeout rather than setInterval: the gap is decided
+    // by each answer, and setInterval has no way to change it.
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
     const poll = async () => {
+      let nextMs = FALLBACK_INTERVAL_MS;
       try {
         const res = await fetch('/api/students/live-class');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        setLive(data.live || null);
+        if (res.ok) {
+          const data = await res.json();
+          if (cancelled) return;
+          setLive(data.live || null);
+          const hinted = Number(data?.poll?.liveSeconds);
+          if (Number.isFinite(hinted) && hinted > 0) {
+            nextMs = Math.min(Math.max(hinted, 10), 1800) * 1000;
+          }
+        }
       } catch {
         // Best-effort background poll.
       }
+      if (!cancelled) timer = setTimeout(poll, nextMs);
     };
 
     poll();
-    const interval = setInterval(poll, POLL_INTERVAL_MS);
+
+    // A tab that was in the background missed however long it was hidden, and
+    // the first thing it shows on the way back would be that stale answer.
+    const onVisible = () => {
+      if (document.visibilityState !== 'visible' || cancelled) return;
+      clearTimeout(timer);
+      poll();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, []);
 

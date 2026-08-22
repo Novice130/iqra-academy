@@ -16,6 +16,13 @@ import { and, desc, eq, gt } from "drizzle-orm";
 
 const RING_WINDOW_MS = 60_000;
 
+/**
+ * Same reason as `students/live-class`: URLSession heuristically caches a
+ * response that carries no cache directives, and a stale "no call" is a phone
+ * that never rings.
+ */
+const NO_STORE = { "Cache-Control": "no-store, no-cache, must-revalidate" };
+
 export async function GET(request: NextRequest) {
   return withHttpDb(async () => {
     try {
@@ -34,20 +41,23 @@ export async function GET(request: NextRequest) {
         orderBy: [desc(callInvites.createdAt)],
       });
 
-      if (!call) return NextResponse.json({ call: null });
+      if (!call) return NextResponse.json({ call: null }, { headers: NO_STORE });
 
       const caller = await db.query.users.findFirst({
         where: eq(users.id, call.callerId),
         columns: { name: true },
       });
 
-      return NextResponse.json({
-        call: {
-          id: call.id,
-          sessionId: call.sessionId,
-          callerName: caller?.name || "Your teacher",
+      return NextResponse.json(
+        {
+          call: {
+            id: call.id,
+            sessionId: call.sessionId,
+            callerName: caller?.name || "Your teacher",
+          },
         },
-      });
+        { headers: NO_STORE }
+      );
     } catch (error) {
       return handleApiError(error);
     }

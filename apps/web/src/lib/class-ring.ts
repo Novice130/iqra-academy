@@ -49,6 +49,54 @@ import { sendWebPushToUsers } from "@/lib/webpush";
 const RE_RING_COOLDOWN_MS = 10 * 60 * 1000;
 
 /**
+ * Everyone booked into one class occurrence, minus the teacher.
+ *
+ * Two things make this more than a `where sessionId = ?`. A class here is a
+ * group row plus one INDIVIDUAL row per student, and each student's booking
+ * normally sits on their own row — read the canonical row alone and a class of
+ * three returns nobody. And the roster is keyed on `userId`, not on the student
+ * profile: a notification reaches a *person's* devices, and the profile is only
+ * how the booking happens to be filed.
+ *
+ * `includeFinished` is the difference between the two callers. Ringing must
+ * skip rows already cancelled or completed — nobody wants a phone ringing for a
+ * lesson that is over. The class-*ended* push is the opposite case: by the time
+ * it is sent the row has just been marked COMPLETED, and excluding it would
+ * mean the message never reaches the students it is about.
+ */
+export async function classRosterUserIds(opts: {
+  canonical: { teacherId: string; scheduledStart: Date | null };
+  teacherId: string;
+  includeFinished?: boolean;
+}): Promise<string[]> {
+  const { canonical, teacherId, includeFinished = false } = opts;
+
+  // Same ±90min rule the room resolver groups occurrences on.
+  const anchor = canonical.scheduledStart?.getTime() ?? Date.now();
+  const statusFilters = includeFinished
+    ? [ne(sessions.status, "CANCELLED")]
+    : [ne(sessions.status, "CANCELLED"), ne(sessions.status, "COMPLETED")];
+
+  const rows = await db.query.sessions.findMany({
+    where: and(
+      eq(sessions.teacherId, canonical.teacherId),
+      ...statusFilters,
+      gte(sessions.scheduledStart, new Date(anchor - SIBLING_WINDOW_MS)),
+      lte(sessions.scheduledStart, new Date(anchor + SIBLING_WINDOW_MS))
+    ),
+    columns: { id: true },
+  });
+  const sessionIds = rows.map((r) => r.id);
+  if (sessionIds.length === 0) return [];
+
+  const roster = await db.query.bookings.findMany({
+    where: and(inArray(bookings.sessionId, sessionIds), ne(bookings.status, "CANCELLED")),
+    columns: { userId: true },
+  });
+  return [...new Set(roster.map((b) => b.userId))].filter((id) => id !== teacherId);
+}
+
+/**
  * Ring every booked student who isn't already in the room.
  *
  * `canonical` is the occurrence's canonical session row — the one
@@ -67,31 +115,8 @@ export async function ringClassStudents(opts: {
 }): Promise<number> {
   const { canonical, roomName, teacherId, teacherName } = opts;
 
-  // 1. Every row belonging to this class, by the same ±90min rule the room
-  //    resolver groups on. CANCELLED and COMPLETED rows are excluded — a
-  //    student whose lesson was cancelled is not expected in it.
-  const anchor = canonical.scheduledStart?.getTime() ?? Date.now();
-  const rows = await db.query.sessions.findMany({
-    where: and(
-      eq(sessions.teacherId, canonical.teacherId),
-      ne(sessions.status, "CANCELLED"),
-      ne(sessions.status, "COMPLETED"),
-      gte(sessions.scheduledStart, new Date(anchor - SIBLING_WINDOW_MS)),
-      lte(sessions.scheduledStart, new Date(anchor + SIBLING_WINDOW_MS))
-    ),
-    columns: { id: true },
-  });
-  const sessionIds = rows.map((r) => r.id);
-  if (sessionIds.length === 0) return 0;
-
-  // 2. Who is expected. Keyed on `userId` rather than the student profile: an
-  //    invite rings a person's devices, and the profile is only how the
-  //    booking happens to be filed.
-  const roster = await db.query.bookings.findMany({
-    where: and(inArray(bookings.sessionId, sessionIds), ne(bookings.status, "CANCELLED")),
-    columns: { userId: true },
-  });
-  let candidates = [...new Set(roster.map((b) => b.userId))].filter((id) => id !== teacherId);
+  // 1 & 2. Who is expected in this class, across every row of the occurrence.
+  let candidates = await classRosterUserIds({ canonical, teacherId });
   if (candidates.length === 0) return 0;
 
   // 3. Drop anyone already in the room. Identity is `email#random` per
