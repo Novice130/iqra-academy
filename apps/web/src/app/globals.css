@@ -173,60 +173,114 @@ body {
 /* ── Chat panel width. LiveKit's default is clamp(200px, 55ch, 60ch), which
    is wider than the video column deserves once the People panel can also be
    open beside it. Full-screen on a phone is left as LiveKit has it. ── */
+/* ── Chat panel styling. Refined frosted glass sidebar and iMessage-style bubbles ── */
+.lk-chat {
+  background: rgba(18, 20, 26, 0.88) !important;
+  backdrop-filter: blur(28px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(28px) saturate(180%) !important;
+  border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+  color: #fff !important;
+}
+.lk-chat-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  background: transparent !important;
+  padding: 12px 16px !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.01em !important;
+}
+.lk-chat-messages {
+  padding: 12px 14px !important;
+  gap: 8px !important;
+}
+.lk-chat-entry {
+  border-radius: 18px !important;
+  padding: 8px 14px !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+  max-width: 88% !important;
+}
+.lk-chat-entry[data-lk-message-origin='local'] {
+  background: linear-gradient(135deg, #007aff 0%, #0056b3 100%) !important;
+  color: #fff !important;
+  border-bottom-right-radius: 4px !important;
+  margin-left: auto !important;
+  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.25) !important;
+}
+.lk-chat-entry[data-lk-message-origin='remote'] {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  color: #f3f4f6 !important;
+  border-bottom-left-radius: 4px !important;
+  margin-right: auto !important;
+}
+.lk-chat-form {
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  padding: 10px 14px !important;
+  background: transparent !important;
+  gap: 8px !important;
+}
+.lk-chat-form-input {
+  background: rgba(255, 255, 255, 0.08) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 20px !important;
+  padding: 8px 16px !important;
+  color: #fff !important;
+  font-size: 13px !important;
+}
+.lk-chat-form-input:focus {
+  outline: none !important;
+  border-color: #007aff !important;
+  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.3) !important;
+}
+.lk-chat-form-button {
+  border-radius: 20px !important;
+  background: #007aff !important;
+  color: #fff !important;
+  font-weight: 600 !important;
+  font-size: 13px !important;
+  padding: 8px 16px !important;
+  cursor: pointer !important;
+  transition: opacity 0.15s ease !important;
+}
+.lk-chat-form-button:hover {
+  opacity: 0.9 !important;
+}
+
 @media (min-width: 640px) {
   .lk-chat {
     width: 340px;
   }
 }
 
-/* ── Call control bar height. Also drives --lk-control-bar-height, which
-   LiveKit's chat panel uses to size its own rows and its mobile bottom
-   offset — the two must agree or the chat sheet sits over the buttons.
-   A phone held sideways is only ~390px tall, where a 76px bar is a quarter
-   of the screen, so it shrinks. ── */
+/* ── Call control bar height & floating pill metrics ── */
 :root {
-  --call-bar-height: 76px;
+  --call-bar-height: 84px;
 }
 .call-surface {
   --lk-control-bar-height: var(--call-bar-height);
 }
 .call-control-bar {
   height: var(--call-bar-height);
-  /* `safe` so that when the row genuinely can't fit, it overflows to the
-     right only. Plain `center` in a scroll container pushes the first
-     buttons off the left edge where they cannot be scrolled back to — the
-     mic would have been unreachable. Browsers that don't know the keyword
-     drop the declaration and fall back to flex-start, which is also safe. */
   justify-content: safe center;
 }
 
-/* ── Round-button size on the call bar. Eight controls, two of which carry a
-   device caret half a button wide, plus gaps and padding, have to fit the
-   narrowest phone in use here (a 360px Samsung):
-
-       9 × btn + 7 × gap(4px) + 12px padding ≤ 100vw
-
-   Fixed 40px buttons needed ~400px and the row scrolled sideways on that
-   phone, with the leave button off the edge. This solves the same line for
-   btn and caps it at the 48px used on a desktop (reached at ~470px wide). ── */
 :root {
-  --call-btn: clamp(30px, calc(11.1vw - 4.5px), 48px);
-  --call-icon: min(22px, calc(var(--call-btn) * 0.56));
+  --call-btn: clamp(34px, calc(10.5vw - 3px), 50px);
+  --call-icon: min(22px, calc(var(--call-btn) * 0.52));
 }
-/* The icons shrink with the buttons, or a 22px glyph in a 30px circle leaves
-   no ring around it and the row reads as a wall. The device carets are half a
-   button wide, so their chevron is scaled off the icon size again. */
+
 .call-control-bar svg:not(.call-caret) {
   width: var(--call-icon);
   height: var(--call-icon);
 }
 .call-control-bar svg.call-caret {
-  width: calc(var(--call-icon) * 0.66);
+  width: calc(var(--call-icon) * 0.62);
   height: auto;
 }
 @media (max-height: 480px) {
   :root {
-    --call-bar-height: 60px;
+    --call-bar-height: 64px;
+    --call-btn: clamp(28px, 9vw, 40px);
   }
 }
 

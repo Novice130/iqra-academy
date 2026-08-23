@@ -275,17 +275,18 @@ function Swatch({
       type="button"
       onClick={onClick}
       title={label}
-      className="relative aspect-video w-full rounded-lg overflow-hidden cursor-pointer bg-cover bg-center flex items-center justify-center"
+      className="relative aspect-video w-full rounded-xl overflow-hidden cursor-pointer bg-cover bg-center flex items-center justify-center transition-all duration-150 active:scale-95 shadow-md"
       style={{
-        outline: active ? '2px solid #34c98a' : '1px solid rgba(255,255,255,0.14)',
+        outline: active ? '2.5px solid #34c98a' : '1px solid rgba(255,255,255,0.15)',
         outlineOffset: '-1px',
+        boxShadow: active ? '0 0 12px rgba(52, 201, 138, 0.4)' : 'none',
         ...style,
       }}
     >
       {children}
       <span
-        className="absolute inset-x-0 bottom-0 px-1 py-0.5 text-[9px] font-medium truncate"
-        style={{ background: 'rgba(0,0,0,0.5)', color: '#fff' }}
+        className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 text-[9px] font-semibold truncate backdrop-blur-md"
+        style={{ background: 'rgba(0,0,0,0.65)', color: '#fff' }}
       >
         {label}
       </span>

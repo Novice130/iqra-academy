@@ -13,16 +13,19 @@ struct HostRequestPrompt: View {
     let onDismiss: () -> Void
 
     var body: some View {
-        // Text above, buttons below. Side by side they wrapped a teacher's
-        // name onto three lines at 402pt and pushed the banner half a screen
-        // tall — over the very video it is asking about.
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: request == .microphone ? "mic.fill" : "video.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 40, height: 40)
-                    .background(Circle().fill(Theme.accentGradient))
+                    .frame(width: 42, height: 42)
+                    .background(
+                        Circle()
+                            .fill(Theme.accentGradient)
+                            .overlay {
+                                Circle().stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            }
+                    )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(request == .microphone
@@ -33,7 +36,7 @@ struct HostRequestPrompt: View {
                         .foregroundStyle(.white)
                     Text("Only you can turn it on.")
                         .font(.caption)
-                        .foregroundStyle(.white.opacity(0.7))
+                        .foregroundStyle(.white.opacity(0.65))
                 }
 
                 Spacer(minLength: 0)
@@ -44,29 +47,41 @@ struct HostRequestPrompt: View {
 
                 Button("Not now") { onDismiss() }
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 6)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 8)
 
                 Button(request == .microphone ? "Unmute" : "Turn on") { onAccept() }
                     .font(.footnote.weight(.bold))
                     .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .frame(height: 34)
-                    .background(Capsule().fill(Theme.accent))
+                    .padding(.horizontal, 20)
+                    .frame(height: 36)
+                    .background(
+                        Capsule()
+                            .fill(Theme.accent)
+                            .shadow(color: Theme.accent.opacity(0.4), radius: 8, y: 3)
+                    )
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.28), Color.white.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
                 }
+                .shadow(color: Color.black.opacity(0.4), radius: 20, y: 8)
         }
         .environment(\.colorScheme, .dark)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
@@ -80,13 +95,19 @@ struct GuestKnockBanner: View {
     let onDeny: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: "hand.wave.fill")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundStyle(.white)
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(Theme.live))
+                    .frame(width: 40, height: 40)
+                    .background(
+                        Circle()
+                            .fill(Theme.live)
+                            .overlay {
+                                Circle().stroke(Color.white.opacity(0.25), lineWidth: 1)
+                            }
+                    )
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(guest.name) wants to join")
@@ -96,7 +117,7 @@ struct GuestKnockBanner: View {
                     if waiting > 1 {
                         Text("\(waiting - 1) more waiting")
                             .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
+                            .foregroundStyle(.white.opacity(0.65))
                     }
                 }
 
@@ -108,29 +129,41 @@ struct GuestKnockBanner: View {
 
                 Button("Deny") { onDeny() }
                     .font(.footnote.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.8))
-                    .padding(.horizontal, 6)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 8)
 
                 Button("Admit") { onAdmit() }
                     .font(.footnote.weight(.bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 18)
-                    .frame(height: 34)
-                    .background(Capsule().fill(Theme.live))
+                    .foregroundStyle(Color(red: 0.03, green: 0.20, blue: 0.12))
+                    .padding(.horizontal, 20)
+                    .frame(height: 36)
+                    .background(
+                        Capsule()
+                            .fill(Theme.live)
+                            .shadow(color: Theme.live.opacity(0.4), radius: 8, y: 3)
+                    )
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .background {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .fill(.ultraThinMaterial)
                 .overlay {
-                    RoundedRectangle(cornerRadius: 20, style: .continuous)
-                        .stroke(.white.opacity(0.15), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.28), Color.white.opacity(0.08)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
                 }
+                .shadow(color: Color.black.opacity(0.4), radius: 20, y: 8)
         }
         .environment(\.colorScheme, .dark)
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 }
@@ -163,16 +196,16 @@ struct SoloInactivityPrompt: View {
     var body: some View {
         Group {
             if showing {
-                VStack(spacing: 14) {
+                VStack(spacing: 16) {
                     Text("Still teaching?")
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
                         .foregroundStyle(.white)
                     Text("You've been alone in this class for a while. It will end in \(remaining)s.")
                         .font(.subheadline)
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.white.opacity(0.8))
 
-                    HStack(spacing: 10) {
+                    HStack(spacing: 12) {
                         Button("End class") {
                             stop()
                             onEnd()
@@ -180,7 +213,7 @@ struct SoloInactivityPrompt: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
-                        .frame(height: 42)
+                        .frame(height: 44)
                         .background(Capsule().fill(Color.red.opacity(0.9)))
 
                         Button("I'm still here") {
@@ -192,21 +225,33 @@ struct SoloInactivityPrompt: View {
                         .font(.subheadline.weight(.bold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 18)
-                        .frame(height: 42)
-                        .background(Capsule().fill(Theme.accent))
+                        .frame(height: 44)
+                        .background(
+                            Capsule()
+                                .fill(Theme.accent)
+                                .shadow(color: Theme.accent.opacity(0.4), radius: 8, y: 3)
+                        )
                     }
                 }
-                .padding(20)
+                .padding(24)
                 .background {
-                    RoundedRectangle(cornerRadius: 24, style: .continuous)
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
                         .fill(.ultraThinMaterial)
                         .overlay {
-                            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                                .stroke(.white.opacity(0.15), lineWidth: 1)
+                            RoundedRectangle(cornerRadius: 26, style: .continuous)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [Color.white.opacity(0.3), Color.white.opacity(0.08)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 1
+                                )
                         }
+                        .shadow(color: Color.black.opacity(0.5), radius: 30, y: 10)
                 }
                 .environment(\.colorScheme, .dark)
-                .padding(.horizontal, 28)
+                .padding(.horizontal, 24)
                 .transition(.opacity.combined(with: .scale(scale: 0.96)))
             }
         }
@@ -262,3 +307,4 @@ struct SoloInactivityPrompt: View {
         showing = false
     }
 }
+

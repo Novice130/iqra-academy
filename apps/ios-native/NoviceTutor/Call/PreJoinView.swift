@@ -60,18 +60,25 @@ struct PreJoinView: View {
             stage
                 .aspectRatio(3.0 / 4.0, contentMode: .fit)
                 .frame(maxWidth: .infinity)
-                .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 26, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 28, style: .continuous)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.24), Color.white.opacity(0.06)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
                 }
-                .shadow(color: .black.opacity(0.55), radius: 24, y: 12)
+                .shadow(color: .black.opacity(0.55), radius: 28, y: 14)
 
             joinButton
 
             Button("Not now", action: onCancel)
                 .font(.footnote.weight(.medium))
-                .foregroundStyle(.white.opacity(0.45))
+                .foregroundStyle(.white.opacity(0.55))
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 20)
@@ -86,39 +93,45 @@ struct PreJoinView: View {
     private var header: some View {
         VStack(spacing: 4) {
             Text("Ready to join?")
-                .font(.title2.weight(.semibold))
+                .font(.title2.weight(.bold))
                 .foregroundStyle(.white)
             Text(teacherName.map { "\($0) is expecting you." } ?? "Check your camera and microphone.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(0.65))
         }
     }
 
     private var stage: some View {
         ZStack {
-            Color.black
+            Color(red: 0.08, green: 0.09, blue: 0.12)
 
             if cameraOn, let previewTrack {
                 SwiftUIVideoView(previewTrack, layoutMode: .fill, mirrorMode: .mirror)
             } else {
                 VStack(spacing: 10) {
                     Image(systemName: "video.slash.fill")
-                        .font(.system(size: 30, weight: .medium))
+                        .font(.system(size: 32, weight: .medium))
                     Text(grants.camera ? "CAMERA IS OFF" : "CAMERA NOT ALLOWED")
                         .font(.caption2.weight(.bold))
                         .kerning(1.2)
                 }
-                .foregroundStyle(.white.opacity(0.35))
+                .foregroundStyle(.white.opacity(0.40))
             }
 
             VStack {
                 HStack {
                     Text(userName)
-                        .font(.caption.weight(.medium))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(.black.opacity(0.45), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background {
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay {
+                                    Capsule().stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+                                }
+                        }
                     Spacer()
                 }
                 Spacer()
@@ -129,7 +142,7 @@ struct PreJoinView: View {
     }
 
     private var controlTiles: some View {
-        HStack(spacing: 14) {
+        HStack(spacing: 16) {
             tile(
                 systemName: micOn ? "mic.fill" : "mic.slash.fill",
                 on: micOn,
@@ -175,7 +188,7 @@ struct PreJoinView: View {
                         .overlay {
                             Circle().fill(
                                 on
-                                    ? AnyShapeStyle(Color.white.opacity(0.16))
+                                    ? AnyShapeStyle(Color.white.opacity(0.18))
                                     : AnyShapeStyle(
                                         LinearGradient(
                                             colors: [Color(red: 0.95, green: 0.34, blue: 0.29), Color(red: 0.77, green: 0.20, blue: 0.16)],
@@ -186,13 +199,20 @@ struct PreJoinView: View {
                             )
                         }
                         .overlay {
-                            Circle().stroke(Color.white.opacity(0.28), lineWidth: 1)
+                            Circle().stroke(
+                                LinearGradient(
+                                    colors: [Color.white.opacity(0.32), Color.white.opacity(0.08)],
+                                    startPoint: .top,
+                                    endPoint: .bottom
+                                ),
+                                lineWidth: 1
+                            )
                         }
-                        .shadow(color: .black.opacity(0.45), radius: 10, y: 5)
+                        .shadow(color: .black.opacity(0.45), radius: 12, y: 6)
                 }
         }
         .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
+        .opacity(disabled ? 0.35 : 1)
         .accessibilityLabel(label)
         .environment(\.colorScheme, .dark)
     }
@@ -213,13 +233,13 @@ struct PreJoinView: View {
                 .font(.headline.weight(.bold))
                 .foregroundStyle(Color(red: 0.03, green: 0.20, blue: 0.12))
                 .frame(maxWidth: .infinity)
-                .frame(height: 58)
+                .frame(height: 56)
                 .background {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .fill(Theme.liveGradient)
                         .overlay {
                             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                                .stroke(Color.white.opacity(0.34), lineWidth: 1)
+                                .stroke(Color.white.opacity(0.36), lineWidth: 1)
                         }
                         .shadow(color: Theme.live.opacity(0.42), radius: 14, y: 6)
                 }

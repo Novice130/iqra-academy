@@ -1,24 +1,9 @@
 'use client';
 
 /**
- * Pre-join screen — Google Meet's "ready to join?" step: a live self-preview
- * with every control sitting on the video itself, and a live mic level so you
- * can see the microphone is actually picking you up before the class starts.
- *
- * One column, preview-first. The device pickers used to sit in a second column
- * beside it, which meant that on a phone — where most of this app's students
- * are — the preview was a postage stamp above a stack of dropdowns. They live
- * behind the gear tile now, where they are reached about as often as they are
- * needed.
- *
- * Everything here runs on raw getUserMedia, not LiveKit hooks: there is no
- * Room yet at this point in the flow. The choices are handed to the caller
- * and applied when the room connects — see LiveKitRoom.
- *
- * Inline styles, not classNames, for anything visual: the call screens have
- * been broken twice by a utility class that silently never applied, and this
- * one has to render correctly the first time on a phone that is about to be in
- * a lesson. Same rule as IncomingCallOverlay.
+ * Pre-join screen — Modern Apple iOS FaceTime style device check:
+ * Live self-preview with background processor, glowing mic level meter,
+ * tactile frosted floating control tiles, and vibrant Apple Green Join Class button.
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
@@ -36,7 +21,6 @@ export interface JoinChoices {
   videoDeviceId?: string;
   audioDeviceId?: string;
   audioOutputDeviceId?: string;
-  /** Background chosen here, re-applied to the real camera track on join. */
   backgroundEffect?: EffectSelection;
 }
 
@@ -70,16 +54,20 @@ function DeviceSelect({
   if (devices.length === 0) return null;
   return (
     <label className="block">
-      <span className="block text-[11px] font-semibold uppercase tracking-wide text-white/45 mb-1">{label}</span>
+      <span className="block text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-1.5">{label}</span>
       <select
         value={value ?? devices[0]?.deviceId ?? ''}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full px-3 py-2.5 rounded-lg text-sm cursor-pointer disabled:opacity-50"
-        style={{ background: '#2a2d33', color: '#e8eaed', border: '1px solid rgba(255,255,255,0.12)' }}
+        className="w-full px-3 py-2.5 rounded-xl text-xs font-medium cursor-pointer disabled:opacity-50 transition"
+        style={{
+          background: 'rgba(255, 255, 255, 0.08)',
+          color: '#f3f4f6',
+          border: '1px solid rgba(255, 255, 255, 0.15)',
+        }}
       >
         {devices.map((d, i) => (
-          <option key={d.deviceId || i} value={d.deviceId}>
+          <option key={d.deviceId || i} value={d.deviceId} className="bg-neutral-900 text-white">
             {d.label || `${label} ${i + 1}`}
           </option>
         ))}
@@ -88,15 +76,6 @@ function DeviceSelect({
   );
 }
 
-/**
- * Phones get a portrait preview, desktops a 16:9 one.
- *
- * A landscape preview on a 360px phone is a 200px-tall strip with the controls
- * sitting across the middle of your own face — and a phone camera is portrait
- * anyway, so the 16:9 box was mostly letterboxing. The iOS device check uses
- * the same 3:4. This is a media query in JavaScript because every visual value
- * on this screen is an inline style; see the note at the top of the file.
- */
 function useNarrowViewport() {
   const [narrow, setNarrow] = useState(false);
 
@@ -137,8 +116,6 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
   const rafRef = useRef<number | null>(null);
 
   const stopStream = useCallback(() => {
-    // Stopping the LocalVideoTrack also tears down any processor attached to
-    // it; the underlying MediaStreamTrack is stopped with the raw stream.
     previewTrackRef.current?.stop();
     previewTrackRef.current = null;
     setPreviewTrack(null);
@@ -151,8 +128,6 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
     setLevel(0);
   }, []);
 
-  // Device labels are empty until permission has been granted once, so the
-  // list is (re)read after every successful getUserMedia rather than upfront.
   const refreshDevices = useCallback(async () => {
     try {
       const all = await navigator.mediaDevices.enumerateDevices();
@@ -160,7 +135,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
       setMics(all.filter((d) => d.kind === 'audioinput'));
       setSpeakers(all.filter((d) => d.kind === 'audiooutput'));
     } catch {
-      // Nothing to show; the selects just stay hidden.
+      // Best-effort
     }
   }, []);
 
@@ -184,10 +159,6 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
         setError(null);
         refreshDevices();
 
-        // Wrap the raw camera track in a LiveKit LocalVideoTrack so the same
-        // background processors used in-call can run on the preview, and
-        // attach *that* to the <video> so what you see is the processed
-        // output, not the bare camera.
         const rawVideo = stream.getVideoTracks()[0];
         if (rawVideo && videoRef.current) {
           const lkTrack = new LocalVideoTrack(rawVideo);
@@ -196,8 +167,6 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
           lkTrack.attach(videoRef.current);
         }
 
-        // Mic level meter — the cheap reassurance that the right microphone
-        // is selected, without having to join and ask "can you hear me?".
         const audioTrack = stream.getAudioTracks()[0];
         if (audioTrack) {
           const Ctx = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -230,9 +199,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
     return () => {
       cancelled = true;
     };
-    // stopStream/refreshDevices are stable useCallbacks.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videoEnabled, audioEnabled, videoDeviceId, audioDeviceId]);
+  }, [videoEnabled, audioEnabled, videoDeviceId, audioDeviceId, stopStream, refreshDevices]);
 
   useEffect(() => {
     const handler = () => refreshDevices();
@@ -258,15 +225,12 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
     <div style={styles.page}>
       <div style={styles.column}>
         <header style={styles.header}>
-          <h1 style={styles.title}>Ready to join?</h1>
-          <p style={styles.subtitle}>Check your camera and microphone before the class starts.</p>
+          <h1 style={styles.title}>Ready to join class?</h1>
+          <p style={styles.subtitle}>Check your camera and microphone preview before starting.</p>
         </header>
 
-        {/* The preview is the screen. Everything else floats on it. */}
         <div style={{ ...styles.stage, aspectRatio: narrow ? '3 / 4' : '16 / 9', maxHeight: '62vh' }}>
           {videoEnabled ? (
-            // Mirrored, like every other call app — an un-mirrored self-view
-            // reads as "wrong" even though it's what others see.
             <video ref={videoRef} autoPlay playsInline muted style={styles.video} />
           ) : (
             <div style={styles.cameraOff}>
@@ -277,25 +241,24 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
 
           <div style={styles.nameChip}>{userName}</div>
 
-          {/* Mic level, only while the mic is live */}
           {audioEnabled && (
             <div style={styles.meter}>
               {[0, 1, 2, 3, 4].map((i) => (
                 <span
                   key={i}
                   style={{
-                    width: 3,
+                    width: 3.5,
                     borderRadius: 999,
-                    transition: 'background 120ms linear',
-                    height: 5 + i * 3,
-                    background: level * 5 > i ? '#43e3a0' : 'rgba(255,255,255,0.28)',
+                    transition: 'background 120ms linear, height 120ms ease',
+                    height: 6 + i * 3,
+                    background: level * 5 > i ? '#34c98a' : 'rgba(255,255,255,0.25)',
+                    boxShadow: level * 5 > i ? '0 0 8px rgba(52, 201, 138, 0.6)' : 'none',
                   }}
                 />
               ))}
             </div>
           )}
 
-          {/* Panels sit above the tiles, and only one is ever open. */}
           {effectsOpen && videoEnabled && (
             <div style={styles.panel}>
               <BackgroundEffectsContent effects={effects} />
@@ -303,8 +266,8 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
           )}
 
           {settingsOpen && (
-            <div style={{ ...styles.panel, padding: '14px 14px 16px' }}>
-              <div style={styles.panelTitle}>Devices</div>
+            <div style={{ ...styles.panel, padding: '16px' }}>
+              <div style={styles.panelTitle}>Audio & Video Devices</div>
               <div style={styles.deviceStack}>
                 <DeviceSelect
                   label="Camera"
@@ -321,7 +284,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
                   disabled={!audioEnabled}
                 />
                 <DeviceSelect
-                  label="Speaker"
+                  label="Speaker Output"
                   devices={speakers}
                   value={audioOutputDeviceId}
                   onChange={setAudioOutputDeviceId}
@@ -363,7 +326,7 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
             <ControlTile
               on
               highlighted={settingsOpen}
-              label="Camera, microphone and speaker"
+              label="Camera, microphone and speaker settings"
               onClick={() => {
                 setEffectsOpen(false);
                 setSettingsOpen((v) => !v);
@@ -387,21 +350,12 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
           Join Class
         </button>
 
-        <p style={styles.footnote}>Your background carries into the call.</p>
+        <p style={styles.footnote}>Your camera settings and virtual background carry directly into class.</p>
       </div>
     </div>
   );
 }
 
-/**
- * A control that sits on the video: translucent, lit along its top edge and
- * casting a shadow onto the picture behind it, so it reads as a physical tile
- * rather than a flat disc drawn on the frame.
- *
- * The recipe is the one the iOS control bar already uses (ultraThinMaterial, a
- * hairline white rim, a shadow underneath) rather than a second invention, so
- * the two apps look like the same product.
- */
 function ControlTile({
   on,
   highlighted,
@@ -421,22 +375,24 @@ function ControlTile({
 
   const surface: React.CSSProperties = !on
     ? {
-        // Off is the one state that must be unmistakable at a glance.
-        background: 'linear-gradient(180deg, #f2564a 0%, #ea4335 55%, #c5342a 100%)',
-        border: '1px solid rgba(255,255,255,0.26)',
+        background: 'linear-gradient(180deg, #ff453a 0%, #d70015 100%)',
+        border: '1px solid rgba(255,255,255,0.28)',
         color: '#fff',
+        boxShadow: '0 4px 14px rgba(255, 69, 58, 0.4)',
       }
     : highlighted
       ? {
-          background: 'linear-gradient(180deg, rgba(67,227,160,0.95) 0%, rgba(52,201,138,0.92) 100%)',
-          border: '1px solid rgba(255,255,255,0.4)',
-          color: '#08331f',
-        }
+        background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+        border: '1px solid rgba(255,255,255,0.35)',
+        color: '#fff',
+        boxShadow: '0 4px 16px rgba(0, 122, 255, 0.45)',
+      }
       : {
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.10) 100%)',
-          border: '1px solid rgba(255,255,255,0.28)',
-          color: '#fff',
-        };
+        background: 'rgba(255,255,255,0.14)',
+        border: '1px solid rgba(255,255,255,0.18)',
+        color: '#fff',
+        boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)',
+      };
 
   return (
     <button
@@ -453,8 +409,7 @@ function ControlTile({
         ...surface,
         opacity: disabled ? 0.4 : 1,
         cursor: disabled ? 'default' : 'pointer',
-        transform: held && !disabled ? 'translateY(2px)' : 'translateY(0)',
-        boxShadow: held && !disabled ? TILE_SHADOW_HELD : TILE_SHADOW,
+        transform: held && !disabled ? 'scale(0.95)' : 'scale(1)',
       }}
     >
       {children}
@@ -462,17 +417,7 @@ function ControlTile({
   );
 }
 
-/**
- * Every colour, radius and shadow in one place, as inline style objects. See
- * the note at the top of the file for why none of this is a utility class.
- */
-const TILE_SIZE = 'clamp(52px, 13.5vw, 64px)';
-
-/** Swapped wholesale on press, so they live outside the style map. */
-const TILE_SHADOW =
-  '0 10px 24px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.45), inset 0 -6px 12px rgba(0,0,0,0.16)';
-const TILE_SHADOW_HELD =
-  '0 3px 10px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.30), inset 0 -4px 10px rgba(0,0,0,0.22)';
+const TILE_SIZE = 'clamp(48px, 12.5vw, 60px)';
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -480,32 +425,32 @@ const styles: Record<string, React.CSSProperties> = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: '16px 14px calc(16px + env(safe-area-inset-bottom))',
-    background: 'radial-gradient(120% 90% at 50% -10%, #1d2430 0%, #131417 55%, #0c0d10 100%)',
+    padding: '20px 16px calc(20px + env(safe-area-inset-bottom))',
+    background: 'radial-gradient(120% 90% at 50% -10%, #1c2230 0%, #0e1015 55%, #08090b 100%)',
   },
   column: {
     width: '100%',
-    maxWidth: 820,
+    maxWidth: 800,
     display: 'flex',
     flexDirection: 'column',
     alignItems: 'center',
-    gap: 14,
+    gap: 16,
   },
   header: { textAlign: 'center' },
-  title: { fontSize: 'clamp(20px, 5vw, 26px)', fontWeight: 600, color: '#fff', margin: 0 },
-  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.5)', margin: '4px 0 0' },
+  title: { fontSize: 'clamp(22px, 5vw, 28px)', fontWeight: 700, color: '#fff', margin: 0, letterSpacing: '-0.02em' },
+  subtitle: { fontSize: 13, color: 'rgba(255,255,255,0.55)', margin: '6px 0 0' },
   stage: {
     position: 'relative',
     width: '100%',
     aspectRatio: '16 / 9',
-    borderRadius: 24,
+    borderRadius: 28,
     overflow: 'hidden',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    background: '#0b0c0f',
-    border: '1px solid rgba(255,255,255,0.10)',
-    boxShadow: '0 24px 60px rgba(0,0,0,0.55)',
+    background: '#0a0c10',
+    border: '1px solid rgba(255,255,255,0.12)',
+    boxShadow: '0 24px 60px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.12)',
   },
   video: { width: '100%', height: '100%', objectFit: 'cover', transform: 'scaleX(-1)' },
   cameraOff: {
@@ -519,63 +464,66 @@ const styles: Record<string, React.CSSProperties> = {
     fontSize: 11,
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
-    fontWeight: 600,
+    fontWeight: 700,
   },
   nameChip: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    padding: '5px 10px',
-    borderRadius: 10,
+    top: 14,
+    left: 14,
+    padding: '6px 12px',
+    borderRadius: 9999,
     fontSize: 12,
-    color: '#e8eaed',
-    background: 'rgba(0,0,0,0.45)',
+    fontWeight: 600,
+    color: '#fff',
+    background: 'rgba(18, 20, 26, 0.75)',
     border: '1px solid rgba(255,255,255,0.14)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
   },
   meter: {
     position: 'absolute',
-    top: 12,
-    right: 12,
+    top: 14,
+    right: 14,
     display: 'flex',
     alignItems: 'center',
     gap: 3,
-    padding: '7px 9px',
-    borderRadius: 10,
-    background: 'rgba(0,0,0,0.45)',
+    padding: '8px 10px',
+    borderRadius: 9999,
+    background: 'rgba(18, 20, 26, 0.75)',
     border: '1px solid rgba(255,255,255,0.14)',
-    backdropFilter: 'blur(10px)',
-    WebkitBackdropFilter: 'blur(10px)',
+    backdropFilter: 'blur(16px)',
+    WebkitBackdropFilter: 'blur(16px)',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
   },
   panel: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: 12,
+    right: 12,
     bottom: `calc(${TILE_SIZE} + 28px)`,
     maxHeight: '68%',
     overflowY: 'auto',
-    borderRadius: 18,
-    background: 'rgba(20,22,26,0.86)',
-    border: '1px solid rgba(255,255,255,0.16)',
-    backdropFilter: 'blur(20px) saturate(150%)',
-    WebkitBackdropFilter: 'blur(20px) saturate(150%)',
-    boxShadow: '0 18px 44px rgba(0,0,0,0.55)',
+    borderRadius: 24,
+    background: 'rgba(24, 26, 32, 0.90)',
+    border: '1px solid rgba(255,255,255,0.18)',
+    backdropFilter: 'blur(28px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+    boxShadow: '0 20px 48px rgba(0,0,0,0.65), inset 0 1px 0 rgba(255,255,255,0.15)',
   },
   panelTitle: {
     fontSize: 11,
-    fontWeight: 600,
+    fontWeight: 700,
     textTransform: 'uppercase',
     letterSpacing: '0.08em',
-    color: 'rgba(255,255,255,0.45)',
-    marginBottom: 10,
+    color: 'rgba(255,255,255,0.5)',
+    marginBottom: 12,
   },
-  deviceStack: { display: 'flex', flexDirection: 'column', gap: 10 },
+  deviceStack: { display: 'flex', flexDirection: 'column', gap: 12 },
   tileRow: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: 14,
+    bottom: 16,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -584,48 +532,46 @@ const styles: Record<string, React.CSSProperties> = {
   tile: {
     width: TILE_SIZE,
     height: TILE_SIZE,
-    borderRadius: 999,
+    borderRadius: 9999,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    backdropFilter: 'blur(16px) saturate(160%)',
-    WebkitBackdropFilter: 'blur(16px) saturate(160%)',
-    transition: 'transform 90ms ease, box-shadow 90ms ease, background 140ms ease',
+    backdropFilter: 'blur(20px) saturate(180%)',
+    WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+    transition: 'transform 120ms ease, box-shadow 120ms ease, background 140ms ease',
   },
   error: {
     width: '100%',
     fontSize: 12,
-    borderRadius: 12,
-    padding: '10px 12px',
+    fontWeight: 500,
+    borderRadius: 16,
+    padding: '12px 16px',
     margin: 0,
-    background: 'rgba(234,67,53,0.12)',
-    border: '1px solid rgba(234,67,53,0.35)',
-    color: '#f6a6a0',
+    background: 'rgba(239, 68, 68, 0.15)',
+    border: '1px solid rgba(239, 68, 68, 0.35)',
+    color: '#fca5a5',
   },
-  // The site's green, turned up. --color-sage is the brand but it is a muted
-  // colour and a muted "go" button is a worse button; this is the same family
-  // as the speaking ring on the call screen and Theme.live on iOS.
   join: {
     width: 'min(380px, 100%)',
-    padding: '17px 28px',
-    marginTop: 2,
-    borderRadius: 18,
-    border: '1px solid rgba(255,255,255,0.34)',
-    fontSize: 17,
+    padding: '16px 28px',
+    marginTop: 4,
+    borderRadius: 20,
+    border: '1px solid rgba(255,255,255,0.3)',
+    fontSize: 16,
     fontWeight: 700,
-    letterSpacing: '0.01em',
-    color: '#08331f',
+    letterSpacing: '-0.01em',
+    color: '#032115',
     cursor: 'pointer',
-    background: 'linear-gradient(160deg, #43e3a0 0%, #34c98a 45%, #10b981 100%)',
+    background: 'linear-gradient(160deg, #34d399 0%, #10b981 45%, #059669 100%)',
     boxShadow:
-      '0 10px 24px rgba(52,201,138,0.38), 0 2px 0 rgba(255,255,255,0.35) inset, 0 -6px 14px rgba(4,84,58,0.35) inset',
+      '0 12px 28px rgba(16, 185, 129, 0.4), 0 1px 0 rgba(255,255,255,0.4) inset',
     transform: 'translateY(0)',
-    transition: 'transform 90ms ease, box-shadow 90ms ease',
+    transition: 'transform 100ms ease, box-shadow 100ms ease',
   },
   joinHeld: {
-    transform: 'translateY(3px)',
+    transform: 'translateY(2px)',
     boxShadow:
-      '0 3px 10px rgba(52,201,138,0.30), 0 1px 0 rgba(255,255,255,0.25) inset, 0 -4px 10px rgba(4,84,58,0.40) inset',
+      '0 4px 12px rgba(16, 185, 129, 0.3), 0 1px 0 rgba(255,255,255,0.25) inset',
   },
-  footnote: { fontSize: 11, color: 'rgba(255,255,255,0.35)', margin: 0, textAlign: 'center' },
+  footnote: { fontSize: 11, color: 'rgba(255,255,255,0.4)', margin: 0, textAlign: 'center' },
 };

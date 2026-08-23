@@ -229,14 +229,14 @@ struct CallStageView: View {
     private var selfTile: some View {
         if let selfPerson {
             ParticipantTile(person: selfPerson, track: selfTrack, compact: true)
-                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
+                .shadow(color: .black.opacity(0.45), radius: 16, y: 6)
         }
     }
 
     private func tileSize(in size: CGSize) -> CGSize {
         // Portrait video in a portrait phone, landscape in landscape — a
         // 9:16 tile in landscape is a letterboxed sliver.
-        size.width > size.height ? CGSize(width: 180, height: 110) : CGSize(width: 108, height: 156)
+        size.width > size.height ? CGSize(width: 180, height: 110) : CGSize(width: 112, height: 160)
     }
 
     private static func nearestCorner(to point: CGPoint, in size: CGSize) -> Corner {
@@ -264,17 +264,32 @@ struct CallStageView: View {
         Text(name)
             .font(.footnote.weight(.medium))
             .foregroundStyle(.white)
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 12)
             .padding(.vertical, 6)
-            .background(.black.opacity(0.45), in: Capsule())
+            .background {
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Capsule()
+                            .stroke(Color.white.opacity(0.15), lineWidth: 0.5)
+                    }
+            }
     }
 
     private var reconnectingChip: some View {
         Label("Reconnecting…", systemImage: "wifi.exclamationmark")
             .font(.footnote.weight(.medium))
             .foregroundStyle(.white)
-            .padding(.horizontal, 14)
+            .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(.black.opacity(0.6), in: Capsule())
+            .background {
+                Capsule()
+                    .fill(.ultraThinMaterial)
+                    .overlay {
+                        Capsule()
+                            .stroke(Color.orange.opacity(0.4), lineWidth: 1)
+                    }
+                    .shadow(color: Color.black.opacity(0.35), radius: 12, y: 4)
+            }
     }
 }

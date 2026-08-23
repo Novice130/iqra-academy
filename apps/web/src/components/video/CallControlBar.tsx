@@ -1,25 +1,14 @@
 'use client';
 
 /**
- * Call control bar — Google Meet's layout: one centred row of round buttons
- * at the bottom, with the device pickers folded into a caret attached to the
- * mic and camera buttons instead of living as separate top-bar controls.
- *
- * Replaces LiveKit's own ControlBar for two reasons:
- *   1. Its device menus render inside `.lk-control-bar`, which is an overflow
- *      container here so buttons stay reachable on a narrow phone — an
- *      overflow container clips absolutely-positioned children, so the menu
- *      came out as a sliver stuck inside the bar. Our menus are `fixed`
- *      above the bar and can't be clipped by anything.
- *   2. Everything else (spotlight, mute, add-student, backgrounds) had been
- *      bolted on as its own floating button over the video. They're now a
- *      panel or a menu item reached from here.
+ * Call control bar — Apple iOS 17/18 FaceTime design language:
+ * Centered floating frosted glassmorphic pill with sleek circular buttons,
+ * tactile mic/camera split toggles with carets, and vibrant Apple Red End/Leave pill.
  */
 
 import { useEffect, useState } from 'react';
 import { Track } from 'livekit-client';
 import {
-  useLocalParticipant,
   useMediaDeviceSelect,
   useRoomContext,
   useTrackToggle,
@@ -55,15 +44,11 @@ import {
 
 type MenuId = 'mic' | 'camera' | 'effects' | 'view' | null;
 
-/**
- * Per-viewer layout. Local only, never synced — `speaker` follows the room's
- * spotlight, `active` follows whoever is talking, and they're different
- * things: a teacher can spotlight a student who then goes quiet.
- */
 export type ViewMode = 'speaker' | 'gallery' | 'active';
 
-const OFF_BG = '#ea4335';
-const ON_BG = 'rgba(255,255,255,0.12)';
+const DANGER_GRADIENT = 'linear-gradient(180deg, #ff453a 0%, #d70015 100%)';
+const ACTIVE_GRADIENT = 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)';
+const ON_BG = 'rgba(255, 255, 255, 0.14)';
 
 function RoundButton({
   onClick,
@@ -74,9 +59,7 @@ function RoundButton({
   children,
 }: {
   onClick: () => void;
-  /** Highlighted (panel open / effect on). */
   active?: boolean;
-  /** Red — muted, or the leave button. */
   danger?: boolean;
   label: string;
   badge?: number;
@@ -88,21 +71,29 @@ function RoundButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="relative rounded-full flex items-center justify-center cursor-pointer transition-colors shrink-0"
+      className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-95 shrink-0"
       style={{
-        // --call-btn shrinks with the viewport (globals.css) so the whole row
-        // fits a 360px phone instead of scrolling sideways.
         width: 'var(--call-btn)',
         height: 'var(--call-btn)',
-        background: danger ? OFF_BG : active ? '#8ab4f8' : ON_BG,
-        color: danger ? '#fff' : active ? '#202124' : '#e8eaed',
+        background: danger ? DANGER_GRADIENT : active ? ACTIVE_GRADIENT : ON_BG,
+        color: '#fff',
+        border: danger
+          ? '1px solid rgba(255, 255, 255, 0.28)'
+          : active
+            ? '1px solid rgba(255, 255, 255, 0.35)'
+            : '1px solid rgba(255, 255, 255, 0.12)',
+        boxShadow: danger
+          ? '0 4px 14px rgba(255, 69, 58, 0.35)'
+          : active
+            ? '0 4px 16px rgba(0, 122, 255, 0.4)'
+            : '0 2px 8px rgba(0, 0, 0, 0.25)',
       }}
     >
       {children}
       {!!badge && badge > 0 && (
         <span
-          className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center"
-          style={{ background: '#ea4335', color: '#fff' }}
+          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center border border-white/20"
+          style={{ background: '#ff3b30', color: '#fff', boxShadow: '0 2px 6px rgba(255, 59, 48, 0.5)' }}
         >
           {badge > 9 ? '9+' : badge}
         </span>
@@ -111,11 +102,6 @@ function RoundButton({
   );
 }
 
-/**
- * Mic / camera: the toggle itself plus a caret that opens that device's
- * picker — the pairing Meet uses, so nobody has to hunt for a settings
- * screen to change microphone.
- */
 function ToggleWithCaret({
   source,
   menuOpen,
@@ -132,14 +118,21 @@ function ToggleWithCaret({
   const Icon = isMic ? (enabled ? MicIcon : MicOffIcon) : enabled ? CameraIcon : CameraOffIcon;
 
   return (
-    <div className="flex items-center rounded-full shrink-0" style={{ background: enabled ? ON_BG : OFF_BG }}>
+    <div
+      className="flex items-center rounded-full shrink-0 transition-all duration-150"
+      style={{
+        background: enabled ? ON_BG : DANGER_GRADIENT,
+        border: enabled ? '1px solid rgba(255, 255, 255, 0.14)' : '1px solid rgba(255, 255, 255, 0.28)',
+        boxShadow: enabled ? '0 2px 8px rgba(0, 0, 0, 0.25)' : '0 4px 14px rgba(255, 69, 58, 0.35)',
+      }}
+    >
       <button
         type="button"
         onClick={() => toggle()}
         disabled={pending}
         title={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
         aria-label={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
-        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60"
+        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60 transition-transform active:scale-95"
         style={{ width: 'var(--call-btn)', height: 'var(--call-btn)', color: '#fff' }}
       >
         <Icon />
@@ -149,11 +142,12 @@ function ToggleWithCaret({
         onClick={onToggleMenu}
         title={`${label} options`}
         aria-label={`${label} options`}
-        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0"
+        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0 border-l transition-opacity"
         style={{
-          width: 'calc(var(--call-btn) * 0.5)',
+          width: 'calc(var(--call-btn) * 0.48)',
           height: 'var(--call-btn)',
           color: '#fff',
+          borderColor: 'rgba(255, 255, 255, 0.15)',
           opacity: menuOpen ? 1 : 0.75,
         }}
       >
@@ -169,27 +163,31 @@ function DeviceList({ kind, label }: { kind: MediaDeviceKind; label: string }) {
 
   return (
     <div className="px-2 py-2">
-      <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">{label}</div>
-      {devices.map((d, i) => {
-        const active = d.deviceId === activeDeviceId;
-        return (
-          <button
-            key={d.deviceId || i}
-            type="button"
-            onClick={() => setActiveMediaDevice(d.deviceId)}
-            className="w-full text-left px-3 py-2.5 rounded-lg text-sm cursor-pointer truncate"
-            style={{ background: active ? 'rgba(138,180,248,0.18)' : 'transparent', color: active ? '#8ab4f8' : '#e8eaed' }}
-          >
-            {active ? '✓ ' : ''}
-            {d.label || `${label} ${i + 1}`}
-          </button>
-        );
-      })}
+      <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">{label}</div>
+      <div className="space-y-0.5">
+        {devices.map((d, i) => {
+          const active = d.deviceId === activeDeviceId;
+          return (
+            <button
+              key={d.deviceId || i}
+              type="button"
+              onClick={() => setActiveMediaDevice(d.deviceId)}
+              className="w-full flex items-center justify-between text-left px-3 py-2.5 rounded-xl text-xs font-medium cursor-pointer transition-colors"
+              style={{
+                background: active ? 'rgba(0, 122, 255, 0.22)' : 'transparent',
+                color: active ? '#60a5fa' : '#f3f4f6',
+              }}
+            >
+              <span className="truncate mr-2">{d.label || `${label} ${i + 1}`}</span>
+              {active && <span className="text-blue-400 font-bold shrink-0">✓</span>}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-/** Popover anchored above the bar. Fixed, so no ancestor can clip it. */
 function Popover({
   onClose,
   wide,
@@ -203,10 +201,13 @@ function Popover({
     <>
       <div className="fixed inset-0 z-[70]" onClick={onClose} />
       <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-[88px] z-[71] rounded-2xl shadow-2xl overflow-y-auto"
+        className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[71] rounded-3xl overflow-y-auto"
         style={{
-          background: '#202124',
-          border: '1px solid rgba(255,255,255,0.12)',
+          background: 'rgba(24, 26, 32, 0.88)',
+          backdropFilter: 'blur(28px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+          boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
           width: wide ? 'min(94vw, 560px)' : 'min(94vw, 380px)',
           maxHeight: '62vh',
         }}
@@ -217,11 +218,10 @@ function Popover({
   );
 }
 
-/** What each layout actually does, in the words of someone in a lesson. */
 const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
-  { id: 'speaker', label: 'Speaker', hint: 'The spotlighted person fills the screen' },
-  { id: 'gallery', label: 'Gallery', hint: 'Everyone in an equal grid' },
-  { id: 'active', label: 'Active speaker', hint: 'Follows whoever is talking' },
+  { id: 'speaker', label: 'Speaker View', hint: 'Spotlighted participant fills the stage' },
+  { id: 'gallery', label: 'Gallery Grid', hint: 'All participants in an equal balanced grid' },
+  { id: 'active', label: 'Active Speaker', hint: 'Dynamically tracks whoever is speaking' },
 ];
 
 export default function CallControlBar({
@@ -237,9 +237,7 @@ export default function CallControlBar({
   onViewModeChange,
 }: {
   effects: BackgroundEffects;
-  /** The session's own teacher — the only person whose leaving ends the class. */
   isHost: boolean;
-  /** Arms the end-the-class path. See LiveKitRoom's endOnDisconnectRef. */
   onEndClassIntent: () => void;
   unreadMessages: number;
   chatOpen: boolean;
@@ -255,22 +253,12 @@ export default function CallControlBar({
   const hasMultipleCameras = useHasMultipleCameras();
   const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
 
-  // Two different mechanisms behind one button.
-  //
-  // In a browser it's `getDisplayMedia`, which iOS Safari and Android Chrome
-  // don't have — a dead button is worse than none, so it stays hidden there.
-  // Inside the Android app there is no getDisplayMedia either, but there IS a
-  // native capture path: the shell publishes the screen into this same room
-  // (see nativeScreenShare.ts). That's the branch below.
   const [canScreenShare, setCanScreenShare] = useState(false);
   const [nativeShell, setNativeShell] = useState(false);
   const [nativeSharing, setSharingState] = useState(getNativeSharing);
   const [nativePending, setNativePending] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
 
-  // The share can end from outside this component entirely — the Stop action
-  // on the Android notification, or the system cast control — so the button
-  // follows the shared store rather than owning the state itself.
   useEffect(() => subscribeNativeSharing(setSharingState), []);
 
   useEffect(() => {
@@ -281,9 +269,6 @@ export default function CallControlBar({
     );
   }, []);
 
-  // The share can also end from outside the page — the user stops it from the
-  // Android notification, or the capture is revoked. The shell calls this so
-  // the button doesn't sit there claiming to be on.
   useEffect(() => {
     if (!nativeShell) return;
     window.__ntScreenShareEnded = () => {
@@ -304,8 +289,6 @@ export default function CallControlBar({
     }
     const sessionId = sessionIdFromRoom(room.name);
     if (!sessionId) return;
-    // Pending until Android's own "start recording?" dialog is answered —
-    // which the user may simply decline, so this cannot assume success.
     setNativePending(true);
     setShareError(null);
     try {
@@ -314,15 +297,12 @@ export default function CallControlBar({
       setShareError(result.message);
     } catch {
       setNativeSharing(false);
-      setShareError("Couldn't start sharing your screen.");
+      setShareError("Couldn't start sharing screen.");
     } finally {
       setNativePending(false);
     }
   };
 
-  // Clears itself: an error about a share the teacher has since started is
-  // worse than no error, and there is no room on a call screen for something
-  // that has to be dismissed by hand.
   useEffect(() => {
     if (!shareError) return;
     const timer = setTimeout(() => setShareError(null), 6000);
@@ -337,96 +317,110 @@ export default function CallControlBar({
         <div
           role="status"
           className="fixed inset-x-0 flex justify-center px-4 pointer-events-none"
-          style={{ bottom: 'calc(var(--call-bar-height, 72px) + 12px)', zIndex: 60 }}
+          style={{ bottom: 'calc(var(--call-bar-height, 84px) + 16px)', zIndex: 60 }}
         >
           <div
-            className="max-w-sm rounded-lg px-3 py-2 text-sm text-center"
-            style={{ background: 'rgba(32,33,36,0.95)', color: '#f28b82', border: '1px solid rgba(242,139,130,0.35)' }}
+            className="max-w-sm rounded-2xl px-4 py-2.5 text-xs font-medium text-center backdrop-blur-xl"
+            style={{
+              background: 'rgba(239, 68, 68, 0.2)',
+              color: '#fca5a5',
+              border: '1px solid rgba(239, 68, 68, 0.4)',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+            }}
           >
             {shareError}
           </div>
         </div>
       )}
 
-      {/* Every control stays on the bar, including on a phone. Hiding one to
-          make room is how "the app has no background button" happens — the
-          buttons shrink instead (--call-btn, globals.css), because a 40px row
-          needed ~400px and a 360px Samsung pushed the leave button off the
-          edge into a sideways scroll nobody thinks to do mid-lesson.
-
-          No justify-center class either: the centring lives in
-          .call-control-bar as `safe center`, which degrades to flex-start
-          rather than pushing the first buttons off the left edge, where a
-          scroll container cannot reach them. */}
+      {/* Floating frosted glassmorphic pill bar */}
       <div
-        className="call-control-bar flex items-center gap-1 sm:gap-3 px-1.5 sm:px-3 shrink-0 overflow-x-auto"
-        style={{
-          background: '#131417',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          scrollbarWidth: 'none',
-        }}
+        className="fixed inset-x-0 bottom-3 sm:bottom-5 z-40 flex justify-center px-2 pointer-events-none"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
-        <ToggleWithCaret
-          source={Track.Source.Microphone}
-          label="microphone"
-          menuOpen={menu === 'mic'}
-          onToggleMenu={() => toggleMenu('mic')}
-        />
-        <ToggleWithCaret
-          source={Track.Source.Camera}
-          label="camera"
-          menuOpen={menu === 'camera'}
-          onToggleMenu={() => toggleMenu('camera')}
-        />
-
-        {canScreenShare && (
-          <RoundButton
-            label={nativeShell && nativePending ? 'Starting screen share…' : 'Present screen'}
-            active={nativeShell ? nativeSharing : screenShare.enabled}
-            onClick={nativeShell ? toggleNativeShare : () => screenShare.toggle()}
-          >
-            <ScreenShareIcon />
-          </RoundButton>
-        )}
-
-        <RoundButton
-          label="Background effects"
-          active={menu === 'effects' || effects.active}
-          onClick={() => toggleMenu('effects')}
-        >
-          <EffectsIcon />
-        </RoundButton>
-
-        <RoundButton label="Chat" active={chatOpen} badge={chatOpen ? 0 : unreadMessages} onClick={onToggleChat}>
-          <ChatIcon />
-        </RoundButton>
-
-        <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
-          <PeopleIcon />
-        </RoundButton>
-
-        <RoundButton label="View options" active={menu === 'view'} onClick={() => toggleMenu('view')}>
-          <LayoutIcon />
-        </RoundButton>
-
-        {/* One tap, no question asked. A confirm sheet was tried and pulled:
-            teachers here are not all technically confident, and two similar
-            red options at the end of a lesson is a decision they shouldn't
-            have to make. Tapping this is the deliberate act that ends a
-            class — everything else (a tunnel, a dead battery, the OS killing
-            the app) leaves it running so they can come back. */}
-        <RoundButton
-          label={isHost ? 'End class' : 'Leave call'}
-          danger
-          onClick={() => {
-            // Order matters: arm first, then disconnect. `disconnect()`
-            // resolves into onDisconnected, which reads the flag.
-            if (isHost) onEndClassIntent();
-            room.disconnect();
+        <div
+          className="call-control-bar pointer-events-auto flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 rounded-full shrink-0 overflow-x-auto max-w-[96vw]"
+          style={{
+            background: 'rgba(20, 22, 28, 0.72)',
+            backdropFilter: 'blur(28px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
+            boxShadow:
+              '0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+            scrollbarWidth: 'none',
           }}
         >
-          <LeaveIcon />
-        </RoundButton>
+          <ToggleWithCaret
+            source={Track.Source.Microphone}
+            label="microphone"
+            menuOpen={menu === 'mic'}
+            onToggleMenu={() => toggleMenu('mic')}
+          />
+          <ToggleWithCaret
+            source={Track.Source.Camera}
+            label="camera"
+            menuOpen={menu === 'camera'}
+            onToggleMenu={() => toggleMenu('camera')}
+          />
+
+          {canScreenShare && (
+            <RoundButton
+              label={nativeShell && nativePending ? 'Starting screen share…' : 'Present screen'}
+              active={nativeShell ? nativeSharing : screenShare.enabled}
+              onClick={nativeShell ? toggleNativeShare : () => screenShare.toggle()}
+            >
+              <ScreenShareIcon />
+            </RoundButton>
+          )}
+
+          <RoundButton
+            label="Background effects"
+            active={menu === 'effects' || effects.active}
+            onClick={() => toggleMenu('effects')}
+          >
+            <EffectsIcon />
+          </RoundButton>
+
+          <RoundButton
+            label="Chat"
+            active={chatOpen}
+            badge={chatOpen ? 0 : unreadMessages}
+            onClick={onToggleChat}
+          >
+            <ChatIcon />
+          </RoundButton>
+
+          <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
+            <PeopleIcon />
+          </RoundButton>
+
+          <RoundButton label="View options" active={menu === 'view'} onClick={() => toggleMenu('view')}>
+            <LayoutIcon />
+          </RoundButton>
+
+          {/* Apple FaceTime red pill End/Leave button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (isHost) onEndClassIntent();
+              room.disconnect();
+            }}
+            title={isHost ? 'End class for everyone' : 'Leave call'}
+            aria-label={isHost ? 'End class for everyone' : 'Leave call'}
+            className="flex items-center justify-center gap-1.5 px-3.5 sm:px-5 rounded-full text-white font-bold cursor-pointer transition-all duration-150 active:scale-95 shrink-0"
+            style={{
+              height: 'var(--call-btn)',
+              background: DANGER_GRADIENT,
+              border: '1px solid rgba(255, 255, 255, 0.3)',
+              boxShadow: '0 4px 16px rgba(255, 69, 58, 0.45)',
+            }}
+          >
+            <LeaveIcon className="shrink-0" />
+            <span className="text-xs sm:text-sm font-semibold tracking-tight whitespace-nowrap">
+              {isHost ? 'End' : 'Leave'}
+            </span>
+          </button>
+        </div>
       </div>
 
       {menu === 'mic' && (
@@ -447,8 +441,8 @@ export default function CallControlBar({
                   cycleCamera();
                   setMenu(null);
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 rounded-lg text-sm cursor-pointer"
-                style={{ background: 'rgba(255,255,255,0.08)', color: '#e8eaed' }}
+                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+                style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}
               >
                 <FlipCameraIcon /> Flip camera
               </button>
@@ -466,38 +460,41 @@ export default function CallControlBar({
       {menu === 'view' && (
         <Popover onClose={() => setMenu(null)}>
           <div className="p-2">
-            {/* Layout only. Muting, spotlight, people and the invite link all
-                have their own button or live in the People panel — repeating
-                them here was the "jargon" the bar was rebuilt to get rid of. */}
-            <div className="px-2 pb-1 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-              View
+            <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">
+              Layout
             </div>
-            {VIEW_MODES.map((m) => {
-              const selected = viewMode === m.id;
-              return (
-                <button
-                  key={m.id}
-                  type="button"
-                  onClick={() => {
-                    onViewModeChange(m.id);
-                    setMenu(null);
-                  }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left cursor-pointer"
-                  style={{ background: selected ? 'rgba(138,180,248,0.16)' : 'transparent' }}
-                >
-                  <span className="w-4 shrink-0 text-sm" style={{ color: '#8ab4f8' }}>
-                    {selected ? '✓' : ''}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="block text-sm" style={{ color: selected ? '#8ab4f8' : '#e8eaed' }}>
-                      {m.label}
+            <div className="space-y-1">
+              {VIEW_MODES.map((m) => {
+                const selected = viewMode === m.id;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => {
+                      onViewModeChange(m.id);
+                      setMenu(null);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left cursor-pointer transition-colors"
+                    style={{
+                      background: selected ? 'rgba(0, 122, 255, 0.22)' : 'transparent',
+                    }}
+                  >
+                    <span className="w-4 shrink-0 text-sm font-bold" style={{ color: '#60a5fa' }}>
+                      {selected ? '✓' : ''}
                     </span>
-                    <span className="block text-[11px] text-white/45">{m.hint}</span>
-                  </span>
-                </button>
-              );
-            })}
-
+                    <span className="min-w-0">
+                      <span
+                        className="block text-xs font-semibold"
+                        style={{ color: selected ? '#93c5fd' : '#f3f4f6' }}
+                      >
+                        {m.label}
+                      </span>
+                      <span className="block text-[11px] text-white/45">{m.hint}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </Popover>
       )}

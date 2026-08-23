@@ -1,5 +1,14 @@
 'use client';
 
+/**
+ * CustomVideoConference — Apple iOS 17/18 FaceTime stage layout:
+ * - Full-bleed presentation stage & auto-balanced responsive grid
+ * - Free draggable PIP tiles with slot-snapping and squircle continuous corners
+ * - Floating Dynamic Island notification pills
+ * - Distraction-free focus mode: auto-hide chrome on tap for Quran recitation
+ * - 100% feature retention across audio unlock, per-student volume, backgrounds, moderation
+ */
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { isTrackReference, type TrackReferenceOrPlaceholder, type WidgetState } from '@livekit/components-core';
@@ -25,10 +34,6 @@ import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import { gainForSlider } from '@/lib/audio-gain';
 
-/**
- * useRoomInfo()'s metadata doesn't reliably re-render on RoomMetadataChanged
- * in this component tree, so subscribe to the room directly instead.
- */
 function useLiveRoomMetadata(): string | undefined {
   const room = useRoomContext();
   const [metadata, setMetadata] = useState<string | undefined>(room.metadata);
@@ -36,9 +41,6 @@ function useLiveRoomMetadata(): string | undefined {
   useEffect(() => {
     const handler = () => setMetadata(room.metadata);
     handler();
-    // RoomMetadataChanged only fires on genuine changes — Connected also
-    // catches a late joiner picking up metadata that was already set before
-    // they connected (the join handshake itself isn't a "change" event).
     room.on(RoomEvent.RoomMetadataChanged, handler);
     room.on(RoomEvent.Connected, handler);
     return () => {
@@ -52,44 +54,18 @@ function useLiveRoomMetadata(): string | undefined {
 
 interface CustomVideoConferenceProps {
   isModerator: boolean;
-  /** True only for the session's own teacher — who alone may end the class. */
   isHost: boolean;
-  /**
-   * Called the instant before the host's End class button disconnects them.
-   * Nothing else ends a class.
-   */
   onEndClassIntent: () => void;
   sessionId: string;
-  /** The class teacher's identity (their email), from the join API. */
   teacherIdentity: string | null;
-  /** Background effect chosen on the pre-join screen, if any. */
   initialEffect?: EffectSelection;
 }
 
-/**
- * Strips the per-connection suffix from a LiveKit identity (`me@x.com#a1b2`).
- * The same person on a phone and a laptop is two participants with two
- * identities but one base — spotlight is about the person, so it matches on
- * the base. Muting and renaming stay per-connection and use the full identity.
- */
 function baseIdentity(identity: string | null | undefined): string | null {
   if (!identity) return null;
   return identity.split('#')[0];
 }
 
-/**
- * True when the class teacher is not in the room and hasn't been for a moment.
- *
- * A teacher can now drop out without the class ending, which is the right
- * behaviour but leaves the students staring at a room that has quietly lost
- * the person teaching them. This is what the banner keys off.
- *
- * The delay matters more than it looks: LiveKit drops and re-adds a
- * participant during an ordinary reconnect, so without it the banner strobes
- * on every wobble. Matching is on `baseIdentity` because identity carries a
- * per-connection suffix — a teacher who rejoins is a different identity and
- * the same person.
- */
 function useTeacherAway(teacherIdentity: string | null, enabled: boolean): boolean {
   const remotes = useRemoteParticipants();
   const teacherBase = baseIdentity(teacherIdentity);
@@ -121,11 +97,6 @@ function parseSpotlightIdentity(metadata: string | undefined): string | null {
   }
 }
 
-/**
- * Per-student playback volume, keyed by base identity. Room state, not a
- * local preference: the teacher turns somebody down and the whole class hears
- * it that way. Absent means full volume.
- */
 function parseVolumes(metadata: string | undefined): Record<string, number> {
   if (!metadata) return {};
   try {
@@ -144,23 +115,6 @@ function parseVolumes(metadata: string | undefined): Record<string, number> {
   }
 }
 
-/**
- * Pushes the room's volumes onto the actual audio, on every client.
- *
- * `RemoteParticipant.setVolume` remembers the value and re-applies it when a
- * track is subscribed later — but only for that participant *object*. A
- * reconnect builds a new one with an empty map, so the value has to be pushed
- * again on ParticipantConnected and TrackSubscribed, not only when the
- * metadata changes.
- *
- * Safe to drive directly: `<RoomAudioRenderer/>` below is mounted without a
- * `volume` prop, and its own setVolume effect short-circuits when that prop is
- * undefined — so it never fights these calls.
- *
- * The stored fraction goes through `gainForSlider` on the way in. setVolume
- * takes raw amplitude, and handing it the slider fraction directly is why
- * turning somebody down to 40% barely sounded different.
- */
 function useAppliedVolumes(volumes: Record<string, number>) {
   const room = useRoomContext();
 
@@ -170,8 +124,6 @@ function useAppliedVolumes(volumes: Record<string, number>) {
         const base = baseIdentity(participant.identity);
         const gain = gainForSlider(base ? volumes[base] ?? 1 : 1);
         participant.setVolume(gain);
-        // setVolume defaults to the microphone alone, so without this a
-        // student sharing a screen kept blasting its audio at full volume.
         participant.setVolume(gain, Track.Source.ScreenShareAudio);
       });
     };
@@ -185,15 +137,6 @@ function useAppliedVolumes(volumes: Record<string, number>) {
   }, [room, volumes]);
 }
 
-/**
- * Unblocks audio playback when the browser refuses to start it on its own.
- *
- * Mobile runs with `webAudioMix` (see LiveKitRoom) so the volume slider has a
- * gain node to move, and a Web Audio context can come up suspended if the
- * browser didn't count the join tap as a gesture for it. Suspended means the
- * whole class is silent, not just quiet — far worse than the problem the mix
- * mode solves — so take the next tap anywhere and start audio with it.
- */
 function useAudioPlaybackUnlock() {
   const room = useRoomContext();
 
@@ -228,13 +171,6 @@ function useAudioPlaybackUnlock() {
   }, [room]);
 }
 
-/**
- * Tracks whether the *viewport* is portrait or landscape — a phone held
- * upright vs. a laptop/tablet/phone rotated sideways. Driving the floating
- * tile's aspect ratio off this (rather than a fixed landscape box) means a
- * phone's tall camera feed isn't squeezed into a wide box and center-cropped
- * down to a sliver near the top.
- */
 function useViewportOrientation(): 'portrait' | 'landscape' {
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>(() =>
     typeof window !== 'undefined' && window.matchMedia('(orientation: portrait)').matches
@@ -253,25 +189,14 @@ function useViewportOrientation(): 'portrait' | 'landscape' {
   return orientation;
 }
 
-/** Gap between floating tiles, and from the edge of the video area. */
-const FLOAT_GAP = 10;
-const FLOAT_MARGIN = 12;
+const FLOAT_GAP = 12;
+const FLOAT_MARGIN = 14;
 
 interface Slot {
   left: number;
   top: number;
 }
 
-/**
- * Parking slots for the floating tiles, filled bottom-right first and stacked
- * upward, wrapping into a second column when the first one runs out of height.
- *
- * Slots exist so tiles can never sit on top of each other. The old code
- * offset each tile by a flat 124px, which is fine for the 110px-tall landscape
- * box and badly wrong for the 180px-tall portrait one — on a phone every peer
- * covered the one below it, which is exactly what a class of three looked
- * like.
- */
 function computeSlots(
   container: { width: number; height: number },
   box: { width: number; height: number },
@@ -285,8 +210,6 @@ function computeSlots(
   return Array.from({ length: count }, (_, i) => {
     const col = Math.floor(i / perColumn);
     const row = i % perColumn;
-    // Anchored to the bottom-right corner so the newest tiles march up and
-    // then leftward, staying clear of the main video's centre.
     const left = container.width - FLOAT_MARGIN - (col + 1) * box.width - col * FLOAT_GAP;
     const top = container.height - FLOAT_MARGIN - (row + 1) * box.height - row * FLOAT_GAP;
     return {
@@ -296,12 +219,6 @@ function computeSlots(
   });
 }
 
-/**
- * Small floating tile — the self-view, and each peer while someone is
- * spotlighted. Draggable, but it always lands in a slot: on release it snaps
- * to the nearest one, swapping with whoever is parked there. Free-form
- * dragging is what let them overlap in the first place.
- */
 function DraggableTile({
   slot,
   size,
@@ -311,9 +228,7 @@ function DraggableTile({
 }: {
   slot: Slot;
   size: { width: number; height: number };
-  /** Fired on a tap that wasn't a drag — used to flip the camera. */
   onTap?: () => void;
-  /** Where the tile was let go, in container coordinates. */
   onDropAt?: (point: { left: number; top: number }) => void;
   children: React.ReactNode;
 }) {
@@ -360,8 +275,6 @@ function DraggableTile({
     setDrag(null);
     if (!dragging) return;
 
-    // A tap and the start of a drag are the same gesture until the finger
-    // moves, so only treat it as a tap if it barely moved and was quick.
     if (onTap && moved < 8 && Date.now() - startedAt < 500) {
       onTap();
       return;
@@ -377,17 +290,15 @@ function DraggableTile({
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
-      className="absolute z-40 rounded-xl overflow-hidden cursor-grab active:cursor-grabbing"
+      className="absolute z-30 rounded-2xl sm:rounded-3xl overflow-hidden cursor-grab active:cursor-grabbing select-none"
       style={{
         width: size.width,
         height: size.height,
         left: position.left,
         top: position.top,
-        // The glide back into a slot is what makes the snap read as
-        // deliberate rather than as the tile jumping away from your finger.
-        transition: drag ? 'none' : 'left 160ms ease-out, top 160ms ease-out',
-        border: '2px solid rgba(255,255,255,0.3)',
-        boxShadow: '0 4px 16px rgba(0,0,0,0.45)',
+        transition: drag ? 'none' : 'left 180ms cubic-bezier(0.16, 1, 0.3, 1), top 180ms cubic-bezier(0.16, 1, 0.3, 1)',
+        border: '1.5px solid rgba(255, 255, 255, 0.22)',
+        boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         touchAction: 'none',
       }}
     >
@@ -396,7 +307,6 @@ function DraggableTile({
   );
 }
 
-/** Columns that keep tiles as close to square-ish as the count allows. */
 function columnsFor(count: number) {
   if (count <= 1) return 1;
   if (count <= 4) return 2;
@@ -413,14 +323,6 @@ export default function CustomVideoConference({
   initialEffect,
 }: CustomVideoConferenceProps) {
   const layoutContext = useCreateLayoutContext();
-  // `withPlaceholder` on the camera is what makes somebody who never turned
-  // their camera on still appear. Passing bare sources returns only real
-  // publications, so a student who joined muted-and-dark published no camera
-  // track, had no entry here, and therefore had no tile — you could hear them
-  // and see nothing. A placeholder is a participant + source with no
-  // publication; VideoTile already renders that as the initial avatar.
-  // Screen share stays placeholder-free, or every participant would conjure
-  // an empty screen-share tile.
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -432,17 +334,12 @@ export default function CustomVideoConference({
   const metadata = useLiveRoomMetadata();
   const { muteTrack, askToUnmute, askForCamera, rename, removeParticipant } = useHostControls(sessionId);
 
-  // Optimistic override so the moderator who clicked sees an instant result
-  // instead of waiting on the metadata round-trip; cleared once the room's
-  // own metadata event confirms the change (or any other change supersedes it).
   const [pendingSpotlight, setPendingSpotlight] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setPendingSpotlight(undefined);
   }, [metadata]);
   const roomSpotlight = pendingSpotlight !== undefined ? pendingSpotlight : parseSpotlightIdentity(metadata);
 
-  // Memoised on the raw metadata string: a fresh object every render would
-  // re-run the apply effect on every render, resetting every volume.
   const volumes = useMemo(() => parseVolumes(metadata), [metadata]);
   useAppliedVolumes(volumes);
   useAudioPlaybackUnlock();
@@ -458,24 +355,12 @@ export default function CustomVideoConference({
     [sessionId]
   );
 
-  // What "speaker" view focuses. Room metadata wins, but until it arrives (or
-  // if it was never written) fall back to the class teacher — a student
-  // should never open the call and find an admin who dropped in to observe
-  // filling their screen.
   const focusIdentity = baseIdentity(roomSpotlight) ?? baseIdentity(teacherIdentity);
-
-  // Per-viewer layout choice, like Zoom's gallery/speaker toggle — local only,
-  // never synced. The defaults differ by role on purpose: a teacher wants
-  // every student on screen at once, a student wants the teacher big.
   const [viewMode, setViewMode] = useState<ViewMode>(isModerator ? 'gallery' : 'speaker');
 
-  // Active-speaker view needs the *last* person to speak, not the current
-  // one: LiveKit's list empties the moment everybody stops talking, and a
-  // screen that falls back to the grid during every pause is unwatchable.
   const speakers = useSpeakingParticipants();
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
   useEffect(() => {
-    // Prefer whoever isn't you — your own voice is not what you want to watch.
     const speaking = speakers.find((p) => !p.isLocal) ?? speakers[0];
     if (speaking) setLastSpeaker(speaking.identity);
   }, [speakers]);
@@ -486,18 +371,16 @@ export default function CustomVideoConference({
     showSettings: false,
   });
 
-  // Only the people waiting on the teacher need telling — not the teacher,
-  // and not an admin observing, who can see perfectly well that they left.
   const teacherAway = useTeacherAway(teacherIdentity, !isModerator);
-
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [peopleOpen, setPeopleOpen] = useState(false);
 
-  // Floating tiles are positioned in pixels, so the video area has to be
-  // measured rather than guessed — it changes with the chat panel, rotation,
-  // and the browser's disappearing address bar.
+  // Auto-hide chrome on tap for distraction-free Quran recitation
+  const [chromeHidden, setChromeHidden] = useState(false);
+  const tapStartTimeRef = useRef(0);
+
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   useEffect(() => {
@@ -513,9 +396,8 @@ export default function CustomVideoConference({
 
   const orientation = useViewportOrientation();
   const floatBox =
-    orientation === 'portrait' ? { width: 110, height: 180 } : { width: 180, height: 110 };
+    orientation === 'portrait' ? { width: 116, height: 184 } : { width: 184, height: 116 };
 
-  /** Which slot each floating tile is parked in, keyed by tile. Drag swaps them. */
   const [slotOrder, setSlotOrder] = useState<string[]>([]);
 
   const handleSpotlight = useCallback(
@@ -527,9 +409,6 @@ export default function CustomVideoConference({
         body: JSON.stringify({ identity }),
       })
         .then((res) => {
-          // fetch() only rejects on network failure, not on 4xx/5xx — a
-          // silent server-side failure would otherwise look like it worked
-          // while nobody else's view ever changed.
           if (!res.ok) {
             console.error('Spotlight update failed', res.status);
             setPendingSpotlight(undefined);
@@ -545,7 +424,6 @@ export default function CustomVideoConference({
     (t) => t.source === Track.Source.ScreenShare && t.publication?.isSubscribed
   );
 
-  /** Everything a tile needs to render and be acted on. */
   const describe = (t: TrackReferenceOrPlaceholder) => {
     const identity = t.participant.identity;
     const mic = micTracks.find((m) => m.participant.identity === identity);
@@ -575,8 +453,6 @@ export default function CustomVideoConference({
       onAskForCamera: p.cameraOff ? () => askForCamera(p.identity) : undefined,
       onRename: (name: string) => rename(p.identity, name),
       onRemove: () => removeParticipant(p.identity),
-      // Keyed on the base identity, not the connection: a student who drops
-      // and rejoins should come back as quiet as the teacher left them.
       volume: volumes[p.base] ?? 1,
       onVolume: (volume: number) => setVolume(p.base, volume),
     };
@@ -599,9 +475,6 @@ export default function CustomVideoConference({
   const localCamera = all.find((p) => p.isLocal);
   const others = all.filter((p) => !p.isLocal);
 
-  // Screen share wins for everyone. Otherwise gallery puts every camera in a
-  // grid, and speaker gives the focused person the frame with everyone else
-  // as draggable tiles.
   let focused: Described | undefined;
   let gridTiles: Described[] = all;
   let floating: Described[] = [];
@@ -611,16 +484,11 @@ export default function CustomVideoConference({
     floating = all;
     gridTiles = [];
   } else if (viewMode === 'gallery') {
-    // A teacher's own camera floats as a self-view so the grid is all
-    // students — unless they're alone, where an empty grid is just a black
-    // void.
     if (isModerator && others.length > 0) {
       gridTiles = others;
       floating = localCamera ? [localCamera] : [];
     }
   } else {
-    // Speaker follows the room's spotlight; active-speaker follows the voice,
-    // falling back to the spotlight until somebody actually says something.
     const focusTarget =
       viewMode === 'active'
         ? all.find((p) => p.identity === lastSpeaker) ?? all.find((p) => p.base === focusIdentity)
@@ -632,9 +500,6 @@ export default function CustomVideoConference({
     }
   }
 
-  // Keep the parking order stable across re-renders: people who were already
-  // floating stay where the viewer dragged them, newcomers take the next free
-  // slot, and anyone who left frees theirs.
   const floatingKeys = floating.map((p) => p.key);
   const orderedKeys = [
     ...slotOrder.filter((k) => floatingKeys.includes(k)),
@@ -648,13 +513,10 @@ export default function CustomVideoConference({
       ];
       return next.length === prev.length && next.every((k, i) => k === prev[i]) ? prev : next;
     });
-    // floatingKeys is derived from the track list; join it so the effect only
-    // runs when the set of floating participants actually changes.
   }, [floatingKeys.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const slots = computeSlots(stageSize, floatBox, orderedKeys.length);
 
-  /** Snap a dropped tile to the nearest slot, swapping with whoever is there. */
   const handleDrop = (key: string, point: { left: number; top: number }) => {
     if (slots.length === 0) return;
     let nearest = 0;
@@ -679,22 +541,39 @@ export default function CustomVideoConference({
     });
   };
 
+  const handleStagePointerDown = () => {
+    tapStartTimeRef.current = Date.now();
+  };
+
+  const handleStagePointerUp = (e: React.PointerEvent) => {
+    // Only toggle if short click/tap and not interacting with floating panels
+    if (Date.now() - tapStartTimeRef.current < 300) {
+      const target = e.target as HTMLElement;
+      if (target.closest('button') || target.closest('input') || target.closest('.call-control-bar')) {
+        return;
+      }
+      setChromeHidden((prev) => !prev);
+    }
+  };
+
   return (
     <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
-      {/* Bar height (and the --lk-control-bar-height the chat panel sizes
-          itself against) lives in globals.css so it can shrink on a phone
-          held sideways, where a 76px bar eats a quarter of the screen. */}
-      <div className="lk-video-conference call-surface" style={{ height: '100%' }}>
+      <div
+        className="lk-video-conference call-surface bg-neutral-950"
+        style={{ height: '100%' }}
+        onPointerDown={handleStagePointerDown}
+        onPointerUp={handleStagePointerUp}
+      >
         <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
           <div
             ref={stageRef}
             style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}
           >
             {focused ? (
-              <div className="w-full h-full p-2">{renderTile(focused)}</div>
+              <div className="w-full h-full p-2 sm:p-3">{renderTile(focused)}</div>
             ) : (
               <div
-                className="w-full h-full grid gap-2 p-2"
+                className="w-full h-full grid gap-2 sm:gap-3 p-2 sm:p-3"
                 style={{
                   gridTemplateColumns: `repeat(${columnsFor(gridTiles.length)}, minmax(0, 1fr))`,
                   gridAutoRows: 'minmax(0, 1fr)',
@@ -708,9 +587,6 @@ export default function CustomVideoConference({
               </div>
             )}
 
-            {/* Peers (and the teacher's own camera in gallery) float as small
-                draggable tiles, each parked in its own slot so they never
-                cover one another. */}
             {floating.map((p) => {
               const slot = slots[orderedKeys.indexOf(p.key)];
               if (!slot) return null;
@@ -722,60 +598,62 @@ export default function CustomVideoConference({
                   onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
                   onDropAt={(point) => handleDrop(p.key, point)}
                 >
-                  {/* Small tiles fill their box; the main tiles show the whole
-                      frame (see VideoTile's `fit`). */}
                   {renderTile(p, 'cover')}
                 </DraggableTile>
               );
             })}
           </div>
 
-          <ScreenSharePill />
+          <div
+            className={`transition-all duration-300 ${
+              chromeHidden ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+            }`}
+          >
+            <ScreenSharePill />
 
-          {/* Inline styles, not classNames — the call screen has been broken
-              twice by a rule that silently never applied. See
-              docs/integration-livekit.md. */}
-          {teacherAway && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 12,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                zIndex: 30,
-                maxWidth: 'calc(100% - 24px)',
-                padding: '8px 16px',
-                borderRadius: 9999,
-                background: 'rgba(17, 17, 17, 0.82)',
-                color: '#fff',
-                fontSize: 13,
-                lineHeight: 1.3,
-                textAlign: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              Teacher disconnected — waiting for them to rejoin.
-            </div>
-          )}
+            {/* Teacher disconnected Dynamic Island notification pill */}
+            {teacherAway && (
+              <div
+                className="absolute top-3 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2.5 px-4 py-2 rounded-full pointer-events-none shadow-2xl backdrop-blur-2xl"
+                style={{
+                  background: 'rgba(24, 26, 32, 0.88)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  boxShadow: '0 12px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
+                }}
+              >
+                <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                <span className="text-xs font-semibold text-white tracking-tight">
+                  Teacher disconnected · waiting to rejoin
+                </span>
+              </div>
+            )}
 
-          {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
+            {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
+          </div>
 
           <SoloInactivityPrompt isHost={isHost} onLeaveOrEnd={onEndClassIntent} />
 
           <MediaRequestModal />
 
-          <CallControlBar
-            effects={effects}
-            isHost={isHost}
-            onEndClassIntent={onEndClassIntent}
-            unreadMessages={widgetState.unreadMessages}
-            chatOpen={widgetState.showChat}
-            peopleOpen={peopleOpen}
-            onToggleChat={() => layoutContext.widget.dispatch?.({ msg: 'toggle_chat' })}
-            onTogglePeople={() => setPeopleOpen((v) => !v)}
-            viewMode={viewMode}
-            onViewModeChange={setViewMode}
-          />
+          {/* Floating Control Bar with auto-hide transition */}
+          <div
+            className={`transition-all duration-300 ${
+              chromeHidden ? 'opacity-0 translate-y-8 pointer-events-none' : 'opacity-100 translate-y-0'
+            }`}
+          >
+            <CallControlBar
+              effects={effects}
+              isHost={isHost}
+              onEndClassIntent={onEndClassIntent}
+              unreadMessages={widgetState.unreadMessages}
+              chatOpen={widgetState.showChat}
+              peopleOpen={peopleOpen}
+              onToggleChat={() => layoutContext.widget.dispatch?.({ msg: 'toggle_chat' })}
+              onTogglePeople={() => setPeopleOpen((v) => !v)}
+              viewMode={viewMode}
+              onViewModeChange={setViewMode}
+            />
+          </div>
         </div>
 
         <Chat style={{ display: widgetState.showChat ? 'grid' : 'none' }} />

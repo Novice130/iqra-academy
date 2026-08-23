@@ -3,14 +3,8 @@ import SwiftUI
 /// The floating bar: the four things people reach for mid-lesson, and the way
 /// out.
 ///
-/// Everything else — people, chat, spotlight, volume, background blur, audio
-/// output — is behind **More**, as a sheet. That is not tidiness: at 402pt a
-/// row of circular buttons runs out of width at five, and a bar that scrolls
-/// sideways during a class is a bar nobody can hit. The bar stays at five and
-/// the sheet takes the rest.
-///
-/// Widths are deliberate: 52pt circles with 10pt gaps and a ~104pt end button
-/// leave the whole bar inside 402pt with room either side.
+/// Designed in the modern Apple iOS FaceTime floating glass language: frosted
+/// ultra-thin material, subtle specular rim lighting, and fluid tactile response.
 struct CallControlBar: View {
     let micOn: Bool
     let cameraOn: Bool
@@ -91,22 +85,45 @@ struct CallControlBar: View {
                 .frame(height: 52)
                 .background {
                     Capsule()
-                        .fill(LinearGradient(colors: [Color.red, Color(red: 0.8, green: 0.1, blue: 0.1)], startPoint: .top, endPoint: .bottom))
-                        .shadow(color: Color.red.opacity(0.4), radius: 8, y: 3)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 1.0, green: 0.27, blue: 0.23),
+                                    Color(red: 0.84, green: 0.08, blue: 0.08)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                        }
+                        .shadow(color: Color.red.opacity(0.45), radius: 10, y: 4)
                 }
             }
             .accessibilityLabel(isHost ? "End class for everyone" : "Leave class")
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
         .background {
             Capsule()
                 .fill(.ultraThinMaterial)
                 .overlay {
                     Capsule()
-                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .stroke(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.28),
+                                    Color.white.opacity(0.08)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            ),
+                            lineWidth: 1
+                        )
                 }
-                .shadow(color: Color.black.opacity(0.35), radius: 16, y: 6)
+                .shadow(color: Color.black.opacity(0.40), radius: 24, y: 10)
         }
         .environment(\.colorScheme, .dark)
     }
@@ -126,10 +143,24 @@ struct CallControlBar: View {
                 .frame(width: 52, height: 52)
                 .background {
                     Circle()
-                        .fill(on ? Color.white.opacity(0.18) : Color.red.opacity(0.85))
+                        .fill(
+                            on
+                                ? Color.white.opacity(0.18)
+                                : Color(red: 0.88, green: 0.22, blue: 0.20).opacity(0.92)
+                        )
                         .overlay {
                             Circle()
-                                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(on ? 0.22 : 0.35),
+                                            Color.white.opacity(0.06)
+                                        ],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    ),
+                                    lineWidth: 1
+                                )
                         }
                 }
                 .overlay(alignment: .topTrailing) {
@@ -137,13 +168,14 @@ struct CallControlBar: View {
                         Circle()
                             .fill(Theme.accent)
                             .frame(width: 12, height: 12)
-                            .overlay { Circle().stroke(Color.black.opacity(0.35), lineWidth: 1) }
-                            .offset(x: 2, y: -2)
+                            .overlay { Circle().stroke(Color.black.opacity(0.4), lineWidth: 1.5) }
+                            .offset(x: 1, y: -1)
                     }
                 }
         }
         .disabled(disabled)
-        .opacity(disabled ? 0.4 : 1)
+        .opacity(disabled ? 0.35 : 1)
         .accessibilityLabel(label)
     }
 }
+

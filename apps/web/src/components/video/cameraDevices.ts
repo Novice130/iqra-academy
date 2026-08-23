@@ -9,7 +9,7 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import { useMediaDeviceSelect, useRoomContext } from '@livekit/components-react';
+import { useRoomContext } from '@livekit/components-react';
 
 /**
  * Whether the device has more than one camera — i.e. whether "flip" means

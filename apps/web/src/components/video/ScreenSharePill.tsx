@@ -1,16 +1,8 @@
 'use client';
 
 /**
- * "Live — sharing your screen", with a Stop button, over the call.
- *
- * Only for the native Android share. In a browser the tab already carries its
- * own "you are sharing" bar and a second one would be noise; on the phone
- * there is nothing on the call screen to say the share is still running, and
- * a teacher who has come back to the app needs to be able to stop it without
- * hunting through the control bar.
- *
- * The companion to this is the ongoing notification, which is what they can
- * reach while they are in whatever app they are actually presenting.
+ * ScreenSharePill — Apple Dynamic Island style indicator:
+ * "Live · sharing your screen" with glowing red indicator and Stop button.
  */
 
 import { useEffect, useState } from 'react';
@@ -25,47 +17,33 @@ export default function ScreenSharePill() {
 
   return (
     <div
-      className="absolute z-[60] flex items-center gap-2 rounded-full"
+      className="absolute top-3 left-1/2 -translate-x-1/2 z-[60] flex items-center gap-2.5 rounded-full pointer-events-auto shadow-2xl animate-fadeIn"
       style={{
-        top: 12,
-        left: '50%',
-        transform: 'translateX(-50%)',
-        background: 'rgba(20,21,24,0.92)',
-        border: '1px solid rgba(255,255,255,0.14)',
-        padding: '6px 6px 6px 12px',
-        // Inline, not className: the call screen's floating pieces have been
-        // caught out by utility classes before.
-        boxShadow: '0 6px 20px rgba(0,0,0,0.45)',
+        background: 'rgba(20, 22, 28, 0.88)',
+        backdropFilter: 'blur(28px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+        border: '1px solid rgba(255, 255, 255, 0.16)',
+        boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        padding: '5px 5px 5px 14px',
       }}
     >
       <span
         aria-hidden
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: '50%',
-          background: '#ea4335',
-          boxShadow: '0 0 0 3px rgba(234,67,53,0.25)',
-        }}
+        className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping"
       />
-      <span style={{ color: '#e8eaed', fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap' }}>
+      <span className="text-xs font-bold text-white tracking-tight whitespace-nowrap">
         Live · sharing your screen
       </span>
       <button
         type="button"
         onClick={() => {
-          // Optimistic: the button has to stop looking live the instant it is
-          // pressed, and the shell confirms by calling __ntScreenShareEnded.
           stopNativeScreenShare().catch(() => {});
         }}
-        className="rounded-full cursor-pointer"
+        className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white cursor-pointer transition active:scale-95 whitespace-nowrap"
         style={{
-          background: '#ea4335',
-          color: '#fff',
-          fontSize: 12,
-          fontWeight: 700,
-          padding: '6px 12px',
-          whiteSpace: 'nowrap',
+          background: 'linear-gradient(180deg, #ff453a 0%, #d70015 100%)',
+          boxShadow: '0 2px 8px rgba(255, 69, 58, 0.4)',
+          border: '1px solid rgba(255, 255, 255, 0.25)',
         }}
       >
         Stop sharing

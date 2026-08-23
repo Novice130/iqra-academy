@@ -1,16 +1,10 @@
 'use client';
 
 /**
- * Video tile — one participant, with their controls on the tile itself the
- * way Zoom does it: mic state is always visible, and the host's actions
- * (mute, camera off, rename, spotlight) live behind a ⋮ on the tile rather
- * than in a separate panel you have to go hunting for.
- *
- * This is deliberately our own tile rather than LiveKit's `ParticipantTile`.
- * That component's `children` prop *replaces* its internals rather than
- * layering over them, and wrapping it in a positioned div breaks
- * `GridLayout`'s sizing — both were tried before. Owning the tile outright
- * is simpler than fighting either behaviour.
+ * Video tile — Modern Apple iOS FaceTime design language:
+ * Continuous squircle rounded corners, radiant emerald active speaker indicator,
+ * frosted glass metadata pills, vibrant gradient initials avatar, and glassmorphic
+ * portalled context menu.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -20,24 +14,16 @@ import { VideoTrack, useIsSpeaking } from '@livekit/components-react';
 import { MicOffIcon, MoreIcon, SpeakingBarsIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
 
-/** Wide enough for "Spotlight for everyone" on one line, narrow enough for a phone. */
 const MENU_WIDTH = 240;
 
 export interface TileActions {
-  /** Host-only. Absent for students, and for your own tile. */
   onSpotlight?: () => void;
   onMute?: () => void;
   onAskToUnmute?: () => void;
   onCameraOff?: () => void;
-  /** LiveKit can force a camera *off* but never back on — this asks. */
   onAskForCamera?: () => void;
   onRename?: (name: string) => void;
-  /** Drops them from the call. Asks for confirmation first — it's abrupt. */
   onRemove?: () => void;
-  /**
-   * This person's playback volume, 0–1, as the whole room currently hears it.
-   * Room state rather than a local preference — see VolumeSlider.
-   */
   volume?: number;
   onVolume?: (volume: number) => void;
 }
@@ -61,13 +47,6 @@ export default function VideoTile({
   isSpotlighted?: boolean;
   actions?: TileActions;
   rounded?: boolean;
-  /**
-   * `contain` shows the whole frame and letterboxes — the right default for
-   * a main tile, because a phone publishes a tall 9:16 stream and `cover`
-   * crops it down to a slice of somebody's neck on a widescreen monitor.
-   * `cover` is kept for the small floating tiles, where filling the box
-   * matters more than seeing every pixel.
-   */
   fit?: 'cover' | 'contain';
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -83,9 +62,6 @@ export default function VideoTile({
     if (!menuOpen) return;
     const close = (e: MouseEvent) => {
       const target = e.target as Node;
-      // The menu is portalled to <body>, so it is not inside rootRef — check
-      // it separately or the first mousedown on a menu item closes the menu
-      // before the click ever lands.
       if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       setMenuOpen(false);
       setRenaming(false);
@@ -95,14 +71,6 @@ export default function VideoTile({
     return () => document.removeEventListener('mousedown', close);
   }, [menuOpen]);
 
-  /**
-   * The menu used to be absolutely positioned inside the tile, which has
-   * `overflow: hidden` — on a phone the tile is ~170px wide and a 220px menu
-   * was clipped to a sliver, or slid off the left edge of the screen with the
-   * labels unreadable. It is now fixed and portalled to <body>, positioned
-   * from the button's own rect and clamped to the viewport, so it cannot be
-   * clipped by the tile, the grid, or the video above it.
-   */
   useLayoutEffect(() => {
     if (!menuOpen) return;
 
@@ -113,11 +81,9 @@ export default function VideoTile({
       const width = Math.min(MENU_WIDTH, window.innerWidth - margin * 2);
       const height = menuRef.current?.offsetHeight ?? 260;
 
-      // Right-aligned to the button, then pulled back inside the viewport.
       let left = btn.right - width;
       left = Math.min(Math.max(left, margin), window.innerWidth - width - margin);
 
-      // Below the button, unless that would run off the bottom — then above.
       let top = btn.bottom + 6;
       if (top + height > window.innerHeight - margin) {
         top = Math.max(margin, Math.min(btn.top - 6 - height, window.innerHeight - height - margin));
@@ -128,7 +94,6 @@ export default function VideoTile({
 
     place();
     window.addEventListener('resize', place);
-    // Capture phase: the tile grid and the people panel both scroll.
     window.addEventListener('scroll', place, true);
     return () => {
       window.removeEventListener('resize', place);
@@ -136,16 +101,7 @@ export default function VideoTile({
     };
   }, [menuOpen, renaming, confirmRemove]);
 
-  /**
-   * Who is talking, per participant rather than per room — the tile has to
-   * light up on its own, including the avatar tile of somebody whose camera
-   * is off, which used to be the only thing you had to go on and wasn't
-   * there at all. Muted people are excluded: LiveKit can still report a
-   * moment of speech as a mic mutes, and a "speaking" ring on a muted tile
-   * reads as a bug.
-   */
   const isSpeaking = useIsSpeaking(trackRef.participant) && !micMuted;
-
   const hasVideo = isTrackReference(trackRef) && !cameraOff;
   const hasActions =
     !!actions &&
@@ -174,40 +130,41 @@ export default function VideoTile({
   return (
     <div
       ref={rootRef}
-      className={`relative w-full h-full overflow-hidden ${rounded ? 'rounded-xl' : ''}`}
+      className={`relative w-full h-full overflow-hidden transition-all duration-200 ${
+        rounded ? 'rounded-2xl sm:rounded-3xl' : ''
+      }`}
       style={{
-        background: '#0b0c0f',
-        outline: isSpotlighted ? '2px solid #8ab4f8' : undefined,
+        background: '#0d0f14',
+        outline: isSpotlighted ? '2.5px solid #007aff' : undefined,
         outlineOffset: '-2px',
-        // Inset shadow rather than a second outline: spotlight already owns
-        // `outline`, and a border would shift the video by a pixel.
-        boxShadow: isSpeaking ? 'inset 0 0 0 3px #34c98a' : undefined,
-        transition: 'box-shadow 120ms ease-out',
+        boxShadow: isSpeaking
+          ? 'inset 0 0 0 2.5px #34c98a, 0 0 20px rgba(52, 201, 138, 0.45)'
+          : isSpotlighted
+            ? '0 0 24px rgba(0, 122, 255, 0.35)'
+            : '0 4px 16px rgba(0, 0, 0, 0.4)',
       }}
     >
       {hasVideo ? (
         <VideoTrack
           trackRef={trackRef}
           className="w-full h-full"
-          // Mirror your own camera only — everyone else should look the way
-          // they actually look.
           style={{ objectFit: fit, transform: isLocal ? 'scaleX(-1)' : undefined }}
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center">
+        <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-neutral-900 to-black">
           <div
-            className="rounded-full flex items-center justify-center font-semibold text-white"
+            className="rounded-full flex items-center justify-center font-bold text-white transition-all duration-200"
             style={{
-              width: '22%',
+              width: '24%',
               aspectRatio: '1',
-              minWidth: 40,
-              maxWidth: 96,
-              background: '#3c4043',
-              fontSize: '1.4em',
-              // A halo around the initial is the only movement on a
-              // camera-off tile, so it is what tells you who is talking.
-              boxShadow: isSpeaking ? '0 0 0 3px #34c98a, 0 0 0 10px rgba(52,201,138,0.22)' : undefined,
-              transition: 'box-shadow 120ms ease-out',
+              minWidth: 46,
+              maxWidth: 104,
+              background: 'linear-gradient(135deg, #007aff 0%, #0040dd 100%)',
+              fontSize: 'clamp(1.2rem, 3.5vw, 2.2rem)',
+              border: '1.5px solid rgba(255, 255, 255, 0.3)',
+              boxShadow: isSpeaking
+                ? '0 0 0 3px #34c98a, 0 0 20px rgba(52, 201, 138, 0.6)'
+                : '0 10px 24px rgba(0, 0, 0, 0.35)',
             }}
           >
             {(name || '?').charAt(0).toUpperCase()}
@@ -215,20 +172,26 @@ export default function VideoTile({
         </div>
       )}
 
-      {/* Name + mic state, always visible — not tucked into a panel. */}
+      {/* Frosted glass name & mic state capsule */}
       <div
-        className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-md max-w-[85%]"
-        style={{ background: 'rgba(0,0,0,0.55)' }}
+        className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full max-w-[85%]"
+        style={{
+          background: 'rgba(18, 20, 26, 0.72)',
+          backdropFilter: 'blur(16px)',
+          WebkitBackdropFilter: 'blur(16px)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.35)',
+        }}
       >
-        {micMuted && <MicOffIcon className="w-3.5 h-3.5 shrink-0" />}
+        {micMuted && <MicOffIcon className="w-3.5 h-3.5 shrink-0 text-red-400" />}
         {isSpeaking && (
-          <span className="shrink-0 flex" style={{ color: '#34c98a' }}>
+          <span className="shrink-0 flex text-emerald-400">
             <SpeakingBarsIcon className="w-3.5 h-3.5" />
           </span>
         )}
         <span
-          className="text-[11px] text-white truncate"
-          style={{ color: micMuted ? '#f6a6a0' : isSpeaking ? '#7ee2b8' : '#fff' }}
+          className="text-xs font-medium text-white truncate"
+          style={{ color: micMuted ? '#fca5a5' : isSpeaking ? '#6ee7b7' : '#f3f4f6' }}
         >
           {name}
           {isLocal ? ' (you)' : ''}
@@ -237,8 +200,13 @@ export default function VideoTile({
 
       {isSpotlighted && (
         <div
-          className="absolute top-2 left-2 px-2 py-0.5 rounded-md text-[10px] font-semibold"
-          style={{ background: 'rgba(138,180,248,0.9)', color: '#202124' }}
+          className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1"
+          style={{
+            background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+            color: '#fff',
+            boxShadow: '0 2px 8px rgba(0, 122, 255, 0.4)',
+            border: '1px solid rgba(255, 255, 255, 0.3)',
+          }}
         >
           ★ Spotlight
         </div>
@@ -255,8 +223,14 @@ export default function VideoTile({
             }}
             onPointerDown={(e) => e.stopPropagation()}
             aria-label={`Options for ${name}`}
-            className="absolute top-2 right-2 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer"
-            style={{ background: 'rgba(0,0,0,0.55)', color: '#fff' }}
+            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-90"
+            style={{
+              background: 'rgba(18, 20, 26, 0.72)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid rgba(255, 255, 255, 0.14)',
+              color: '#fff',
+            }}
           >
             <MoreIcon className="w-4 h-4" />
           </button>
@@ -264,24 +238,22 @@ export default function VideoTile({
           {menuOpen && typeof document !== 'undefined' && createPortal(
             <div
               ref={menuRef}
-              // Fixed width, not min-width: shrink-to-fit on an absolutely
-              // positioned box resolved to ~520px here, which left a short
-              // label like "Rename…" swimming in empty space.
-              className="fixed z-[80] rounded-2xl overflow-hidden"
+              className="fixed z-[80] rounded-3xl overflow-hidden"
               style={{
                 top: menuPos?.top ?? -9999,
                 left: menuPos?.left ?? -9999,
                 width: `min(${MENU_WIDTH}px, calc(100vw - 16px))`,
-                // Hidden until measured, so it never flashes in the corner.
                 visibility: menuPos ? 'visible' : 'hidden',
-                background: '#26282c',
-                border: '1px solid rgba(255,255,255,0.08)',
-                boxShadow: '0 12px 32px rgba(0,0,0,0.5)',
+                background: 'rgba(24, 26, 32, 0.90)',
+                backdropFilter: 'blur(28px) saturate(180%)',
+                WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                border: '1px solid rgba(255, 255, 255, 0.16)',
+                boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
               }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               {renaming ? (
-                <div className="p-2">
+                <div className="p-3">
                   <input
                     autoFocus
                     value={draft}
@@ -290,28 +262,26 @@ export default function VideoTile({
                       if (e.key === 'Enter') submitRename();
                       if (e.key === 'Escape') setRenaming(false);
                     }}
-                    className="w-full px-2.5 py-2 rounded-lg text-sm"
-                    style={{ background: '#2a2d33', color: '#e8eaed', border: '1px solid rgba(255,255,255,0.14)' }}
+                    className="w-full px-3 py-2 rounded-xl text-xs bg-white/10 text-white border border-white/20 focus:outline-none focus:border-blue-500"
                   />
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex gap-2 mt-2.5">
                     <button
                       onClick={submitRename}
-                      className="flex-1 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
-                      style={{ background: '#8ab4f8', color: '#202124' }}
+                      className="flex-1 py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
+                      style={{ background: '#007aff', color: '#fff' }}
                     >
                       Save
                     </button>
                     <button
                       onClick={() => setRenaming(false)}
-                      className="flex-1 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
-                      style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+                      className="flex-1 py-1.5 rounded-xl text-xs font-medium cursor-pointer bg-white/10 text-white hover:bg-white/15"
                     >
                       Cancel
                     </button>
                   </div>
                 </div>
               ) : (
-                <div className="py-1.5">
+                <div className="py-2">
                   {actions?.onSpotlight && (
                     <MenuItem
                       label={isSpotlighted ? 'Remove spotlight' : 'Spotlight for everyone'}
@@ -361,21 +331,11 @@ export default function VideoTile({
                       )}
                   {actions?.onRename && <MenuItem label="Rename…" onClick={() => setRenaming(true)} />}
 
-                  {/* Turning somebody down instead of muting them: they keep
-                      reciting, the class hears them quietly. The menu stays
-                      open while the handle is dragged — VolumeSlider stops the
-                      pointer events that would otherwise dismiss it. */}
                   {actions?.onVolume && (
                     <>
-                      <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
-                      {/* Same 14px inset as MenuItem — at a smaller one the
-                          speaker icon sat on the menu's edge and read as
-                          clipped. */}
-                      <div className="px-3.5 pt-0.5 pb-1.5">
-                        <div
-                          className="pb-1 text-[10px] font-semibold uppercase tracking-wider"
-                          style={{ color: 'rgba(255,255,255,0.45)' }}
-                        >
+                      <div className="my-1 border-t border-white/10" />
+                      <div className="px-3.5 pt-1 pb-2">
+                        <div className="pb-1 text-[10px] font-semibold uppercase tracking-wider text-white/45">
                           Volume for everyone
                         </div>
                         <VolumeSlider
@@ -388,15 +348,11 @@ export default function VideoTile({
                     </>
                   )}
 
-                  {/* Two taps, not a browser confirm(): the dialog steals
-                      focus from the call and reads as a page error on a
-                      phone. Kicking someone out of a lesson by a mis-tap is
-                      the thing worth preventing. */}
                   {actions?.onRemove && (
                     <>
-                      <div className="my-1" style={{ borderTop: '1px solid rgba(255,255,255,0.08)' }} />
+                      <div className="my-1 border-t border-white/10" />
                       {confirmRemove ? (
-                        <div className="px-2 pb-1">
+                        <div className="px-2.5 pb-1">
                           <button
                             type="button"
                             onClick={() => {
@@ -404,16 +360,15 @@ export default function VideoTile({
                               setConfirmRemove(false);
                               setMenuOpen(false);
                             }}
-                            className="w-full py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
-                            style={{ background: '#ea4335', color: '#fff' }}
+                            className="w-full py-1.5 rounded-xl text-xs font-semibold cursor-pointer"
+                            style={{ background: '#ff3b30', color: '#fff' }}
                           >
                             Remove {name}
                           </button>
                           <button
                             type="button"
                             onClick={() => setConfirmRemove(false)}
-                            className="w-full mt-1.5 py-1.5 rounded-lg text-xs font-medium cursor-pointer"
-                            style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+                            className="w-full mt-1.5 py-1.5 rounded-xl text-xs font-medium cursor-pointer bg-white/10 text-white"
                           >
                             Cancel
                           </button>
@@ -443,8 +398,9 @@ function MenuItem({ label, onClick, danger }: { label: string; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="w-full text-left px-3.5 py-2 text-[13px] leading-5 cursor-pointer hover:bg-white/10 transition-colors"
-      style={{ color: danger ? '#f6a6a0' : '#e8eaed' }}
+      className={`w-full text-left px-4 py-2 text-xs font-medium cursor-pointer transition-colors ${
+        danger ? 'text-red-400 hover:bg-red-500/15' : 'text-neutral-200 hover:bg-white/10'
+      }`}
     >
       {label}
     </button>

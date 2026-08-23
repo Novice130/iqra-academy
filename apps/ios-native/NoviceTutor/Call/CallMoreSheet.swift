@@ -228,13 +228,20 @@ private struct ChatPane: View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 12) {
                         if controller.chat.messages.isEmpty {
-                            Text("Messages sent here reach everyone in the class. They aren't saved after it ends.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .padding(.top, 32)
+                            VStack(spacing: 8) {
+                                Image(systemName: "bubble.left.and.bubble.right")
+                                    .font(.system(size: 28))
+                                    .foregroundStyle(.secondary.opacity(0.6))
+                                Text("Messages sent here reach everyone in the class. They aren't saved after it ends.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.top, 36)
+                            .padding(.horizontal, 24)
                         }
                         ForEach(controller.chat.messages) { message in
                             MessageBubble(message: message).id(message.id)
@@ -245,34 +252,46 @@ private struct ChatPane: View {
                 }
                 .onChange(of: controller.chat.messages.count) { _, _ in
                     guard let last = controller.chat.messages.last else { return }
-                    withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        proxy.scrollTo(last.id, anchor: .bottom)
+                    }
                 }
             }
 
-            HStack(spacing: 8) {
-                TextField("Message the class", text: $draft, axis: .vertical)
+            HStack(spacing: 10) {
+                TextField("Message the class…", text: $draft, axis: .vertical)
                     .lineLimit(1 ... 4)
                     .textFieldStyle(.plain)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
-                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .background(
+                        RoundedRectangle(cornerRadius: 20, style: .continuous)
+                            .fill(Color(uiColor: .tertiarySystemFill))
+                    )
                     .focused($focused)
                     .submitLabel(.send)
                     .onSubmit(send)
 
                 Button(action: send) {
                     Image(systemName: "arrow.up.circle.fill")
-                        .font(.system(size: 30))
+                        .font(.system(size: 32, weight: .semibold))
+                        .foregroundStyle(
+                            draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? AnyShapeStyle(Color.secondary.opacity(0.4))
+                                : AnyShapeStyle(Theme.accentGradient)
+                        )
                 }
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
         }
     }
 
     private func send() {
-        let text = draft
+        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         draft = ""
         Task { await controller.chat.send(text) }
     }
@@ -282,19 +301,24 @@ private struct MessageBubble: View {
     let message: CallChat.Message
 
     var body: some View {
-        VStack(alignment: message.isMine ? .trailing : .leading, spacing: 3) {
-            Text(message.isMine ? "You" : message.senderName)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+        VStack(alignment: message.isMine ? .trailing : .leading, spacing: 4) {
+            if !message.isMine {
+                Text(message.senderName)
+                    .font(.caption2.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 4)
+            }
             Text(message.body)
                 .font(.subheadline)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 9)
                 .background(
-                    message.isMine ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.primary.opacity(0.08)),
-                    in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    message.isMine
+                        ? AnyShapeStyle(Theme.accentGradient)
+                        : AnyShapeStyle(Color(uiColor: .secondarySystemFill)),
+                    in: RoundedRectangle(cornerRadius: 18, style: .continuous)
                 )
-                .foregroundStyle(message.isMine ? .white : .primary)
+                .foregroundStyle(message.isMine ? .white : Color.primary)
         }
         .frame(maxWidth: .infinity, alignment: message.isMine ? .trailing : .leading)
     }

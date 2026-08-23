@@ -1,20 +1,24 @@
 'use client';
 
+/**
+ * SoloInactivityPrompt — Apple modal style inactivity prompt:
+ * Checks if teacher is alone for 30m, offers 45m extension or clean departure.
+ */
+
 import React, { useEffect, useState, useRef } from 'react';
 import { useRemoteParticipants } from '@livekit/components-react';
 
 interface SoloInactivityPromptProps {
   isHost: boolean;
   onLeaveOrEnd: () => void;
-  /** Test override in ms (optional) */
   customInitialTimeoutMs?: number;
   customExtensionTimeoutMs?: number;
   customWarningWindowSec?: number;
 }
 
-const INITIAL_SOLO_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const EXTENSION_SOLO_TIMEOUT_MS = 45 * 60 * 1000; // 45 minutes
-const WARNING_WINDOW_SECONDS = 60; // 1 minute to respond
+const INITIAL_SOLO_TIMEOUT_MS = 30 * 60 * 1000;
+const EXTENSION_SOLO_TIMEOUT_MS = 45 * 60 * 1000;
+const WARNING_WINDOW_SECONDS = 60;
 
 export default function SoloInactivityPrompt({
   isHost,
@@ -37,12 +41,9 @@ export default function SoloInactivityPrompt({
   const extensionMs = customExtensionTimeoutMs ?? EXTENSION_SOLO_TIMEOUT_MS;
   const warningSec = customWarningWindowSec ?? WARNING_WINDOW_SECONDS;
 
-  // Reset or start solo timer
   useEffect(() => {
-    // Only applies to host/teacher
     if (!isHost) return;
 
-    // If someone joined, dismiss everything and reset
     if (!isSolo) {
       setShowPrompt(false);
       setHasExtended(false);
@@ -51,7 +52,6 @@ export default function SoloInactivityPrompt({
       return;
     }
 
-    // Teacher is solo: calculate required delay
     const delay = hasExtended ? extensionMs : initialMs;
 
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -65,7 +65,6 @@ export default function SoloInactivityPrompt({
     };
   }, [isHost, isSolo, hasExtended, initialMs, extensionMs, warningSec]);
 
-  // Handle 60s countdown when prompt is visible
   useEffect(() => {
     if (!showPrompt) {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
@@ -90,7 +89,7 @@ export default function SoloInactivityPrompt({
 
   const handleStay = () => {
     setShowPrompt(false);
-    setHasExtended(true); // Next time it triggers in 45 minutes
+    setHasExtended(true);
   };
 
   const handleLeave = () => {
@@ -101,52 +100,59 @@ export default function SoloInactivityPrompt({
   if (!showPrompt || !isHost) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-md bg-neutral-900/95 border border-white/10 rounded-2xl p-6 shadow-2xl text-center text-white space-y-5">
-        {/* Animated Hourglass / Clock Icon */}
-        <div className="mx-auto w-16 h-16 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400">
-          <svg
-            className="w-8 h-8 animate-pulse"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 backdrop-blur-xl bg-black/60 animate-fadeIn">
+      <div
+        className="relative w-full max-w-md rounded-3xl p-6 sm:p-7 shadow-2xl text-center text-white space-y-5"
+        style={{
+          background: 'rgba(28, 30, 36, 0.94)',
+          backdropFilter: 'blur(28px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        }}
+      >
+        <div
+          className="mx-auto w-16 h-16 rounded-full flex items-center justify-center text-amber-400"
+          style={{
+            background: 'linear-gradient(135deg, rgba(245, 158, 11, 0.25) 0%, rgba(217, 119, 6, 0.15) 100%)',
+            border: '1px solid rgba(245, 158, 11, 0.35)',
+            boxShadow: '0 8px 24px rgba(245, 158, 11, 0.25)',
+          }}
+        >
+          <svg className="w-8 h-8 animate-pulse" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
         </div>
 
-        {/* Header & Copy */}
-        <div className="space-y-2">
-          <h3 className="text-xl font-bold tracking-tight">Are you still there?</h3>
-          <p className="text-sm text-neutral-300">
-            You are the only person in this meeting. To save resources, this call will automatically close unless you choose to stay.
+        <div className="space-y-1.5">
+          <h3 className="text-xl font-bold tracking-tight">Are you still teaching?</h3>
+          <p className="text-xs text-neutral-300 leading-relaxed max-w-sm mx-auto">
+            You are the only person in this meeting. To save resources, this call will close automatically unless you choose to stay.
           </p>
         </div>
 
-        {/* Countdown Ring Badge */}
-        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-red-500/15 border border-red-500/30 text-red-400 text-xs font-bold">
           <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-          Leaving in {secondsRemaining}s…
+          Auto-closing in {secondsRemaining}s…
         </div>
 
-        {/* Action Buttons */}
         <div className="flex flex-col sm:flex-row gap-3 pt-2">
           <button
             type="button"
             onClick={handleStay}
-            className="flex-1 py-3 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 active:bg-blue-700 font-semibold text-sm transition shadow-lg shadow-blue-600/20 cursor-pointer"
+            className="flex-1 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm text-white transition active:scale-95 cursor-pointer shadow-lg"
+            style={{
+              background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+              boxShadow: '0 4px 16px rgba(0, 122, 255, 0.4)',
+              border: '1px solid rgba(255, 255, 255, 0.2)',
+            }}
           >
             Stay in call (+45m)
           </button>
           <button
             type="button"
             onClick={handleLeave}
-            className="flex-1 py-3 px-4 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:bg-neutral-800 border border-white/10 font-semibold text-sm text-neutral-300 transition cursor-pointer"
+            className="flex-1 py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/15 active:bg-white/20 border border-white/10 font-semibold text-xs sm:text-sm text-neutral-200 transition cursor-pointer"
           >
             Leave now
           </button>

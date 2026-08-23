@@ -3,11 +3,8 @@ import SwiftUI
 
 /// One person, as a rectangle of video or the initials standing in for it.
 ///
-/// The badges are the two things a person in a class actually needs from a
-/// tile: who this is, and whether they can be heard. Everything else — the
-/// host controls, the volume — lives in the People sheet, because a tile the
-/// size of a thumbnail cannot carry a menu without swallowing the taps meant
-/// for the video behind it.
+/// Refined in the modern iOS FaceTime visual style: continuous squircle corners,
+/// frosted glass metadata pills, and glowing active-speaker aura.
 struct ParticipantTile: View {
     let person: CallController.Person
     let track: VideoTrack?
@@ -15,9 +12,13 @@ struct ParticipantTile: View {
     var compact: Bool = false
     var showName: Bool = true
 
+    private var cornerRadius: CGFloat {
+        compact ? 16 : 22
+    }
+
     var body: some View {
         ZStack(alignment: .bottomLeading) {
-            Color.white.opacity(0.06)
+            Color(red: 0.08, green: 0.09, blue: 0.12)
 
             if let track, person.cameraOn {
                 SwiftUIVideoView(
@@ -36,7 +37,7 @@ struct ParticipantTile: View {
                     if !person.micOn {
                         Image(systemName: "mic.slash.fill")
                             .font(.system(size: compact ? 9 : 11, weight: .semibold))
-                            .foregroundStyle(Color.red.opacity(0.95))
+                            .foregroundStyle(Color(red: 1.0, green: 0.35, blue: 0.32))
                     }
                     Text(person.isLocal ? "You" : person.name)
                         .font(compact ? .caption2.weight(.medium) : .footnote.weight(.medium))
@@ -51,18 +52,29 @@ struct ParticipantTile: View {
                             .foregroundStyle(.white.opacity(0.7))
                     }
                 }
-                .padding(.horizontal, compact ? 7 : 10)
+                .padding(.horizontal, compact ? 8 : 11)
                 .padding(.vertical, compact ? 4 : 6)
-                .background(.black.opacity(0.45), in: Capsule())
-                .padding(compact ? 6 : 10)
+                .background {
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(0.14), lineWidth: 0.5)
+                        }
+                }
+                .padding(compact ? 7 : 11)
             }
         }
-        .clipShape(RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .overlay {
-            RoundedRectangle(cornerRadius: compact ? 14 : 18, style: .continuous)
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .stroke(
                     person.isSpeaking ? Theme.live : Color.white.opacity(0.12),
                     lineWidth: person.isSpeaking ? 2.5 : 1
+                )
+                .shadow(
+                    color: person.isSpeaking ? Theme.live.opacity(0.6) : .clear,
+                    radius: person.isSpeaking ? 8 : 0
                 )
                 // Speaking is a fact about the last few hundred milliseconds;
                 // without the fade the border strobes through a sentence.
@@ -73,9 +85,23 @@ struct ParticipantTile: View {
     private var initialsBadge: some View {
         ZStack {
             Circle()
-                .fill(Theme.accentGradient)
-                .frame(width: compact ? 44 : 68, height: compact ? 44 : 68)
-                .opacity(0.9)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.22, green: 0.52, blue: 0.98),
+                            Color(red: 0.12, green: 0.36, blue: 0.82)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: compact ? 48 : 72, height: compact ? 48 : 72)
+                .overlay {
+                    Circle()
+                        .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                }
+                .shadow(color: .black.opacity(0.25), radius: 10, y: 4)
+
             Text(initials)
                 .font((compact ? Font.headline : Font.title2).weight(.semibold))
                 .foregroundStyle(.white)
@@ -84,9 +110,10 @@ struct ParticipantTile: View {
     }
 
     private var initials: String {
-        let source = person.isLocal ? person.name : person.name
+        let source = person.name
         let parts = source.split(separator: " ").prefix(2)
         let letters = parts.compactMap { $0.first }.map(String.init).joined()
         return letters.isEmpty ? "?" : letters.uppercased()
     }
 }
+
