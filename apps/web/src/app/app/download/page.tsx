@@ -251,11 +251,13 @@ function PlatformRow({
   fallbackHref?: string;
 }) {
   return (
-    <div className="flex items-center gap-4 p-5 rounded-2xl border border-[var(--color-cream)] bg-white">
+    <div className="flex items-center flex-wrap gap-4 p-5 rounded-2xl border border-[var(--color-cream)] bg-white">
       <div className="shrink-0 w-10 h-10 flex items-center justify-center text-[var(--color-charcoal)]">
         {icon}
       </div>
-      <div className="flex-1 min-w-0">
+      {/* basis, not just flex-1: below it the CTA wraps to its own line rather
+          than squeezing the name and detail into a two-word-per-line column. */}
+      <div className="flex-1 basis-40 min-w-0">
         <div className="font-semibold text-[var(--color-charcoal)]">{name}</div>
         <div className="text-sm text-[var(--color-gray)] mt-0.5">{detail}</div>
       </div>
