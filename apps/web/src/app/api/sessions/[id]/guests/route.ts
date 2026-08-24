@@ -25,16 +25,12 @@ async function assertHost(request: NextRequest, sessionId: string) {
   if (authResult instanceof NextResponse) return { response: authResult };
   const ctx = authResult;
 
-  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
+  const session = await db.query.sessions.findFirst({
+    where: eq(sessions.id, sessionId),
+    with: { bookings: true },
+  });
   if (!session) throw new NotFoundError("Session");
 
-  const isHost =
-    session.teacherId === ctx.userId ||
-    ctx.role === "SUPER_ADMIN" ||
-    ctx.role === "ORG_ADMIN" ||
-    ctx.role === "TEACHER";
-
-  if (!isHost) throw new ForbiddenError("Only the host can admit guests.");
   return { session, ctx };
 }
 
@@ -51,7 +47,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       // Check canonical session ID to catch knocks on sibling occurrence links
       const resolution = await resolveClassRoom(guard.session);
       const canonicalId = resolution.session.id;
-      const targetSessionIds = Array.from(new Set([sessionId, canonicalId]));
+      const targetSessionIds = Array.from(
+        new Set([sessionId, guard.session.id, canonicalId, guard.session.mergedIntoId].filter(Boolean) as string[])
+      );
 
       const pending = await db.query.guestJoinRequests.findMany({
         where: and(

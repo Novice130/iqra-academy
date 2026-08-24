@@ -59,19 +59,28 @@ export const ScreenShareIcon = (p: P) => (
   </svg>
 );
 
-/**
- * Background effects: a person standing in front of a dashed frame — the
- * frame is what's being swapped out. The old glyph was a person with a
- * sparkle, which read as "add someone to the call" sitting two buttons away
- * from the People button.
- */
-export const EffectsIcon = (p: P) => (
+export const FramePersonIcon = (p: P) => (
   <svg {...base} {...p}>
-    <rect x="2.5" y="3.5" width="19" height="17" rx="3" strokeDasharray="3.2 2.6" />
-    <circle cx="12" cy="10" r="2.7" />
-    <path d="M7.3 17.6a5 5 0 0 1 9.4 0" />
+    <path d="M4 7V4h3M17 4h3v3M4 17v3h3M17 20h3v-3" strokeWidth={2} />
+    <circle cx="12" cy="10" r="2.8" />
+    <path d="M8 17.5a4 4 0 0 1 8 0" />
   </svg>
 );
+
+export const VisualEffectsSparkleIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M19 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h7" />
+    <circle cx="8.5" cy="9.5" r="1.5" />
+    <path d="m21 16-5-5L5 21" />
+    <path d="M18.5 2.5v4M20.5 4.5h-4" strokeWidth={2} />
+  </svg>
+);
+
+/**
+ * Background effects: a person standing in front of a dashed frame — the
+ * frame is what's being swapped out.
+ */
+export const EffectsIcon = VisualEffectsSparkleIcon;
 
 export const SettingsIcon = (p: P) => (
   <svg {...base} {...p}>

@@ -24,7 +24,7 @@ import {
   useCreateLayoutContext,
 } from '@livekit/components-react';
 import CallControlBar, { type ViewMode, VIEW_MODES } from './CallControlBar';
-import { LayoutIcon, ChevronUpIcon, EffectsIcon } from './CallIcons';
+import { LayoutIcon, ChevronUpIcon, EffectsIcon, FramePersonIcon, VisualEffectsSparkleIcon, MoreIcon } from './CallIcons';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
@@ -378,6 +378,8 @@ export default function CustomVideoConference({
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [effectsOpen, setEffectsOpen] = useState(false);
+  const [tileMenuOpen, setTileMenuOpen] = useState(false);
+  const [tileFit, setTileFit] = useState<'cover' | 'contain'>('contain');
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const tapStartTimeRef = useRef(0);
@@ -386,11 +388,11 @@ export default function CustomVideoConference({
   const resetIdleTimer = useCallback(() => {
     setChromeHidden(false);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen) return;
+    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen || tileMenuOpen) return;
     idleTimerRef.current = setTimeout(() => {
       setChromeHidden(true);
     }, 3500);
-  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen]);
+  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen, tileMenuOpen]);
 
   useEffect(() => {
     resetIdleTimer();
@@ -485,7 +487,7 @@ export default function CustomVideoConference({
       isLocal={p.isLocal}
       isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
       actions={actionsFor(p)}
-      fit={fit}
+      fit={p.isLocal ? tileFit : fit}
     />
   );
 
@@ -723,37 +725,132 @@ export default function CustomVideoConference({
               )}
             </div>
 
-            {/* Floating Center Visual Effects Button (Icon Only — Apple Liquid Glass) */}
+            {/* Google Meet 3-Button Action Pill (Reframe, Visual Effects, More Menu) */}
             <div
               className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[55] pointer-events-auto transition-all duration-300 ${
                 chromeHidden ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'
               }`}
             >
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setEffectsOpen((v) => !v);
-                }}
-                title="Change background / visual effects"
-                aria-label="Change background / visual effects"
-                className="group w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 active:scale-95 text-white shadow-2xl hover:brightness-110"
+              <div
+                className="flex items-center gap-1 p-1 rounded-full shadow-2xl"
                 style={{
-                  background: effects.active
-                    ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.42) 0%, rgba(0, 90, 220, 0.30) 100%)'
-                    : 'rgba(255, 255, 255, 0.12)',
-                  backdropFilter: 'blur(28px) saturate(200%) contrast(105%)',
-                  WebkitBackdropFilter: 'blur(28px) saturate(200%) contrast(105%)',
-                  border: effects.active
-                    ? '1px solid rgba(120, 190, 255, 0.55)'
-                    : '1px solid rgba(255, 255, 255, 0.25)',
-                  boxShadow: effects.active
-                    ? '0 12px 36px rgba(0, 122, 255, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.70), inset 0 -1px 0 0 rgba(0, 122, 255, 0.25)'
-                    : '0 10px 30px rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.50), inset 0 -1px 0 0 rgba(255, 255, 255, 0.10)',
+                  background: 'rgba(24, 26, 34, 0.65)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  boxShadow:
+                    '0 16px 40px rgba(0, 0, 0, 0.50), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
                 }}
               >
-                <EffectsIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white shrink-0 group-hover:scale-110 transition-transform" />
-              </button>
+                {/* Button 1: Reframe / Fit */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTileFit((prev) => (prev === 'cover' ? 'contain' : 'cover'));
+                  }}
+                  title="Reframe video"
+                  aria-label="Reframe video"
+                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 hover:bg-white/15 text-white/90 hover:text-white"
+                >
+                  <FramePersonIcon className="w-5 h-5" />
+                </button>
+
+                {/* Button 2: Visual Effects / Background Replace */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEffectsOpen((v) => !v);
+                  }}
+                  title="Apply visual effects"
+                  aria-label="Apply visual effects"
+                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 text-white"
+                  style={{
+                    background: effects.active
+                      ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.45) 0%, rgba(0, 90, 220, 0.35) 100%)'
+                      : 'transparent',
+                    border: effects.active ? '1px solid rgba(120, 190, 255, 0.50)' : '1px solid transparent',
+                    boxShadow: effects.active ? '0 4px 14px rgba(0, 122, 255, 0.35)' : 'none',
+                  }}
+                >
+                  <VisualEffectsSparkleIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
+                </button>
+
+                {/* Button 3: More Options Menu */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTileMenuOpen((v) => !v);
+                  }}
+                  title="More options"
+                  aria-label="More options"
+                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 hover:bg-white/15 text-white/90 hover:text-white"
+                >
+                  <MoreIcon className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Context Menu matching Google Meet */}
+              {tileMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[80]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setTileMenuOpen(false);
+                    }}
+                  />
+                  <div
+                    className="absolute left-1/2 -translate-x-1/2 top-14 z-[81] w-64 rounded-3xl p-2 shadow-2xl animate-fadeIn overflow-hidden"
+                    style={{
+                      background: 'rgba(24, 26, 34, 0.85)',
+                      backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                      WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                      border: '1px solid rgba(255, 255, 255, 0.20)',
+                      boxShadow:
+                        '0 24px 64px rgba(0, 0, 0, 0.60), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTileFit((prev) => (prev === 'cover' ? 'contain' : 'cover'));
+                        setTileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
+                    >
+                      <FramePersonIcon className="w-4 h-4 text-white/70" />
+                      <span>{tileFit === 'cover' ? 'Fit video to screen' : 'Fill video to screen'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEffectsOpen(true);
+                        setTileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
+                    >
+                      <VisualEffectsSparkleIcon className="w-4 h-4 text-blue-400" />
+                      <span>Change background effects</span>
+                    </button>
+                    {isModerator && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          handleSpotlight(localCamera?.base === focusIdentity ? null : localCamera?.base ?? null);
+                          setTileMenuOpen(false);
+                        }}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
+                      >
+                        <span className="text-sm">📌</span>
+                        <span>Pin / Spotlight self-view</span>
+                      </button>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
 
             {effectsOpen && (
@@ -788,6 +885,9 @@ export default function CustomVideoConference({
             )}
           </div>
 
+          {/* Always-active Guest Admission Prompt outside chromeHidden */}
+          <GuestKnockPrompt sessionId={sessionId} />
+
           <div
             className={`transition-all duration-300 ${
               chromeHidden ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
@@ -811,8 +911,6 @@ export default function CustomVideoConference({
                 </span>
               </div>
             )}
-
-            {(isModerator || isHost) && <GuestKnockPrompt sessionId={sessionId} />}
           </div>
 
           <SoloInactivityPrompt isHost={isHost} onLeaveOrEnd={onEndClassIntent} />
