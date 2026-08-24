@@ -323,31 +323,41 @@ export default function PeoplePanel({
     });
 
   return (
-    <div
-      className="fixed inset-0 z-[60] sm:static sm:z-auto sm:w-[340px] sm:shrink-0 flex flex-col"
-      style={{
-        background: 'rgba(20, 22, 28, 0.92)',
-        backdropFilter: 'blur(28px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-        borderLeft: '1px solid rgba(255, 255, 255, 0.12)',
-      }}
-    >
+    <>
+      <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <div
-        className="flex items-center justify-between px-4 h-14 shrink-0"
-        style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}
+        className="fixed left-1/2 -translate-x-1/2 bottom-[84px] sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[71] flex flex-col rounded-3xl overflow-hidden shadow-2xl animate-fadeIn"
+        style={{
+          width: 'min(94vw, 440px)',
+          maxHeight: '75vh',
+          background: 'rgba(20, 22, 28, 0.92)',
+          backdropFilter: 'blur(28px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        }}
       >
-        <span className="text-sm font-bold text-white tracking-tight">People ({people.length})</span>
-        <button
-          onClick={onClose}
-          className="w-8 h-8 rounded-full flex items-center justify-center cursor-pointer text-white/70 hover:text-white bg-white/10 transition"
-          aria-label="Close"
+        <div
+          className="flex items-center justify-between px-5 h-14 shrink-0"
+          style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}
         >
-          ✕
-        </button>
-      </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-bold text-white tracking-tight">People in Class</span>
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+              {people.length}
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer text-white/70 hover:text-white bg-white/10 hover:bg-white/15 transition"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        </div>
 
-      <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2">
-        {isModerator && <InviteGuest sessionId={sessionId} />}
+        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
+          {isModerator && <InviteGuest sessionId={sessionId} />}
 
         {people.map((p) => {
           const spotlighted = p.base === baseIdentity(spotlightIdentity);
@@ -438,5 +448,6 @@ export default function PeoplePanel({
         {isModerator && <RingStudents sessionId={sessionId} />}
       </div>
     </div>
+    </>
   );
 }

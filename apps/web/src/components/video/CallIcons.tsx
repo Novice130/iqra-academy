@@ -82,18 +82,21 @@ export const SettingsIcon = (p: P) => (
 
 export const ChatIcon = (p: P) => (
   <svg {...base} {...p}>
-    <path d="M20.5 12.5a7.5 7.5 0 0 1-10.9 6.7L4 20.5l1.4-5A7.5 7.5 0 1 1 20.5 12.5z" />
+    <path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z" />
   </svg>
 );
 
+/** Single person with plus icon — for inviting/adding someone to the call */
 export const PeopleIcon = (p: P) => (
   <svg {...base} {...p}>
-    <circle cx="9" cy="8" r="3.2" />
-    <path d="M3 19a6 6 0 0 1 12 0" />
-    <path d="M16 5.6a3.2 3.2 0 0 1 0 6.3" />
-    <path d="M17.5 14.2A5.6 5.6 0 0 1 21 19" />
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+    <circle cx="9" cy="7" r="4" />
+    <line x1="19" y1="8" x2="19" y2="14" />
+    <line x1="16" y1="11" x2="22" y2="11" />
   </svg>
 );
+
+export const UserPlusIcon = PeopleIcon;
 
 export const MoreIcon = (p: P) => (
   <svg {...base} {...p}>

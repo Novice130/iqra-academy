@@ -51,22 +51,30 @@ void main() {
 }
 `;
 
-/** Blends this frame's mask into the running average. */
+/** Blends this frame's mask into the running average with motion-adaptive responsiveness. */
 const temporalShader = `#version 300 es
 precision highp float;
 in vec2 uv;
 uniform sampler2D u_current;
 uniform sampler2D u_previous;
-uniform float u_blend;      // 1.0 = ignore history
+uniform float u_blend;      // base blend rate (e.g. 0.65)
 uniform bool u_reset;       // first frame, or the mask changed size
-uniform bool u_invert;      // masks are per-category; we ask for "background"
+uniform bool u_invert;      // invert if channel is background
 out vec4 fragColor;
 
 void main() {
   float current = texture(u_current, uv).r;
   if (u_invert) current = 1.0 - current;
   float previous = texture(u_previous, uv).r;
-  float blended = u_reset ? current : mix(previous, current, u_blend);
+
+  // Motion-adaptive temporal blend:
+  // When the head/body moves, the difference between current and previous frame is high.
+  // We dynamically increase the blend towards 1.0 so fast movements have ZERO ghosting/trails.
+  // In static areas, we maintain smooth temporal integration to eliminate 30Hz edge grain.
+  float diff = abs(current - previous);
+  float adaptiveBlend = clamp(u_blend + diff * 4.0, 0.45, 1.0);
+
+  float blended = u_reset ? current : mix(previous, current, adaptiveBlend);
   fragColor = vec4(vec3(blended), 1.0);
 }
 `;
@@ -129,17 +137,15 @@ void main() {
   vec3 person = texture(u_frame, uv).rgb;
   vec3 background = texture(u_background, uv * u_bgScale + u_bgOffset).rgb;
 
-  // The mask is already soft and already smoothed over time, so this is a
-  // narrow window rather than the wide guess you need against a binary mask:
-  // it sharpens the middle of the gradient without hardening the ends.
-  float mask = texture(u_mask, uv).r;
-  float alpha = smoothstep(0.5 - u_edge, 0.5 + u_edge, mask);
+  // S-curve contrast curve on mask to reject low-probability background noise
+  // and cleanly define contours around hair, hats, and glasses
+  float rawMask = texture(u_mask, uv).r;
+  float contrastMask = smoothstep(0.15, 0.85, rawMask);
+  float alpha = smoothstep(0.5 - u_edge, 0.5 + u_edge, contrastMask);
 
-  // Light wrap. A real subject picks up colour from what is behind them, and
-  // its absence is most of why a composite looks cut out with scissors. This
-  // peaks exactly on the transition and is zero on either side of it.
+  // Subtle natural light wrap on the boundary rim
   float rim = 4.0 * alpha * (1.0 - alpha);
-  vec3 lit = mix(person, background, rim * u_wrap);
+  vec3 lit = mix(person, background, rim * u_wrap * 0.4);
 
   fragColor = vec4(mix(background, lit, alpha), 1.0);
 }
@@ -220,12 +226,12 @@ export interface PipelineSettings {
 }
 
 export const DEFAULT_SETTINGS: PipelineSettings = {
-  // Fast enough that a turning head doesn't smear, slow enough to kill the
-  // per-frame jitter that the old pipeline showed as grain.
-  temporalBlend: 0.45,
-  maskFeather: 1.2,
-  edgeSoftness: 0.12,
-  lightWrap: 0.3,
+  // Fast and responsive so fast head turns have zero ghosting trails,
+  // while motion-adaptive blending cleans up 30Hz jitter on static edges.
+  temporalBlend: 0.65,
+  maskFeather: 1.0,
+  edgeSoftness: 0.08,
+  lightWrap: 0.2,
 };
 
 /** How much the background is downscaled before being blurred. */

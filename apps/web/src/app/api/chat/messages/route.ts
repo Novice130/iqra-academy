@@ -11,7 +11,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
-import { eq, and, asc, isNull } from "drizzle-orm";
+import { eq, and, asc, isNull, gte, lt, sql } from "drizzle-orm";
 import { chatMessages, chatRooms, notifications, subscriptions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
@@ -20,7 +20,7 @@ import { createId } from "@paralleldrive/cuid2";
 const sendMessageSchema = z.object({
   sessionId: z.string().min(1).optional(),
   studentId: z.string().min(1).optional(),
-  content: z.string().min(1).max(500),
+  content: z.string().min(1).max(2000000), // Supports text, image embeds, and video links
 });
 
 const STAFF_ROLES = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"];
@@ -43,6 +43,20 @@ export async function GET(request: NextRequest) {
       const studentId = searchParams.get("studentId");
 
       return await withRLS(ctx, async (tx) => {
+        // Opportunistically clean up messages older than 2 months (60 days)
+        try {
+          await tx
+            .delete(chatMessages)
+            .where(
+              and(
+                eq(chatMessages.orgId, ctx.orgId),
+                lt(chatMessages.createdAt, sql`NOW() - INTERVAL '60 days'`)
+              )
+            );
+        } catch {
+          // Non-blocking cleanup
+        }
+
         let room;
         if (sessionId) {
           room = await tx.query.chatRooms.findFirst({
@@ -81,6 +95,7 @@ export async function GET(request: NextRequest) {
         const conditions = [
           eq(chatMessages.roomId, room.id),
           eq(chatMessages.orgId, ctx.orgId),
+          gte(chatMessages.createdAt, sql`NOW() - INTERVAL '60 days'`),
         ];
         // Students don't see hidden or deleted messages
         if (!isStaff) {

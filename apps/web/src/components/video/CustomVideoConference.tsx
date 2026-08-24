@@ -467,7 +467,7 @@ export default function CustomVideoConference({
       micMuted={p.micMuted}
       cameraOff={p.cameraOff}
       isLocal={p.isLocal}
-      isSpotlighted={p.base === focusIdentity}
+      isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
       actions={actionsFor(p)}
       fit={fit}
     />

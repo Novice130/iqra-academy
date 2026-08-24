@@ -34,7 +34,6 @@ import {
   ChevronUpIcon,
   EffectsIcon,
   FlipCameraIcon,
-  LayoutIcon,
   LeaveIcon,
   MicIcon,
   MicOffIcon,
@@ -42,7 +41,7 @@ import {
   ScreenShareIcon,
 } from './CallIcons';
 
-type MenuId = 'mic' | 'camera' | 'effects' | 'view' | null;
+type MenuId = 'mic' | 'camera' | 'effects' | null;
 
 export type ViewMode = 'speaker' | 'gallery' | 'active';
 
@@ -233,8 +232,6 @@ export default function CallControlBar({
   peopleOpen,
   onToggleChat,
   onTogglePeople,
-  viewMode,
-  onViewModeChange,
 }: {
   effects: BackgroundEffects;
   isHost: boolean;
@@ -373,24 +370,14 @@ export default function CallControlBar({
             </RoundButton>
           )}
 
-          {/* Centered Background Effects Button */}
+          {/* Centered Background Effects Button (Google Meet Style) */}
           <RoundButton
-            label="Background effects"
+            label="Visual effects"
             active={menu === 'effects' || effects.active}
             onClick={() => toggleMenu('effects')}
           >
             <EffectsIcon />
           </RoundButton>
-
-          {onViewModeChange && (
-            <RoundButton
-              label="View layout"
-              active={menu === 'view'}
-              onClick={() => toggleMenu('view')}
-            >
-              <LayoutIcon />
-            </RoundButton>
-          )}
 
           <RoundButton
             label="Chat"
@@ -401,7 +388,7 @@ export default function CallControlBar({
             <ChatIcon />
           </RoundButton>
 
-          <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
+          <RoundButton label="Add people / Participants" active={peopleOpen} onClick={onTogglePeople}>
             <PeopleIcon />
           </RoundButton>
 
@@ -465,48 +452,6 @@ export default function CallControlBar({
             onSelect={() => setMenu(null)}
             onClose={() => setMenu(null)}
           />
-        </Popover>
-      )}
-
-      {menu === 'view' && onViewModeChange && (
-        <Popover onClose={() => setMenu(null)}>
-          <div className="p-2">
-            <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">
-              Choose Layout
-            </div>
-            <div className="space-y-1">
-              {VIEW_MODES.map((m) => {
-                const selected = viewMode === m.id;
-                return (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => {
-                      onViewModeChange(m.id);
-                      setMenu(null);
-                    }}
-                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left cursor-pointer transition-colors"
-                    style={{
-                      background: selected ? 'rgba(0, 122, 255, 0.22)' : 'transparent',
-                    }}
-                  >
-                    <span className="w-4 shrink-0 text-sm font-bold" style={{ color: '#60a5fa' }}>
-                      {selected ? '✓' : ''}
-                    </span>
-                    <span className="min-w-0">
-                      <span
-                        className="block text-xs font-semibold"
-                        style={{ color: selected ? '#93c5fd' : '#f3f4f6' }}
-                      >
-                        {m.label}
-                      </span>
-                      <span className="block text-[11px] text-white/45">{m.hint}</span>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </Popover>
       )}
     </>

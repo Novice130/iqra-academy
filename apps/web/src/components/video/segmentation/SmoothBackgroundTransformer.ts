@@ -261,9 +261,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
         this.segmenter.segmentForVideo(frame, timestamp, (result) => {
           const masks = result.confidenceMasks;
-          const mask = masks?.[0];
-          if (mask) {
-            const invert = masks.length > 1;
+          if (masks && masks.length > 0) {
+            // MediaPipe 2-class selfie segmenter: masks[0] is background, masks[1] is person
+            const mask = masks.length > 1 ? masks[1] : masks[0];
+            const invert = masks.length === 1;
             this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
           }
           result.close();

@@ -15,7 +15,6 @@ import { users } from "@/db/schema";
 import { requireRole, ROLE_HIERARCHY } from "@/lib/rbac";
 import {
   handleApiError,
-  ConflictError,
   NotFoundError,
   ForbiddenError,
   BusinessRuleError,
@@ -25,22 +24,16 @@ import { notify } from "@/lib/notify";
 
 const createUserSchema = z.object({
   email: z.string().email(),
-  name: z.string().min(1).max(100),
-  role: z.enum(["STUDENT", "TEACHER"]),
+  name: z.string().min(1).max(100).optional(),
+  role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN"]).default("TEACHER"),
   phone: z.string().optional(),
+  timezone: z.string().optional(),
 });
 
 const updateUserSchema = z.object({
   userId: z.string().min(1),
   name: z.string().min(1).max(100).optional(),
-  /**
-   * Every role is accepted here on purpose. The privilege ceiling below is
-   * what rejects an over-reach, rather than a zod enum — encoding the policy
-   * in the parser meant a SUPER_ADMIN could not do their own job, while an
-   * ORG_ADMIN could still demote one.
-   */
   role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]).optional(),
-  /** Empty string clears the number. Absent leaves it alone. */
   phone: z.string().max(40).optional(),
 });
 
@@ -76,10 +69,6 @@ export async function GET(request: NextRequest) {
             name: users.name,
             role: users.role,
             phone: users.phone,
-            /**
-             * Shown in the admin table because a teacher with no zone is the
-             * exact condition that makes their availability unusable.
-             */
             timezone: users.timezone,
             createdAt: users.createdAt,
             emailVerified: users.emailVerified,
@@ -96,7 +85,7 @@ export async function GET(request: NextRequest) {
   });
 }
 
-/** POST /api/admin/users — create a user in the org */
+/** POST /api/admin/users — create or add a teacher/user in the org */
 export async function POST(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -108,26 +97,57 @@ export async function POST(request: NextRequest) {
       const data = createUserSchema.parse(body);
 
       return await withRLS(ctx, async (tx) => {
-        // Check duplicate email within org
+        // Check existing user within org
         const existing = await tx.query.users.findFirst({
-          where: and(eq(users.email, data.email), eq(users.orgId, ctx.orgId)),
+          where: and(eq(users.email, data.email.toLowerCase().trim()), eq(users.orgId, ctx.orgId)),
         });
-        if (existing) throw new ConflictError("A user with this email already exists in your organization.");
 
-        const [user] = await tx.insert(users).values({
-          ...data,
-          role: data.role as typeof users.role.enumValues[number],
-          orgId: ctx.orgId,
-        }).returning();
+        if (existing) {
+          const [updated] = await tx
+            .update(users)
+            .set({
+              role: data.role as typeof users.role.enumValues[number],
+              ...(data.name ? { name: data.name } : {}),
+              ...(data.timezone ? { timezone: data.timezone } : {}),
+            })
+            .where(eq(users.id, existing.id))
+            .returning();
+
+          await logAudit({
+            orgId: ctx.orgId,
+            actorId: ctx.userId,
+            action: "ROLE_CHANGED",
+            target: `user:${existing.id}`,
+            metadata: { email: data.email, role: data.role, promoted: true },
+            ipAddress: getClientIp(request.headers),
+          });
+
+          return NextResponse.json({ user: updated, promoted: true }, { status: 200 });
+        }
+
+        const fallbackName = data.name || data.email.split("@")[0];
+        const [user] = await tx
+          .insert(users)
+          .values({
+            email: data.email.toLowerCase().trim(),
+            name: fallbackName,
+            role: data.role as typeof users.role.enumValues[number],
+            phone: data.phone,
+            timezone: data.timezone || "America/New_York",
+            orgId: ctx.orgId,
+          })
+          .returning();
 
         await logAudit({
-          orgId: ctx.orgId, actorId: ctx.userId,
-          action: "USER_CREATED", target: `user:${user.id}`,
+          orgId: ctx.orgId,
+          actorId: ctx.userId,
+          action: "USER_CREATED",
+          target: `user:${user.id}`,
           metadata: { email: data.email, role: data.role },
           ipAddress: getClientIp(request.headers),
         });
 
-        return NextResponse.json({ user }, { status: 201 });
+        return NextResponse.json({ user, promoted: false }, { status: 201 });
       });
     } catch (error) {
       return handleApiError(error);

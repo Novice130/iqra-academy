@@ -142,9 +142,72 @@ export default function UserRoleTable({
     verticalAlign: "middle",
   };
 
+  const [addOpen, setAddOpen] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newTz, setNewTz] = useState("America/New_York");
+  const [adding, setAdding] = useState(false);
+
+  async function handleAddTeacher(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newEmail.trim()) return;
+
+    setAdding(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: newEmail.trim(),
+          name: newName.trim() || undefined,
+          role: "TEACHER",
+          timezone: newTz,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to add teacher");
+
+      const createdUser = data.user;
+      setRows((prev) => {
+        const existingIdx = prev.findIndex((u) => u.id === createdUser.id || u.email.toLowerCase() === createdUser.email.toLowerCase());
+        const row: AdminUserRow = {
+          id: createdUser.id,
+          email: createdUser.email,
+          name: createdUser.name,
+          role: createdUser.role,
+          phone: createdUser.phone || null,
+          timezone: createdUser.timezone || newTz,
+          createdAt: createdUser.createdAt || new Date().toISOString(),
+        };
+        if (existingIdx >= 0) {
+          const copy = [...prev];
+          copy[existingIdx] = row;
+          return copy;
+        }
+        return [row, ...prev];
+      });
+
+      setMessage({
+        text: `Teacher ${createdUser.email} has been added! When they log in, they will automatically have all teacher features.`,
+        bad: false,
+      });
+      setAddOpen(false);
+      setNewEmail("");
+      setNewName("");
+    } catch (err) {
+      setMessage({
+        text: err instanceof Error ? err.message : "Failed to add teacher.",
+        bad: true,
+      });
+    } finally {
+      setAdding(false);
+    }
+  }
+
   return (
     <div>
-      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "16px" }}>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "16px", alignItems: "center" }}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -163,7 +226,152 @@ export default function UserRoleTable({
             </option>
           ))}
         </select>
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          style={{
+            background: "linear-gradient(135deg, #007aff 0%, #0056b3 100%)",
+            color: "#fff",
+            border: "none",
+            borderRadius: "8px",
+            padding: "9px 16px",
+            fontSize: "14px",
+            fontWeight: 600,
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+          }}
+        >
+          + Add Teacher
+        </button>
       </div>
+
+      {addOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 100,
+            background: "rgba(0,0,0,0.65)",
+            backdropFilter: "blur(6px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onClick={() => setAddOpen(false)}
+        >
+          <div
+            style={{
+              background: "#1e293b",
+              border: "1px solid #334155",
+              borderRadius: "16px",
+              padding: "24px",
+              width: "100%",
+              maxWidth: "460px",
+              boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
+              <h3 style={{ color: "#fff", margin: 0, fontSize: "18px", fontWeight: 700 }}>Add New Teacher</h3>
+              <button
+                onClick={() => setAddOpen(false)}
+                style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}
+              >
+                ✕
+              </button>
+            </div>
+            <p style={{ color: "#94a3b8", fontSize: "13px", marginTop: 0, marginBottom: "16px", lineHeight: "1.5" }}>
+              Enter the teacher&apos;s email address. Once added, when this person logs in with this email (via Google or password), they will automatically get full teacher dashboard and classroom access.
+            </p>
+            <form onSubmit={handleAddTeacher} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div>
+                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                  Teacher Email *
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="teacher@example.com"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                  Full Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g. Ustadha Fatima"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                />
+              </div>
+              <div>
+                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
+                  Time Zone
+                </label>
+                <select
+                  value={newTz}
+                  onChange={(e) => setNewTz(e.target.value)}
+                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+                >
+                  <option value="America/New_York">America/New_York (Eastern)</option>
+                  <option value="America/Chicago">America/Chicago (Central)</option>
+                  <option value="America/Denver">America/Denver (Mountain)</option>
+                  <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
+                  <option value="Europe/London">Europe/London (GMT/BST)</option>
+                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
+                  <option value="Asia/Karachi">Asia/Karachi (PKT)</option>
+                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
+                  <option value="Asia/Riyadh">Asia/Riyadh (AST)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+                <button
+                  type="button"
+                  onClick={() => setAddOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    borderRadius: "8px",
+                    border: "1px solid #475569",
+                    background: "#334155",
+                    color: "#e2e8f0",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={adding || !newEmail.trim()}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "linear-gradient(135deg, #007aff 0%, #0056b3 100%)",
+                    color: "#fff",
+                    fontWeight: 600,
+                    cursor: adding ? "not-allowed" : "pointer",
+                    opacity: adding ? 0.7 : 1,
+                  }}
+                >
+                  {adding ? "Adding..." : "Add Teacher"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {message && (
         <div
