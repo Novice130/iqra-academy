@@ -10,9 +10,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Spinner from '@/components/Spinner';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
+import { authClient } from '@/lib/auth-client';
 
 const POLL_INTERVAL_MS = 2500;
 /** Matches the server's knock window — past this the request is EXPIRED anyway. */
@@ -22,6 +23,7 @@ type Stage = 'form' | 'waiting' | 'denied' | 'admitted' | 'error';
 
 export default function GuestJoinPage() {
   const params = useParams();
+  const router = useRouter();
   const sessionId = params.id as string;
 
   const [stage, setStage] = useState<Stage>('form');
@@ -37,6 +39,18 @@ export default function GuestJoinPage() {
   // Once we hold a token the answer is final: a poll already in flight must
   // not drag us back out of the room when the server retires the used request.
   const settledRef = useRef(false);
+
+  // If user is already logged in with an account, send them straight to class
+  useEffect(() => {
+    authClient
+      .getSession()
+      .then(({ data }) => {
+        if (data?.session && sessionId) {
+          router.replace(`/dashboard/session/${sessionId}`);
+        }
+      })
+      .catch(() => {});
+  }, [sessionId, router]);
 
   // Poll our own request until the host answers.
   useEffect(() => {

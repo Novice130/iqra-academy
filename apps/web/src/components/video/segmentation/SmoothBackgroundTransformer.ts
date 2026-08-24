@@ -110,6 +110,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   /** Segmentation wants a monotonically increasing timestamp in milliseconds. */
   private lastTimestamp = 0;
 
+  /** Minimum gap between heavy ML segmentation passes (ms) to keep 60fps WebGL fluid */
+  private lastInferenceTime = 0;
+  private static readonly MIN_INFERENCE_GAP_MS = 32; // ~30fps ML inference budget
+
   constructor(options: SmoothBackgroundOptions) {
     super();
     this.options = options;
@@ -247,33 +251,29 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         canvas.height = frame.displayHeight;
       }
 
-      // `segmentForVideo` is synchronous despite the callback, and the callback
-      // fires before it returns — so the mask folded in here belongs to this
-      // frame, not the last one. It refuses a timestamp that hasn't advanced.
-      const timestamp = Math.max(this.lastTimestamp + 1, performance.now());
-      this.lastTimestamp = timestamp;
-      this.segmenter.segmentForVideo(frame, timestamp, (result) => {
-        const masks = result.confidenceMasks;
-        const mask = masks?.[0];
-        if (mask) {
-          // What channel 0 means depends on the model, and getting it backwards
-          // replaces the *person* with the wallpaper — which is exactly what
-          // happened the first time this ran. A two-class segmenter emits one
-          // mask and it is the foreground; a multiclass one emits a mask per
-          // category and the first is the background. Read it off the number of
-          // masks rather than off which model we think we loaded.
-          const invert = masks.length > 1;
-          this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
-        }
-        result.close();
-      });
+      const now = performance.now();
+      const shouldRunInference = now - this.lastInferenceTime >= SmoothBackgroundTransformer.MIN_INFERENCE_GAP_MS || !this.pipeline.ready;
+
+      if (shouldRunInference) {
+        this.lastInferenceTime = now;
+        const timestamp = Math.max(this.lastTimestamp + 1, now);
+        this.lastTimestamp = timestamp;
+
+        this.segmenter.segmentForVideo(frame, timestamp, (result) => {
+          const masks = result.confidenceMasks;
+          const mask = masks?.[0];
+          if (mask) {
+            const invert = masks.length > 1;
+            this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
+          }
+          result.close();
+        });
+      }
 
       if (this.pipeline.ready && this.pipeline.render(frame)) {
         controller.enqueue(new VideoFrame(canvas, { timestamp: frame.timestamp ?? 0 }));
         handled = true;
       } else {
-        // No mask yet — the first frame or two. Passing the camera through is
-        // far better than a black hole where someone's face should be.
         passThrough();
       }
     } catch (err) {

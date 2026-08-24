@@ -218,7 +218,7 @@ function Popover({
   );
 }
 
-const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
+export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'speaker', label: 'Speaker View', hint: 'Spotlighted participant fills the stage' },
   { id: 'gallery', label: 'Gallery Grid', hint: 'All participants in an equal balanced grid' },
   { id: 'active', label: 'Active Speaker', hint: 'Dynamically tracks whoever is speaking' },
@@ -244,8 +244,8 @@ export default function CallControlBar({
   peopleOpen: boolean;
   onToggleChat: () => void;
   onTogglePeople: () => void;
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
+  viewMode?: ViewMode;
+  onViewModeChange?: (mode: ViewMode) => void;
 }) {
   const room = useRoomContext();
   const [menu, setMenu] = useState<MenuId>(null);
@@ -373,6 +373,7 @@ export default function CallControlBar({
             </RoundButton>
           )}
 
+          {/* Centered Background Effects Button */}
           <RoundButton
             label="Background effects"
             active={menu === 'effects' || effects.active}
@@ -380,6 +381,16 @@ export default function CallControlBar({
           >
             <EffectsIcon />
           </RoundButton>
+
+          {onViewModeChange && (
+            <RoundButton
+              label="View layout"
+              active={menu === 'view'}
+              onClick={() => toggleMenu('view')}
+            >
+              <LayoutIcon />
+            </RoundButton>
+          )}
 
           <RoundButton
             label="Chat"
@@ -392,10 +403,6 @@ export default function CallControlBar({
 
           <RoundButton label="People" active={peopleOpen} onClick={onTogglePeople}>
             <PeopleIcon />
-          </RoundButton>
-
-          <RoundButton label="View options" active={menu === 'view'} onClick={() => toggleMenu('view')}>
-            <LayoutIcon />
           </RoundButton>
 
           {/* Apple FaceTime red pill End/Leave button */}
@@ -453,15 +460,19 @@ export default function CallControlBar({
 
       {menu === 'effects' && (
         <Popover wide onClose={() => setMenu(null)}>
-          <BackgroundEffectsContent effects={effects} />
+          <BackgroundEffectsContent
+            effects={effects}
+            onSelect={() => setMenu(null)}
+            onClose={() => setMenu(null)}
+          />
         </Popover>
       )}
 
-      {menu === 'view' && (
+      {menu === 'view' && onViewModeChange && (
         <Popover onClose={() => setMenu(null)}>
           <div className="p-2">
             <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">
-              Layout
+              Choose Layout
             </div>
             <div className="space-y-1">
               {VIEW_MODES.map((m) => {

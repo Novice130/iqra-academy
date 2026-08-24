@@ -113,36 +113,35 @@ export async function GET(
 
       // Auto-book on the way in for an instant meeting, for a class this
       // teacher currently has running, or for the row that *is* the room for
-      // this occurrence. Without this a student redirected onto the teacher's
-      // group row — a row they were never booked on — gets a 403 and bounces
-      // back to their own empty session, which is the split-room bug itself.
+      // this occurrence. Ensures anyone holding the link with an account can join.
       if (!isStudent && !isTeacher && (isInstantMeeting || session.status === "IN_PROGRESS" || isTheRoom)) {
-        const [profiles, taughtBefore] = await Promise.all([
-          db.query.studentProfiles.findMany({
-            where: eq(studentProfiles.userId, ctx.userId),
-          }),
-          // Roster check: has this teacher ever taught this user before?
-          db
-            .select({ id: bookings.id })
-            .from(bookings)
-            .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-            .where(and(eq(bookings.userId, ctx.userId), eq(sessions.teacherId, session.teacherId)))
-            .limit(1),
-        ]);
+        const existingProfiles = await db.query.studentProfiles.findMany({
+          where: eq(studentProfiles.userId, ctx.userId),
+        });
 
-        // Still a roster check: the student has to be someone this teacher has
-        // actually taught. An instant meeting is the exception — its whole
-        // point is pulling in whoever the teacher just handed the link to.
-        if (profiles.length > 0 && (isInstantMeeting || taughtBefore.length > 0)) {
-           await db.insert(bookings).values({
-             id: createId(),
-             orgId: session.orgId,
-             userId: ctx.userId,
-             studentProfileId: profiles[0].id,
-             sessionId: session.id,
-             status: "CONFIRMED",
-           });
-           isStudent = true;
+        let profile = existingProfiles[0];
+        if (!profile) {
+          const profileId = createId();
+          await db.insert(studentProfiles).values({
+            id: profileId,
+            orgId: session.orgId,
+            userId: ctx.userId,
+            name: user.name || "Student",
+            track: "QAIDAH",
+          });
+          profile = { id: profileId, orgId: session.orgId, userId: ctx.userId, name: user.name || "Student", track: "QAIDAH" } as any;
+        }
+
+        if (profile) {
+          await db.insert(bookings).values({
+            id: createId(),
+            orgId: session.orgId,
+            userId: ctx.userId,
+            studentProfileId: profile.id,
+            sessionId: session.id,
+            status: "CONFIRMED",
+          }).catch(() => {});
+          isStudent = true;
         }
       }
 

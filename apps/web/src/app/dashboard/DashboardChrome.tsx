@@ -197,37 +197,60 @@ export default function DashboardChrome({
 
       {/* Main */}
       <main className="flex-1 min-w-0 flex flex-col">
-        {/* Mobile header */}
+        {/* Top Header — unified for mobile and desktop */}
         <header
-          className="relative flex items-center justify-between px-5 h-14 lg:hidden"
+          className="relative flex items-center justify-between px-5 h-14"
           style={{
             background: "var(--bg-elevated)",
             borderBottom: "1px solid var(--border)",
           }}
         >
-          <div className="flex items-center gap-2">
-            <img
-              src="/logo.png"
-              alt="Novice Tutor"
-              className="w-10 h-10 object-contain"
-            />
-            <span
-              className="text-sm font-semibold"
-              style={{ color: "var(--text-primary)" }}
-            >
-              Novice Tutor
-            </span>
+          {/* Left: Brand on mobile, Page context on desktop */}
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2 lg:hidden">
+              <img
+                src="/logo.png"
+                alt="Novice Tutor"
+                className="w-9 h-9 object-contain"
+              />
+              <span
+                className="text-sm font-semibold"
+                style={{ color: "var(--text-primary)" }}
+              >
+                Novice Tutor
+              </span>
+            </div>
+            <div className="hidden lg:flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
+                {titleFor(pathname ?? "", isTeachingRole)}
+              </span>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen((v) => !v)}
-            className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white cursor-pointer"
-            style={{ background: "var(--accent)" }}
-            aria-label="Account menu"
-            aria-expanded={mobileMenuOpen}
-          >
-            {initials}
-          </button>
+
+          {/* Right: User Account Profile Button */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((v) => !v)}
+              className="flex items-center gap-2.5 px-2.5 py-1.5 rounded-full cursor-pointer transition-colors hover:bg-white/5"
+              style={{ border: "1px solid var(--border)" }}
+              aria-label="Account menu"
+              aria-expanded={mobileMenuOpen}
+            >
+              <div
+                className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0"
+                style={{ background: "var(--accent)" }}
+              >
+                {initials}
+              </div>
+              <span
+                className="text-xs font-medium max-w-[120px] truncate hidden sm:inline"
+                style={{ color: "var(--text-primary)" }}
+              >
+                {user.name || "Account"}
+              </span>
+            </button>
+          </div>
 
           {mobileMenuOpen && (
             <>
@@ -237,21 +260,22 @@ export default function DashboardChrome({
                 onClick={() => setMobileMenuOpen(false)}
               />
               <div
-                className="absolute right-4 top-14 z-50 w-64 rounded-xl shadow-lg overflow-hidden"
+                className="absolute right-4 top-14 z-50 w-64 rounded-xl shadow-xl overflow-hidden animate-fadeIn"
                 style={{
                   background: "var(--bg-elevated)",
                   border: "1px solid var(--border)",
+                  boxShadow: "0 16px 36px rgba(0, 0, 0, 0.4)",
                 }}
               >
                 <div className="p-4" style={{ borderBottom: "1px solid var(--border)" }}>
                   <div
-                    className="text-sm font-medium truncate"
+                    className="text-sm font-semibold truncate"
                     style={{ color: "var(--text-primary)" }}
                   >
                     {user.name || "User"}
                   </div>
                   <div
-                    className="text-xs truncate"
+                    className="text-xs truncate mt-0.5"
                     style={{ color: "var(--text-tertiary)" }}
                   >
                     {user.email}

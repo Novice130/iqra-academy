@@ -30,14 +30,15 @@ export default function SessionRoomPage() {
    * Devices are left at the browser default and both tracks start on; anything
    * they want to change is one tap away on the control bar.
    */
-  const autoJoin = searchParams.get('answer') === '1';
+  // Default to instant direct join for seamless 1-click class entry
+  const showPreview = searchParams.get('preview') === '1';
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<Waiting | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
-  const [userName, setUserName] = useState<string>('Student');
+  const [userName, setUserName] = useState<string>('Participant');
   const [isModerator, setIsModerator] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
@@ -47,13 +48,6 @@ export default function SessionRoomPage() {
   const [joining, setJoining] = useState(false);
   const joinedRef = useRef(false);
 
-  /**
-   * `connecting` tells the server this token is about to be handed to LiveKit.
-   * That is also when it sweeps this person's stale connections out of the
-   * room, so it must not be set for the mount-time call that only decides
-   * between lobby / redirect / pre-join — otherwise opening a class on a
-   * second device evicts you from the one you are really in on the first.
-   */
   const attemptJoin = useCallback(async (opts?: { connecting?: boolean; force?: boolean }) => {
     if (joinedRef.current && !opts?.force) return false;
     try {
@@ -96,6 +90,9 @@ export default function SessionRoomPage() {
       if (data.userName) {
         setUserName(data.userName);
       }
+      if (!showPreview) {
+        setChoices({ videoEnabled: true, audioEnabled: true });
+      }
       return true;
     } catch (err: any) {
       setError(err.message);
@@ -103,27 +100,23 @@ export default function SessionRoomPage() {
     } finally {
       setLoading(false);
     }
-  }, [sessionId, router]);
+  }, [sessionId, router, showPreview]);
 
   useEffect(() => {
     if (!sessionId) return;
-    // Answering a ring goes straight into the room, so that first call *is*
-    // the connecting one.
-    attemptJoin({ connecting: autoJoin });
-  }, [sessionId, autoJoin, attemptJoin]);
+    // Connect immediately in a single fast roundtrip
+    attemptJoin({ connecting: !showPreview });
+  }, [sessionId, showPreview, attemptJoin]);
 
   // Keep asking while we're in the lobby. The moment the teacher starts — this
   // session or another one — the next poll picks up a token or a redirect.
   useEffect(() => {
     if (!waiting) return;
-    const interval = setInterval(() => attemptJoin({ connecting: autoJoin }), LOBBY_POLL_MS);
+    const interval = setInterval(() => attemptJoin({ connecting: !showPreview }), LOBBY_POLL_MS);
     return () => clearInterval(interval);
-  }, [waiting, autoJoin, attemptJoin]);
+  }, [waiting, showPreview, attemptJoin]);
 
-  // The pre-join choices double as the "has joined" flag — there's no room
-  // to render until the user has actually picked their devices. The token is
-  // re-minted here rather than reused from mount, so the server's stale-
-  // connection sweep happens now, when this device is genuinely joining.
+  // The pre-join choices double as the "has joined" flag when preview is enabled
   const handleJoin = async (picked: JoinChoices) => {
     setJoining(true);
     const ready = await attemptJoin({ connecting: true, force: true });
@@ -134,11 +127,21 @@ export default function SessionRoomPage() {
     setChoices(picked);
   };
 
-  if (loading) {
+  if (loading || joining) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white font-sans">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-emerald-500 mb-4" />
-        <p className="text-slate-400">Loading session credentials...</p>
+      <div className="flex flex-col items-center justify-center min-h-screen font-sans" style={{ background: '#131417' }}>
+        <div
+          className="mb-5 w-14 h-14 rounded-full"
+          style={{
+            border: '3.5px solid rgba(138,180,248,0.22)',
+            borderTopColor: '#8ab4f8',
+            animation: 'lk-spin 800ms linear infinite',
+          }}
+        />
+        <h2 className="text-base font-semibold text-white tracking-tight mb-1">
+          {loading ? 'Starting class…' : 'Connecting to classroom…'}
+        </h2>
+        <p className="text-xs text-neutral-400">Setting up audio and video devices</p>
       </div>
     );
   }
@@ -205,21 +208,6 @@ export default function SessionRoomPage() {
 
   if (!token || !serverUrl) return null;
 
-  if (autoJoin && !choices) {
-    return (
-      <LiveKitRoom
-        token={token}
-        url={serverUrl}
-        sessionId={sessionId}
-        isModerator={isModerator}
-        isHost={isHost}
-        choices={{ videoEnabled: true, audioEnabled: true }}
-        teacherIdentity={teacherIdentity}
-        identity={identity}
-      />
-    );
-  }
-
   if (choices) {
     return (
       <LiveKitRoom
@@ -232,24 +220,6 @@ export default function SessionRoomPage() {
         teacherIdentity={teacherIdentity}
         identity={identity}
       />
-    );
-  }
-
-  // The gap between tapping Join and the room appearing is one request long.
-  // Leaving the pre-join screen up looks like the button did nothing.
-  if (joining) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-screen font-sans" style={{ background: '#131417' }}>
-        <div
-          className="mb-4 w-12 h-12 rounded-full"
-          style={{
-            border: '3px solid rgba(138,180,248,0.25)',
-            borderTopColor: '#8ab4f8',
-            animation: 'lk-spin 900ms linear infinite',
-          }}
-        />
-        <p style={{ color: 'rgba(255,255,255,0.55)' }}>Joining…</p>
-      </div>
     );
   }
 

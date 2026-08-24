@@ -17,6 +17,7 @@ import { db, withDb } from "@/lib/db";
 import { and, count, eq, gt } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
+import { resolveClassRoom } from "@/lib/class-room";
 import { createId } from "@paralleldrive/cuid2";
 
 /** A class nobody has started (or that ended hours ago) can't be knocked on. */
@@ -45,11 +46,9 @@ type SessionRow = typeof sessions.$inferSelect;
  * auto-creates rooms on join, so they'd sit in an unsupervised room alone.
  */
 function isJoinable(session: SessionRow): boolean {
-  return (
-    session.status === "IN_PROGRESS" &&
-    !!session.actualStart &&
-    session.actualStart.getTime() > Date.now() - JOINABLE_WINDOW_MS
-  );
+  if (session.status === "IN_PROGRESS") return true;
+  if (!session.actualStart) return false;
+  return session.actualStart.getTime() > Date.now() - JOINABLE_WINDOW_MS;
 }
 
 export async function POST(request: NextRequest) {
@@ -67,12 +66,16 @@ export async function POST(request: NextRequest) {
         throw new BusinessRuleError("Please enter your name.");
       }
 
-      const session = await db.query.sessions.findFirst({
+      const rawSession = await db.query.sessions.findFirst({
         where: eq(sessions.id, sessionId),
       });
-      if (!session) throw new NotFoundError("Session");
+      if (!rawSession) throw new NotFoundError("Session");
 
-      if (!isJoinable(session)) {
+      // Resolve to canonical room so knocks land where the teacher actually is
+      const resolution = await resolveClassRoom(rawSession);
+      const session = resolution.session;
+
+      if (resolution.kind === "too-early" && !isJoinable(session)) {
         throw new BusinessRuleError("This class hasn't started yet. Try the link again once it's live.");
       }
 
@@ -83,12 +86,10 @@ export async function POST(request: NextRequest) {
 
       const knockedSince = new Date(Date.now() - KNOCK_WINDOW_MS);
 
-      // Knocking twice is the same knock. Without this, the "Ask again"
-      // button and an impatient double-tap both stack another card on the
-      // host's screen.
+      // Knocking twice is the same knock. Match on canonical session or requested session
       const existing = await db.query.guestJoinRequests.findFirst({
         where: and(
-          eq(guestJoinRequests.sessionId, sessionId),
+          eq(guestJoinRequests.sessionId, session.id),
           eq(guestJoinRequests.name, name),
           eq(guestJoinRequests.status, "PENDING"),
           gt(guestJoinRequests.createdAt, knockedSince)
@@ -110,7 +111,7 @@ export async function POST(request: NextRequest) {
         .from(guestJoinRequests)
         .where(
           and(
-            eq(guestJoinRequests.sessionId, sessionId),
+            eq(guestJoinRequests.sessionId, session.id),
             eq(guestJoinRequests.status, "PENDING"),
             gt(guestJoinRequests.createdAt, knockedSince)
           )
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
       await db.insert(guestJoinRequests).values({
         id,
         orgId: session.orgId,
-        sessionId,
+        sessionId: session.id,
         name,
         status: "PENDING",
       });

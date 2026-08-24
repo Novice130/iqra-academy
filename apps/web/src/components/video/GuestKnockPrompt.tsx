@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 
-const POLL_INTERVAL_MS = 10000;
+const POLL_INTERVAL_MS = 2500;
 
 interface WaitingGuest {
   id: string;
@@ -26,7 +26,9 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
       if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await fetch(`/api/sessions/${sessionId}/guests`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          return;
+        }
         const data = await res.json();
         if (!cancelled) setGuests(data.guests || []);
       } catch {
@@ -63,7 +65,7 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
   if (guests.length === 0) return null;
 
   return (
-    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-50 w-[min(92vw,380px)] space-y-2 pointer-events-auto">
+    <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[100] w-[min(92vw,380px)] space-y-2 pointer-events-auto">
       {guests.map((g) => (
         <div
           key={g.id}

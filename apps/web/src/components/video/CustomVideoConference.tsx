@@ -23,7 +23,8 @@ import {
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
-import CallControlBar, { type ViewMode } from './CallControlBar';
+import CallControlBar, { type ViewMode, VIEW_MODES } from './CallControlBar';
+import { LayoutIcon, ChevronUpIcon } from './CallIcons';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
@@ -357,6 +358,7 @@ export default function CustomVideoConference({
 
   const focusIdentity = baseIdentity(roomSpotlight) ?? baseIdentity(teacherIdentity);
   const [viewMode, setViewMode] = useState<ViewMode>(isModerator ? 'gallery' : 'speaker');
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
 
   const speakers = useSpeakingParticipants();
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
@@ -602,6 +604,88 @@ export default function CustomVideoConference({
                 </DraggableTile>
               );
             })}
+
+            {/* Top Right Floating View Switcher — permanently mounted inside stage */}
+            <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-[60] pointer-events-auto">
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setViewMenuOpen((v) => !v);
+                }}
+                title="Switch layout"
+                aria-label="Switch layout"
+                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full cursor-pointer transition-all duration-150 active:scale-95 text-white font-medium text-xs shadow-2xl backdrop-blur-2xl"
+                style={{
+                  background: 'rgba(20, 22, 28, 0.85)',
+                  border: '1px solid rgba(255, 255, 255, 0.22)',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                }}
+              >
+                <LayoutIcon className="w-4 h-4 text-blue-400 shrink-0" />
+                <span className="capitalize text-xs font-semibold tracking-tight">
+                  {viewMode === 'gallery' ? 'Gallery View' : viewMode === 'speaker' ? 'Speaker View' : 'Active Speaker'}
+                </span>
+                <ChevronUpIcon className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${viewMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {viewMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[80]"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewMenuOpen(false);
+                    }}
+                  />
+                  <div
+                    className="absolute right-0 top-12 z-[81] w-56 rounded-2xl p-1.5 shadow-2xl animate-fadeIn overflow-hidden"
+                    style={{
+                      background: 'rgba(20, 22, 28, 0.95)',
+                      backdropFilter: 'blur(28px) saturate(180%)',
+                      WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                    }}
+                  >
+                    <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white/45">
+                      Choose Layout
+                    </div>
+                    <div className="space-y-0.5">
+                      {VIEW_MODES.map((m) => {
+                        const selected = viewMode === m.id;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewMode(m.id);
+                              setViewMenuOpen(false);
+                            }}
+                            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left cursor-pointer transition-colors"
+                            style={{
+                              background: selected ? 'rgba(0, 122, 255, 0.25)' : 'transparent',
+                            }}
+                          >
+                            <div>
+                              <div
+                                className="text-xs font-semibold"
+                                style={{ color: selected ? '#93c5fd' : '#f3f4f6' }}
+                              >
+                                {m.label}
+                              </div>
+                              <div className="text-[10px] text-white/45">{m.hint}</div>
+                            </div>
+                            {selected && <span className="text-blue-400 font-bold text-xs">✓</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
 
           <div
@@ -628,7 +712,7 @@ export default function CustomVideoConference({
               </div>
             )}
 
-            {isModerator && <GuestKnockPrompt sessionId={sessionId} />}
+            {(isModerator || isHost) && <GuestKnockPrompt sessionId={sessionId} />}
           </div>
 
           <SoloInactivityPrompt isHost={isHost} onLeaveOrEnd={onEndClassIntent} />

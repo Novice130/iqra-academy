@@ -294,8 +294,21 @@ function Swatch({
   );
 }
 
-export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffects }) {
+export function BackgroundEffectsContent({
+  effects,
+  onSelect,
+  onClose,
+}: {
+  effects: BackgroundEffects;
+  onSelect?: () => void;
+  onClose?: () => void;
+}) {
   const { selection, select, supported, busy, error } = effects;
+
+  const handlePick = (choice: EffectSelection) => {
+    select(choice);
+    onSelect?.();
+  };
 
   if (!supported) {
     return (
@@ -306,9 +319,21 @@ export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffec
   }
 
   return (
-    <div className="px-3 pb-3">
-      <div className="px-1 py-2 text-[11px] font-semibold uppercase tracking-wide text-white/45">
-        Effects {busy && <span className="normal-case font-normal">· applying…</span>}
+    <div className="px-3 pb-3 pt-1">
+      <div className="flex items-center justify-between px-1 py-2">
+        <div className="text-[11px] font-bold uppercase tracking-wider text-white/50">
+          Visual Effects {busy && <span className="normal-case font-normal text-blue-400">· applying…</span>}
+        </div>
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-xs text-white/60 hover:text-white hover:bg-white/10 transition cursor-pointer"
+            aria-label="Close"
+          >
+            ✕
+          </button>
+        )}
       </div>
       {error && (
         <div
@@ -318,23 +343,23 @@ export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffec
           {error}
         </div>
       )}
-      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
         <Swatch
           label="None"
           active={selection.kind === 'none'}
-          onClick={() => select({ kind: 'none' })}
+          onClick={() => handlePick({ kind: 'none' })}
           style={{ background: '#2a2d33' }}
         />
         <Swatch
           label="Slight blur"
           active={selection.kind === 'blur' && selection.radius <= 6}
-          onClick={() => select({ kind: 'blur', radius: 5 })}
+          onClick={() => handlePick({ kind: 'blur', radius: 5 })}
           style={{ background: 'linear-gradient(135deg,#3d4149,#5a606b)' }}
         />
         <Swatch
           label="Blur"
           active={selection.kind === 'blur' && selection.radius > 6}
-          onClick={() => select({ kind: 'blur', radius: 15 })}
+          onClick={() => handlePick({ kind: 'blur', radius: 15 })}
           style={{ background: 'linear-gradient(135deg,#4a4f59,#7c838f)' }}
         />
         {WALLPAPERS.map((w) => (
@@ -342,7 +367,7 @@ export function BackgroundEffectsContent({ effects }: { effects: BackgroundEffec
             key={w.id}
             label={w.label}
             active={selection.kind === 'image' && selection.id === w.id}
-            onClick={() => select({ kind: 'image', id: w.id })}
+            onClick={() => handlePick({ kind: 'image', id: w.id })}
             style={{ backgroundImage: `url(${w.path})` }}
           />
         ))}
