@@ -13,10 +13,6 @@ import {
   useRoomContext,
   useTrackToggle,
 } from '@livekit/components-react';
-import {
-  BackgroundEffectsContent,
-  type BackgroundEffects,
-} from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import {
   getNativeSharing,
@@ -32,7 +28,6 @@ import {
   CameraOffIcon,
   ChatIcon,
   ChevronUpIcon,
-  EffectsIcon,
   FlipCameraIcon,
   LeaveIcon,
   MicIcon,
@@ -41,7 +36,7 @@ import {
   ScreenShareIcon,
 } from './CallIcons';
 
-type MenuId = 'mic' | 'camera' | 'effects' | null;
+type MenuId = 'mic' | 'camera' | null;
 
 export type ViewMode = 'speaker' | 'gallery' | 'active';
 
@@ -224,7 +219,6 @@ export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
 ];
 
 export default function CallControlBar({
-  effects,
   isHost,
   onEndClassIntent,
   unreadMessages,
@@ -233,7 +227,6 @@ export default function CallControlBar({
   onToggleChat,
   onTogglePeople,
 }: {
-  effects: BackgroundEffects;
   isHost: boolean;
   onEndClassIntent: () => void;
   unreadMessages: number;
@@ -370,15 +363,6 @@ export default function CallControlBar({
             </RoundButton>
           )}
 
-          {/* Centered Background Effects Button (Google Meet Style) */}
-          <RoundButton
-            label="Visual effects"
-            active={menu === 'effects' || effects.active}
-            onClick={() => toggleMenu('effects')}
-          >
-            <EffectsIcon />
-          </RoundButton>
-
           <RoundButton
             label="Chat"
             active={chatOpen}
@@ -442,16 +426,6 @@ export default function CallControlBar({
               </button>
             </div>
           )}
-        </Popover>
-      )}
-
-      {menu === 'effects' && (
-        <Popover wide onClose={() => setMenu(null)}>
-          <BackgroundEffectsContent
-            effects={effects}
-            onSelect={() => setMenu(null)}
-            onClose={() => setMenu(null)}
-          />
         </Popover>
       )}
     </>

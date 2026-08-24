@@ -111,10 +111,8 @@ export async function GET(
       const resolution = await timings.track("resolve", resolveClassRoom(session));
       const isTheRoom = resolution.session.id === sessionId && resolution.kind !== "too-early";
 
-      // Auto-book on the way in for an instant meeting, for a class this
-      // teacher currently has running, or for the row that *is* the room for
-      // this occurrence. Ensures anyone holding the link with an account can join.
-      if (!isStudent && !isTeacher && (isInstantMeeting || session.status === "IN_PROGRESS" || isTheRoom)) {
+      // Auto-book on the way in. Ensures anyone holding the class link with an account can join.
+      if (!isStudent && !isTeacher) {
         const existingProfiles = await db.query.studentProfiles.findMany({
           where: eq(studentProfiles.userId, ctx.userId),
         });
@@ -143,10 +141,6 @@ export async function GET(
           }).catch(() => {});
           isStudent = true;
         }
-      }
-
-      if (!isTeacher && !isStudent) {
-        throw new ForbiddenError("You are not part of this session.");
       }
 
       if (resolution.session.id !== sessionId) {

@@ -46,9 +46,8 @@ type SessionRow = typeof sessions.$inferSelect;
  * auto-creates rooms on join, so they'd sit in an unsupervised room alone.
  */
 function isJoinable(session: SessionRow): boolean {
-  if (session.status === "IN_PROGRESS") return true;
-  if (!session.actualStart) return false;
-  return session.actualStart.getTime() > Date.now() - JOINABLE_WINDOW_MS;
+  if (session.status === "COMPLETED" || session.status === "CANCELLED") return false;
+  return true;
 }
 
 export async function POST(request: NextRequest) {
@@ -74,10 +73,6 @@ export async function POST(request: NextRequest) {
       // Resolve to canonical room so knocks land where the teacher actually is
       const resolution = await resolveClassRoom(rawSession);
       const session = resolution.session;
-
-      if (resolution.kind === "too-early" && !isJoinable(session)) {
-        throw new BusinessRuleError("This class hasn't started yet. Try the link again once it's live.");
-      }
 
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, session.teacherId),
@@ -183,8 +178,8 @@ export async function GET(request: NextRequest) {
       const session = await db.query.sessions.findFirst({
         where: eq(sessions.id, req.sessionId),
       });
-      if (!session || !isJoinable(session)) {
-        throw new BusinessRuleError("This class is no longer running.");
+      if (!session) {
+        throw new BusinessRuleError("This class is no longer available.");
       }
 
       const teacher = await db.query.users.findFirst({

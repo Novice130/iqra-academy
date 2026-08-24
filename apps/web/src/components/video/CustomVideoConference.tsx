@@ -24,13 +24,13 @@ import {
   useCreateLayoutContext,
 } from '@livekit/components-react';
 import CallControlBar, { type ViewMode, VIEW_MODES } from './CallControlBar';
-import { LayoutIcon, ChevronUpIcon } from './CallIcons';
+import { LayoutIcon, ChevronUpIcon, EffectsIcon } from './CallIcons';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
 import ScreenSharePill from './ScreenSharePill';
 import SoloInactivityPrompt from './SoloInactivityPrompt';
-import { useBackgroundEffects, type EffectSelection } from './BackgroundEffects';
+import { useBackgroundEffects, BackgroundEffectsContent, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import { gainForSlider } from '@/lib/audio-gain';
@@ -377,6 +377,7 @@ export default function CustomVideoConference({
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
+  const [effectsOpen, setEffectsOpen] = useState(false);
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const tapStartTimeRef = useRef(0);
@@ -385,11 +386,11 @@ export default function CustomVideoConference({
   const resetIdleTimer = useCallback(() => {
     setChromeHidden(false);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (viewMenuOpen || peopleOpen || widgetState.showChat) return;
+    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen) return;
     idleTimerRef.current = setTimeout(() => {
       setChromeHidden(true);
     }, 3500);
-  }, [viewMenuOpen, peopleOpen, widgetState.showChat]);
+  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen]);
 
   useEffect(() => {
     resetIdleTimer();
@@ -717,6 +718,70 @@ export default function CustomVideoConference({
                 </>
               )}
             </div>
+
+            {/* Floating Center Visual Effects Button (Google Meet / Apple Style) */}
+            <div
+              className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[55] pointer-events-auto transition-all duration-300 ${
+                chromeHidden ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'
+              }`}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setEffectsOpen((v) => !v);
+                }}
+                title="Change background / visual effects"
+                aria-label="Change background / visual effects"
+                className="group flex items-center gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs sm:text-sm shadow-2xl backdrop-blur-2xl"
+                style={{
+                  background: effects.active
+                    ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.90) 0%, rgba(0, 86, 179, 0.90) 100%)'
+                    : 'rgba(20, 22, 28, 0.85)',
+                  border: effects.active
+                    ? '1px solid rgba(255, 255, 255, 0.35)'
+                    : '1px solid rgba(255, 255, 255, 0.22)',
+                  boxShadow: effects.active
+                    ? '0 12px 32px rgba(0, 122, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25)'
+                    : '0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                }}
+              >
+                <EffectsIcon className="w-5 h-5 text-white shrink-0 group-hover:scale-110 transition-transform" />
+                <span className="tracking-tight whitespace-nowrap">
+                  {effects.active ? 'Background on' : 'Change background'}
+                </span>
+              </button>
+            </div>
+
+            {effectsOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-[80]"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setEffectsOpen(false);
+                  }}
+                />
+                <div
+                  className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[81] rounded-3xl overflow-y-auto"
+                  style={{
+                    background: 'rgba(24, 26, 32, 0.92)',
+                    backdropFilter: 'blur(28px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                    width: 'min(94vw, 560px)',
+                    maxHeight: '62vh',
+                  }}
+                >
+                  <BackgroundEffectsContent
+                    effects={effects}
+                    onSelect={() => setEffectsOpen(false)}
+                    onClose={() => setEffectsOpen(false)}
+                  />
+                </div>
+              </>
+            )}
           </div>
 
           <div
@@ -757,7 +822,6 @@ export default function CustomVideoConference({
             }`}
           >
             <CallControlBar
-              effects={effects}
               isHost={isHost}
               onEndClassIntent={onEndClassIntent}
               unreadMessages={widgetState.unreadMessages}
