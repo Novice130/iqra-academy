@@ -67,14 +67,15 @@ void main() {
   if (u_invert) current = 1.0 - current;
   float previous = texture(u_previous, uv).r;
 
-  // Motion-adaptive temporal blend:
-  // When the head/body moves, the difference between current and previous frame is high.
-  // We dynamically increase the blend towards 1.0 so fast movements have ZERO ghosting/trails.
-  // In static areas, we maintain smooth temporal integration to eliminate 30Hz edge grain.
+  // Stable macro-movement filter:
+  // Sub-0.18 fluctuations are raw neural network inference noise and sensor jitter.
+  // We ignore sensor jitter and preserve a calm, stable EMA history.
+  // When genuine head/body motion happens (diff > 0.18), we smoothly ramp up response.
   float diff = abs(current - previous);
-  float adaptiveBlend = clamp(u_blend + diff * 4.0, 0.45, 1.0);
+  float motion = smoothstep(0.18, 0.50, diff);
+  float blend = mix(u_blend, 0.70, motion);
 
-  float blended = u_reset ? current : mix(previous, current, adaptiveBlend);
+  float blended = u_reset ? current : mix(previous, current, blend);
   fragColor = vec4(vec3(blended), 1.0);
 }
 `;
@@ -137,15 +138,15 @@ void main() {
   vec3 person = texture(u_frame, uv).rgb;
   vec3 background = texture(u_background, uv * u_bgScale + u_bgOffset).rgb;
 
-  // S-curve contrast curve on mask to reject low-probability background noise
-  // and cleanly define contours around hair, hats, and glasses
-  float rawMask = texture(u_mask, uv).r;
-  float contrastMask = smoothstep(0.15, 0.85, rawMask);
-  float alpha = smoothstep(0.5 - u_edge, 0.5 + u_edge, contrastMask);
+  // Silky subpixel anti-aliased alpha matte:
+  // Operating on the Gaussian-feathered mask creates a continuous, natural transition
+  // without blocky pixel steps or pulsating edges.
+  float mask = texture(u_mask, uv).r;
+  float alpha = smoothstep(0.5 - u_edge, 0.5 + u_edge, mask);
 
   // Subtle natural light wrap on the boundary rim
   float rim = 4.0 * alpha * (1.0 - alpha);
-  vec3 lit = mix(person, background, rim * u_wrap * 0.4);
+  vec3 lit = mix(person, background, rim * u_wrap * 0.35);
 
   fragColor = vec4(mix(background, lit, alpha), 1.0);
 }
@@ -226,12 +227,12 @@ export interface PipelineSettings {
 }
 
 export const DEFAULT_SETTINGS: PipelineSettings = {
-  // Fast and responsive so fast head turns have zero ghosting trails,
-  // while motion-adaptive blending cleans up 30Hz jitter on static edges.
-  temporalBlend: 0.65,
-  maskFeather: 1.0,
-  edgeSoftness: 0.08,
-  lightWrap: 0.2,
+  // 72% EMA temporal stability eliminates sensor noise, pulsating and flickering,
+  // while motion adaptation prevents ghosting on head movement.
+  temporalBlend: 0.28,
+  maskFeather: 1.8,
+  edgeSoftness: 0.18,
+  lightWrap: 0.22,
 };
 
 /** How much the background is downscaled before being blurred. */

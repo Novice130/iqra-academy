@@ -378,10 +378,25 @@ export default function CustomVideoConference({
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [peopleOpen, setPeopleOpen] = useState(false);
-
-  // Auto-hide chrome on tap for distraction-free Quran recitation
   const [chromeHidden, setChromeHidden] = useState(false);
   const tapStartTimeRef = useRef(0);
+  const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetIdleTimer = useCallback(() => {
+    setChromeHidden(false);
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (viewMenuOpen || peopleOpen || widgetState.showChat) return;
+    idleTimerRef.current = setTimeout(() => {
+      setChromeHidden(true);
+    }, 3500);
+  }, [viewMenuOpen, peopleOpen, widgetState.showChat]);
+
+  useEffect(() => {
+    resetIdleTimer();
+    return () => {
+      if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    };
+  }, [resetIdleTimer]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -548,21 +563,30 @@ export default function CustomVideoConference({
   };
 
   const handleStagePointerUp = (e: React.PointerEvent) => {
-    // Only toggle if short click/tap and not interacting with floating panels
     if (Date.now() - tapStartTimeRef.current < 300) {
       const target = e.target as HTMLElement;
-      if (target.closest('button') || target.closest('input') || target.closest('.call-control-bar')) {
+      if (
+        target.closest('button') ||
+        target.closest('input') ||
+        target.closest('.call-control-bar') ||
+        target.closest('[role="dialog"]')
+      ) {
         return;
       }
-      setChromeHidden((prev) => !prev);
+      setChromeHidden((prev) => {
+        const next = !prev;
+        if (!next) resetIdleTimer();
+        return next;
+      });
     }
   };
 
   return (
     <LayoutContextProvider value={layoutContext} onWidgetChange={setWidgetState}>
       <div
-        className="lk-video-conference call-surface bg-neutral-950"
+        className="lk-video-conference call-surface bg-neutral-950 select-none"
         style={{ height: '100%' }}
+        onPointerMove={resetIdleTimer}
         onPointerDown={handleStagePointerDown}
         onPointerUp={handleStagePointerUp}
       >
@@ -605,8 +629,15 @@ export default function CustomVideoConference({
               );
             })}
 
-            {/* Top Right Floating View Switcher — permanently mounted inside stage */}
-            <div className="absolute top-3 right-3 sm:top-4 sm:right-4 z-[60] pointer-events-auto">
+            <div
+              className={`absolute top-5 right-5 sm:top-6 sm:right-6 md:top-8 md:right-8 z-[60] pointer-events-auto transition-all duration-300 ${
+                chromeHidden ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+              }`}
+              style={{
+                marginTop: 'max(0px, env(safe-area-inset-top))',
+                marginRight: 'max(0px, env(safe-area-inset-right))',
+              }}
+            >
               <button
                 type="button"
                 onClick={(e) => {
@@ -615,9 +646,9 @@ export default function CustomVideoConference({
                 }}
                 title="Switch layout"
                 aria-label="Switch layout"
-                className="flex items-center gap-1.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full cursor-pointer transition-all duration-150 active:scale-95 text-white font-medium text-xs shadow-2xl backdrop-blur-2xl"
+                className="flex items-center gap-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full cursor-pointer transition-all duration-150 active:scale-95 text-white font-semibold text-xs shadow-2xl backdrop-blur-2xl"
                 style={{
-                  background: 'rgba(20, 22, 28, 0.85)',
+                  background: 'rgba(20, 22, 28, 0.88)',
                   border: '1px solid rgba(255, 255, 255, 0.22)',
                   boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
                 }}
