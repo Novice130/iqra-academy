@@ -201,18 +201,19 @@ interface Slot {
 function computeSlots(
   container: { width: number; height: number },
   box: { width: number; height: number },
-  count: number
+  count: number,
+  bottomClearance: number = 96
 ): Slot[] {
   if (count === 0 || container.width === 0 || container.height === 0) return [];
 
-  const usableHeight = container.height - FLOAT_MARGIN * 2;
+  const usableHeight = Math.max(box.height, container.height - bottomClearance - FLOAT_MARGIN * 2);
   const perColumn = Math.max(1, Math.floor((usableHeight + FLOAT_GAP) / (box.height + FLOAT_GAP)));
 
   return Array.from({ length: count }, (_, i) => {
     const col = Math.floor(i / perColumn);
     const row = i % perColumn;
     const left = container.width - FLOAT_MARGIN - (col + 1) * box.width - col * FLOAT_GAP;
-    const top = container.height - FLOAT_MARGIN - (row + 1) * box.height - row * FLOAT_GAP;
+    const top = container.height - bottomClearance - (row + 1) * box.height - row * FLOAT_GAP;
     return {
       left: Math.max(FLOAT_MARGIN, left),
       top: Math.max(FLOAT_MARGIN, top),
@@ -220,15 +221,77 @@ function computeSlots(
   });
 }
 
+function snapPoint(
+  raw: { left: number; top: number },
+  size: { width: number; height: number },
+  container: { width: number; height: number },
+  bottomClearance: number,
+  otherPositions: Slot[] = []
+): { left: number; top: number } {
+  const minX = FLOAT_MARGIN;
+  const maxX = Math.max(minX, container.width - size.width - FLOAT_MARGIN);
+  const minY = FLOAT_MARGIN;
+  const maxY = Math.max(minY, container.height - bottomClearance - size.height);
+
+  let left = Math.max(minX, Math.min(maxX, raw.left));
+  let top = Math.max(minY, Math.min(maxY, raw.top));
+
+  const SNAP_DIST = 20;
+
+  // 1. Snap to bottom menu line
+  if (Math.abs(top - maxY) < SNAP_DIST) {
+    top = maxY;
+  }
+  // 2. Snap to container boundaries
+  if (Math.abs(left - minX) < SNAP_DIST) left = minX;
+  if (Math.abs(left - maxX) < SNAP_DIST) left = maxX;
+  if (Math.abs(top - minY) < SNAP_DIST) top = minY;
+
+  // 3. Snap / clip to other floating tiles
+  for (const other of otherPositions) {
+    // Snap horizontally adjacent
+    if (Math.abs(left - (other.left + size.width + FLOAT_GAP)) < SNAP_DIST) {
+      left = other.left + size.width + FLOAT_GAP;
+    }
+    if (Math.abs(left - (other.left - size.width - FLOAT_GAP)) < SNAP_DIST) {
+      left = other.left - size.width - FLOAT_GAP;
+    }
+    // Snap vertically adjacent
+    if (Math.abs(top - (other.top + size.height + FLOAT_GAP)) < SNAP_DIST) {
+      top = other.top + size.height + FLOAT_GAP;
+    }
+    if (Math.abs(top - (other.top - size.height - FLOAT_GAP)) < SNAP_DIST) {
+      top = other.top - size.height - FLOAT_GAP;
+    }
+    // Snap flush alignment
+    if (Math.abs(left - other.left) < SNAP_DIST) left = other.left;
+    if (Math.abs(top - other.top) < SNAP_DIST) top = other.top;
+  }
+
+  // Re-clamp after snapping
+  left = Math.max(minX, Math.min(maxX, left));
+  top = Math.max(minY, Math.min(maxY, top));
+
+  return { left, top };
+}
+
 function DraggableTile({
   slot,
+  customPosition,
   size,
+  containerSize,
+  bottomClearance,
+  otherPositions = [],
   onTap,
   onDropAt,
   children,
 }: {
   slot: Slot;
+  customPosition?: Slot;
   size: { width: number; height: number };
+  containerSize: { width: number; height: number };
+  bottomClearance: number;
+  otherPositions?: Slot[];
   onTap?: () => void;
   onDropAt?: (point: { left: number; top: number }) => void;
   children: React.ReactNode;
@@ -245,6 +308,15 @@ function DraggableTile({
     moved: 0,
   });
 
+  // Calculate base position clamped above bottom menu clearance
+  const maxY = Math.max(FLOAT_MARGIN, containerSize.height - bottomClearance - size.height);
+  const basePos = customPosition
+    ? {
+        left: Math.max(FLOAT_MARGIN, Math.min(Math.max(FLOAT_MARGIN, containerSize.width - size.width - FLOAT_MARGIN), customPosition.left)),
+        top: Math.max(FLOAT_MARGIN, Math.min(maxY, customPosition.top)),
+      }
+    : slot;
+
   const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     const el = elRef.current;
     if (!el) return;
@@ -252,12 +324,12 @@ function DraggableTile({
       dragging: true,
       startX: e.clientX,
       startY: e.clientY,
-      startLeft: slot.left,
-      startTop: slot.top,
+      startLeft: basePos.left,
+      startTop: basePos.top,
       startedAt: Date.now(),
       moved: 0,
     };
-    setDrag({ left: slot.left, top: slot.top });
+    setDrag({ left: basePos.left, top: basePos.top });
     el.setPointerCapture(e.pointerId);
   };
 
@@ -280,10 +352,13 @@ function DraggableTile({
       onTap();
       return;
     }
-    if (dropped && moved >= 8) onDropAt?.(dropped);
+    if (dropped && moved >= 8 && containerSize.width > 0 && containerSize.height > 0) {
+      const snapped = snapPoint(dropped, size, containerSize, bottomClearance, otherPositions);
+      onDropAt?.(snapped);
+    }
   };
 
-  const position = drag ?? slot;
+  const position = drag ?? basePos;
 
   return (
     <div
@@ -297,7 +372,7 @@ function DraggableTile({
         height: size.height,
         left: position.left,
         top: position.top,
-        transition: drag ? 'none' : 'left 180ms cubic-bezier(0.16, 1, 0.3, 1), top 180ms cubic-bezier(0.16, 1, 0.3, 1)',
+        transition: drag ? 'none' : 'left 220ms cubic-bezier(0.16, 1, 0.3, 1), top 220ms cubic-bezier(0.16, 1, 0.3, 1)',
         border: '1.5px solid rgba(255, 255, 255, 0.22)',
         boxShadow: '0 12px 32px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         touchAction: 'none',
@@ -558,6 +633,9 @@ export default function CustomVideoConference({
     }
   }
 
+  const [customPositions, setCustomPositions] = useState<Record<string, Slot>>({});
+  const bottomClearance = chromeHidden ? 24 : 96;
+
   const floatingKeys = floating.map((p) => p.key);
   const orderedKeys = [
     ...slotOrder.filter((k) => floatingKeys.includes(k)),
@@ -573,30 +651,13 @@ export default function CustomVideoConference({
     });
   }, [floatingKeys.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const slots = computeSlots(stageSize, floatBox, orderedKeys.length);
+  const slots = computeSlots(stageSize, floatBox, orderedKeys.length, bottomClearance);
 
   const handleDrop = (key: string, point: { left: number; top: number }) => {
-    if (slots.length === 0) return;
-    let nearest = 0;
-    let best = Infinity;
-    slots.forEach((s, i) => {
-      const distance = Math.hypot(s.left - point.left, s.top - point.top);
-      if (distance < best) {
-        best = distance;
-        nearest = i;
-      }
-    });
-    setSlotOrder((prev) => {
-      const order = [
-        ...prev.filter((k) => floatingKeys.includes(k)),
-        ...floatingKeys.filter((k) => !prev.includes(k)),
-      ];
-      const from = order.indexOf(key);
-      if (from === -1 || from === nearest) return prev;
-      const next = [...order];
-      [next[from], next[nearest]] = [next[nearest], next[from]];
-      return next;
-    });
+    setCustomPositions((prev) => ({
+      ...prev,
+      [key]: point,
+    }));
   };
 
   const handleStagePointerDown = () => {
@@ -637,13 +698,23 @@ export default function CustomVideoConference({
             style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}
           >
             {focused ? (
-              <div className="w-full h-full p-2 sm:p-3">{renderTile(focused)}</div>
+              <div
+                className="w-full h-full p-2 sm:p-3"
+                style={{
+                  paddingBottom: `${bottomClearance + 8}px`,
+                  transition: 'padding-bottom 220ms cubic-bezier(0.16, 1, 0.3, 1)',
+                }}
+              >
+                {renderTile(focused)}
+              </div>
             ) : (
               <div
                 className="w-full h-full grid gap-2 sm:gap-3 p-2 sm:p-3"
                 style={{
                   gridTemplateColumns: `repeat(${columnsFor(gridTiles.length)}, minmax(0, 1fr))`,
                   gridAutoRows: 'minmax(0, 1fr)',
+                  paddingBottom: `${bottomClearance + 12}px`,
+                  transition: 'padding-bottom 220ms cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
               >
                 {gridTiles.map((p) => (
@@ -655,13 +726,22 @@ export default function CustomVideoConference({
             )}
 
             {floating.map((p) => {
-              const slot = slots[orderedKeys.indexOf(p.key)];
-              if (!slot) return null;
+              const slot = slots[orderedKeys.indexOf(p.key)] || { left: 14, top: 14 };
+              const customPos = customPositions[p.key];
+              const otherPosList = floating
+                .filter((other) => other.key !== p.key)
+                .map((other) => customPositions[other.key] || slots[orderedKeys.indexOf(other.key)])
+                .filter(Boolean) as Slot[];
+
               return (
                 <DraggableTile
                   key={p.key}
                   slot={slot}
+                  customPosition={customPos}
                   size={floatBox}
+                  containerSize={stageSize}
+                  bottomClearance={bottomClearance}
+                  otherPositions={otherPosList}
                   onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
                   onDropAt={(point) => handleDrop(p.key, point)}
                 >
