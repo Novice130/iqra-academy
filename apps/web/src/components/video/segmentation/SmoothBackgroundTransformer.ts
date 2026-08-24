@@ -263,8 +263,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
           const masks = result.confidenceMasks;
           const mask = masks?.[0];
           if (mask) {
-            // Channel 0 of selfie_segmenter is background confidence, invert so 1.0 = person, 0.0 = background
-            const invert = masks.length > 1 || true;
+            const invert = masks.length > 1;
             this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
           }
           result.close();

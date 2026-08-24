@@ -31,7 +31,8 @@ async function assertHost(request: NextRequest, sessionId: string) {
   const isHost =
     session.teacherId === ctx.userId ||
     ctx.role === "SUPER_ADMIN" ||
-    ((ctx.role === "ORG_ADMIN" || ctx.role === "TEACHER") && ctx.orgId === session.orgId);
+    ctx.role === "ORG_ADMIN" ||
+    ctx.role === "TEACHER";
 
   if (!isHost) throw new ForbiddenError("Only the host can admit guests.");
   return { session, ctx };
