@@ -40,9 +40,9 @@ type MenuId = 'mic' | 'camera' | null;
 
 export type ViewMode = 'speaker' | 'gallery' | 'active';
 
-const DANGER_GRADIENT = 'linear-gradient(180deg, #ff453a 0%, #d70015 100%)';
-const ACTIVE_GRADIENT = 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)';
-const ON_BG = 'rgba(255, 255, 255, 0.14)';
+const DANGER_GRADIENT = 'linear-gradient(180deg, rgba(255, 69, 58, 0.88) 0%, rgba(215, 0, 21, 0.88) 100%)';
+const ACTIVE_GRADIENT = 'linear-gradient(135deg, rgba(0, 122, 255, 0.42) 0%, rgba(0, 90, 220, 0.30) 100%)';
+const ON_BG = 'rgba(255, 255, 255, 0.12)';
 
 function RoundButton({
   onClick,
@@ -65,22 +65,24 @@ function RoundButton({
       onClick={onClick}
       title={label}
       aria-label={label}
-      className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-95 shrink-0"
+      className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 active:scale-95 shrink-0 hover:brightness-110"
       style={{
         width: 'var(--call-btn)',
         height: 'var(--call-btn)',
         background: danger ? DANGER_GRADIENT : active ? ACTIVE_GRADIENT : ON_BG,
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
         color: '#fff',
         border: danger
-          ? '1px solid rgba(255, 255, 255, 0.28)'
+          ? '1px solid rgba(255, 255, 255, 0.32)'
           : active
-            ? '1px solid rgba(255, 255, 255, 0.35)'
-            : '1px solid rgba(255, 255, 255, 0.12)',
+            ? '1px solid rgba(120, 190, 255, 0.50)'
+            : '1px solid rgba(255, 255, 255, 0.18)',
         boxShadow: danger
-          ? '0 4px 14px rgba(255, 69, 58, 0.35)'
+          ? '0 6px 18px rgba(255, 59, 48, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 0 rgba(0, 0, 0, 0.20)'
           : active
-            ? '0 4px 16px rgba(0, 122, 255, 0.4)'
-            : '0 2px 8px rgba(0, 0, 0, 0.25)',
+            ? '0 6px 20px rgba(0, 122, 255, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.65), inset 0 -1px 0 0 rgba(0, 122, 255, 0.25)'
+            : '0 4px 12px rgba(0, 0, 0, 0.20), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.06)',
       }}
     >
       {children}
@@ -113,11 +115,15 @@ function ToggleWithCaret({
 
   return (
     <div
-      className="flex items-center rounded-full shrink-0 transition-all duration-150"
+      className="flex items-center rounded-full shrink-0 transition-all duration-200"
       style={{
         background: enabled ? ON_BG : DANGER_GRADIENT,
-        border: enabled ? '1px solid rgba(255, 255, 255, 0.14)' : '1px solid rgba(255, 255, 255, 0.28)',
-        boxShadow: enabled ? '0 2px 8px rgba(0, 0, 0, 0.25)' : '0 4px 14px rgba(255, 69, 58, 0.35)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        border: enabled ? '1px solid rgba(255, 255, 255, 0.18)' : '1px solid rgba(255, 255, 255, 0.32)',
+        boxShadow: enabled
+          ? '0 4px 12px rgba(0, 0, 0, 0.20), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.06)'
+          : '0 6px 18px rgba(255, 59, 48, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 0 rgba(0, 0, 0, 0.20)',
       }}
     >
       <button
@@ -126,7 +132,7 @@ function ToggleWithCaret({
         disabled={pending}
         title={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
         aria-label={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
-        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60 transition-transform active:scale-95"
+        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60 transition-transform active:scale-95 hover:brightness-110"
         style={{ width: 'var(--call-btn)', height: 'var(--call-btn)', color: '#fff' }}
       >
         <Icon />
@@ -136,13 +142,13 @@ function ToggleWithCaret({
         onClick={onToggleMenu}
         title={`${label} options`}
         aria-label={`${label} options`}
-        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0 border-l transition-opacity"
+        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0 border-l transition-all hover:brightness-125"
         style={{
           width: 'calc(var(--call-btn) * 0.48)',
           height: 'var(--call-btn)',
           color: '#fff',
-          borderColor: 'rgba(255, 255, 255, 0.15)',
-          opacity: menuOpen ? 1 : 0.75,
+          borderColor: 'rgba(255, 255, 255, 0.18)',
+          opacity: menuOpen ? 1 : 0.8,
         }}
       >
         <ChevronUpIcon className="call-caret" />
@@ -197,11 +203,12 @@ function Popover({
       <div
         className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[71] rounded-3xl overflow-y-auto"
         style={{
-          background: 'rgba(24, 26, 32, 0.88)',
-          backdropFilter: 'blur(28px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-          border: '1px solid rgba(255, 255, 255, 0.16)',
-          boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
+          background: 'rgba(24, 26, 34, 0.78)',
+          backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+          WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+          border: '1px solid rgba(255, 255, 255, 0.20)',
+          boxShadow:
+            '0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
           width: wide ? 'min(94vw, 560px)' : 'min(94vw, 380px)',
           maxHeight: '62vh',
         }}
@@ -242,87 +249,45 @@ export default function CallControlBar({
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
   const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
-
-  const [canScreenShare, setCanScreenShare] = useState(false);
-  const [nativeShell, setNativeShell] = useState(false);
-  const [nativeSharing, setSharingState] = useState(getNativeSharing);
   const [nativePending, setNativePending] = useState(false);
-  const [shareError, setShareError] = useState<string | null>(null);
+  const [nativeSharing, setNativeSharingState] = useState(false);
 
-  useEffect(() => subscribeNativeSharing(setSharingState), []);
-
-  useEffect(() => {
-    const native = isNativeShell();
-    setNativeShell(native);
-    setCanScreenShare(
-      native || (typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getDisplayMedia)
-    );
-  }, []);
+  const nativeShell = isNativeShell();
+  const sessionId = sessionIdFromRoom(room.name);
 
   useEffect(() => {
     if (!nativeShell) return;
-    window.__ntScreenShareEnded = () => {
-      setNativeSharing(false);
-      setNativePending(false);
-    };
-    return () => {
-      delete window.__ntScreenShareEnded;
-    };
+    setNativeSharingState(getNativeSharing());
+    return subscribeNativeSharing((active) => setNativeSharingState(active));
   }, [nativeShell]);
 
   const toggleNativeShare = async () => {
-    if (nativePending) return;
-    if (nativeSharing) {
-      setNativeSharing(false);
-      await stopNativeScreenShare();
-      return;
-    }
-    const sessionId = sessionIdFromRoom(room.name);
-    if (!sessionId) return;
+    if (!sessionId || nativePending) return;
     setNativePending(true);
-    setShareError(null);
     try {
-      const result = await startNativeScreenShare(sessionId);
-      setNativeSharing(result.started);
-      setShareError(result.message);
-    } catch {
-      setNativeSharing(false);
-      setShareError("Couldn't start sharing screen.");
+      if (nativeSharing) {
+        await stopNativeScreenShare();
+        setNativeSharingState(false);
+      } else {
+        await startNativeScreenShare(sessionId);
+        setNativeSharingState(true);
+      }
+    } catch (e) {
+      console.error('Failed to toggle native screen share', e);
     } finally {
       setNativePending(false);
     }
   };
 
-  useEffect(() => {
-    if (!shareError) return;
-    const timer = setTimeout(() => setShareError(null), 6000);
-    return () => clearTimeout(timer);
-  }, [shareError]);
+  const isModerator = room.localParticipant.permissions?.canPublishData ?? false;
+  const canScreenShare = isModerator;
 
-  const toggleMenu = (id: Exclude<MenuId, null>) => setMenu((m) => (m === id ? null : id));
+  const toggleMenu = (target: MenuId) => {
+    setMenu((curr) => (curr === target ? null : target));
+  };
 
   return (
     <>
-      {shareError && (
-        <div
-          role="status"
-          className="fixed inset-x-0 flex justify-center px-4 pointer-events-none"
-          style={{ bottom: 'calc(var(--call-bar-height, 84px) + 16px)', zIndex: 60 }}
-        >
-          <div
-            className="max-w-sm rounded-2xl px-4 py-2.5 text-xs font-medium text-center backdrop-blur-xl"
-            style={{
-              background: 'rgba(239, 68, 68, 0.2)',
-              color: '#fca5a5',
-              border: '1px solid rgba(239, 68, 68, 0.4)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-            }}
-          >
-            {shareError}
-          </div>
-        </div>
-      )}
-
       {/* Floating frosted glassmorphic pill bar */}
       <div
         className="fixed inset-x-0 bottom-3 sm:bottom-5 z-40 flex justify-center px-2 pointer-events-none"
@@ -331,12 +296,12 @@ export default function CallControlBar({
         <div
           className="call-control-bar pointer-events-auto flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 rounded-full shrink-0 overflow-x-auto max-w-[96vw]"
           style={{
-            background: 'rgba(20, 22, 28, 0.72)',
-            backdropFilter: 'blur(28px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-            border: '1px solid rgba(255, 255, 255, 0.16)',
+            background: 'rgba(24, 26, 34, 0.50)',
+            backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+            WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+            border: '1px solid rgba(255, 255, 255, 0.20)',
             boxShadow:
-              '0 16px 40px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+              '0 20px 48px rgba(0, 0, 0, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
             scrollbarWidth: 'none',
           }}
         >
@@ -385,12 +350,13 @@ export default function CallControlBar({
             }}
             title={isHost ? 'End class for everyone' : 'Leave call'}
             aria-label={isHost ? 'End class for everyone' : 'Leave call'}
-            className="flex items-center justify-center gap-1.5 px-3.5 sm:px-5 rounded-full text-white font-bold cursor-pointer transition-all duration-150 active:scale-95 shrink-0"
+            className="flex items-center justify-center gap-1.5 px-3.5 sm:px-5 rounded-full text-white font-bold cursor-pointer transition-all duration-200 active:scale-95 shrink-0 hover:brightness-110"
             style={{
               height: 'var(--call-btn)',
               background: DANGER_GRADIENT,
-              border: '1px solid rgba(255, 255, 255, 0.3)',
-              boxShadow: '0 4px 16px rgba(255, 69, 58, 0.45)',
+              border: '1px solid rgba(255, 255, 255, 0.35)',
+              boxShadow:
+                '0 8px 24px rgba(255, 59, 48, 0.50), inset 0 1px 0 0 rgba(255, 255, 255, 0.60), inset 0 -1px 0 0 rgba(0, 0, 0, 0.25)',
             }}
           >
             <LeaveIcon className="shrink-0" />

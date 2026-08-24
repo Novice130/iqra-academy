@@ -647,11 +647,14 @@ export default function CustomVideoConference({
                 }}
                 title="Switch layout"
                 aria-label="Switch layout"
-                className="flex items-center gap-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full cursor-pointer transition-all duration-150 active:scale-95 text-white font-semibold text-xs shadow-2xl backdrop-blur-2xl"
+                className="flex items-center gap-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs shadow-2xl hover:brightness-110"
                 style={{
-                  background: 'rgba(20, 22, 28, 0.88)',
-                  border: '1px solid rgba(255, 255, 255, 0.22)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                  background: 'rgba(24, 26, 34, 0.60)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  boxShadow:
+                    '0 12px 36px rgba(0, 0, 0, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
                 }}
               >
                 <LayoutIcon className="w-4 h-4 text-blue-400 shrink-0" />
@@ -673,11 +676,12 @@ export default function CustomVideoConference({
                   <div
                     className="absolute right-0 top-12 z-[81] w-56 rounded-2xl p-1.5 shadow-2xl animate-fadeIn overflow-hidden"
                     style={{
-                      background: 'rgba(20, 22, 28, 0.95)',
-                      backdropFilter: 'blur(28px) saturate(180%)',
-                      WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                      background: 'rgba(24, 26, 34, 0.78)',
+                      backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                      WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                      border: '1px solid rgba(255, 255, 255, 0.20)',
+                      boxShadow:
+                        '0 20px 48px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
                     }}
                   >
                     <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white/45">
@@ -695,9 +699,9 @@ export default function CustomVideoConference({
                               setViewMode(m.id);
                               setViewMenuOpen(false);
                             }}
-                            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left cursor-pointer transition-colors"
+                            className="w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-left cursor-pointer transition-all duration-150"
                             style={{
-                              background: selected ? 'rgba(0, 122, 255, 0.25)' : 'transparent',
+                              background: selected ? 'rgba(0, 122, 255, 0.35)' : 'transparent',
                             }}
                           >
                             <div>
@@ -719,7 +723,7 @@ export default function CustomVideoConference({
               )}
             </div>
 
-            {/* Floating Center Visual Effects Button (Google Meet / Apple Style) */}
+            {/* Floating Center Visual Effects Button (Icon Only — Apple Liquid Glass) */}
             <div
               className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[55] pointer-events-auto transition-all duration-300 ${
                 chromeHidden ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'
@@ -733,23 +737,22 @@ export default function CustomVideoConference({
                 }}
                 title="Change background / visual effects"
                 aria-label="Change background / visual effects"
-                className="group flex items-center gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs sm:text-sm shadow-2xl backdrop-blur-2xl"
+                className="group w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 active:scale-95 text-white shadow-2xl hover:brightness-110"
                 style={{
                   background: effects.active
-                    ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.90) 0%, rgba(0, 86, 179, 0.90) 100%)'
-                    : 'rgba(20, 22, 28, 0.85)',
+                    ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.42) 0%, rgba(0, 90, 220, 0.30) 100%)'
+                    : 'rgba(255, 255, 255, 0.12)',
+                  backdropFilter: 'blur(28px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(28px) saturate(200%) contrast(105%)',
                   border: effects.active
-                    ? '1px solid rgba(255, 255, 255, 0.35)'
-                    : '1px solid rgba(255, 255, 255, 0.22)',
+                    ? '1px solid rgba(120, 190, 255, 0.55)'
+                    : '1px solid rgba(255, 255, 255, 0.25)',
                   boxShadow: effects.active
-                    ? '0 12px 32px rgba(0, 122, 255, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25)'
-                    : '0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                    ? '0 12px 36px rgba(0, 122, 255, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.70), inset 0 -1px 0 0 rgba(0, 122, 255, 0.25)'
+                    : '0 10px 30px rgba(0, 0, 0, 0.35), inset 0 1px 0 0 rgba(255, 255, 255, 0.50), inset 0 -1px 0 0 rgba(255, 255, 255, 0.10)',
                 }}
               >
-                <EffectsIcon className="w-5 h-5 text-white shrink-0 group-hover:scale-110 transition-transform" />
-                <span className="tracking-tight whitespace-nowrap">
-                  {effects.active ? 'Background on' : 'Change background'}
-                </span>
+                <EffectsIcon className="w-5 h-5 sm:w-6 sm:h-6 text-white shrink-0 group-hover:scale-110 transition-transform" />
               </button>
             </div>
 
@@ -765,11 +768,12 @@ export default function CustomVideoConference({
                 <div
                   className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[81] rounded-3xl overflow-y-auto"
                   style={{
-                    background: 'rgba(24, 26, 32, 0.92)',
-                    backdropFilter: 'blur(28px) saturate(180%)',
-                    WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-                    border: '1px solid rgba(255, 255, 255, 0.18)',
-                    boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                    background: 'rgba(24, 26, 34, 0.78)',
+                    backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                    WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
+                    border: '1px solid rgba(255, 255, 255, 0.20)',
+                    boxShadow:
+                      '0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
                     width: 'min(94vw, 560px)',
                     maxHeight: '62vh',
                   }}

@@ -57,7 +57,7 @@ precision highp float;
 in vec2 uv;
 uniform sampler2D u_current;
 uniform sampler2D u_previous;
-uniform float u_blend;      // base blend rate (e.g. 0.65)
+uniform float u_blend;      // base blend rate (e.g. 0.15)
 uniform bool u_reset;       // first frame, or the mask changed size
 uniform bool u_invert;      // invert if channel is background
 out vec4 fragColor;
@@ -67,13 +67,15 @@ void main() {
   if (u_invert) current = 1.0 - current;
   float previous = texture(u_previous, uv).r;
 
-  // Stable macro-movement filter:
-  // Sub-0.18 fluctuations are raw neural network inference noise and sensor jitter.
-  // We ignore sensor jitter and preserve a calm, stable EMA history.
-  // When genuine head/body motion happens (diff > 0.18), we smoothly ramp up response.
+  // Multi-level motion-adaptive noise gate:
+  // Sub-0.22 fluctuations are raw neural network inference noise and camera sensor jitter.
+  // Genuine body movement (> 0.22) smoothly ramps up responsiveness.
+  // The cubic ease-in (motion * motion) ensures micro-jitter near the threshold
+  // is suppressed much more aggressively than deliberate movement.
   float diff = abs(current - previous);
-  float motion = smoothstep(0.18, 0.50, diff);
-  float blend = mix(u_blend, 0.70, motion);
+  float motion = smoothstep(0.22, 0.55, diff);
+  motion = motion * motion;  // cubic ease-in for extra noise suppression
+  float blend = mix(u_blend, 0.65, motion);
 
   float blended = u_reset ? current : mix(previous, current, blend);
   fragColor = vec4(vec3(blended), 1.0);
@@ -227,12 +229,16 @@ export interface PipelineSettings {
 }
 
 export const DEFAULT_SETTINGS: PipelineSettings = {
-  // 72% EMA temporal stability eliminates sensor noise, pulsating and flickering,
-  // while motion adaptation prevents ghosting on head movement.
-  temporalBlend: 0.28,
-  maskFeather: 1.8,
-  edgeSoftness: 0.18,
-  lightWrap: 0.22,
+  // 85% EMA history — aggressive temporal stability crushes sensor noise,
+  // pulsating and flickering. Combined with the motion-adaptive gate in
+  // temporalShader, genuine movement still comes through cleanly.
+  temporalBlend: 0.15,
+  // Wider Gaussian feather softens the low-resolution mask before compositing.
+  maskFeather: 2.4,
+  // Narrow final ramp keeps the person-background boundary tight but smooth.
+  edgeSoftness: 0.14,
+  // Subtle rim wrap prevents the "cardboard cutout" look.
+  lightWrap: 0.18,
 };
 
 /** How much the background is downscaled before being blurred. */
