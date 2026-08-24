@@ -63,6 +63,30 @@ function LeaveOnPageHide() {
 }
 
 /**
+ * Traps browser / mobile hardware back button and swipe-back gestures while in call.
+ * Ensures accidental back navigation NEVER kicks the participant out of the classroom.
+ * The only way to leave is by explicitly tapping the End/Leave button.
+ */
+function usePreventBackNavigation() {
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    // Push state so back gesture hits our trap
+    window.history.pushState({ inLiveKitCall: true }, '', window.location.href);
+
+    const handlePop = () => {
+      // When back is pressed or swiped, push state right back immediately
+      window.history.pushState({ inLiveKitCall: true }, '', window.location.href);
+    };
+
+    window.addEventListener('popstate', handlePop);
+    return () => {
+      window.removeEventListener('popstate', handlePop);
+    };
+  }, []);
+}
+
+/**
  * Keeps the screen awake for the duration of the call — otherwise the OS's
  * normal auto-lock timeout kills the screen mid-class, unlike Zoom/Meet/
  * WhatsApp which all hold a wake lock while a call is active. The lock is
@@ -204,6 +228,7 @@ export default function LiveKitRoom({
    * here as CLIENT_INITIATED too and is indistinguishable at this level.
    */
   const endOnDisconnectRef = useRef(false);
+  usePreventBackNavigation();
 
   useEffect(() => {
     const onHide = (event: PageTransitionEvent) => {

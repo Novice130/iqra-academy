@@ -30,7 +30,18 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
           return;
         }
         const data = await res.json();
-        if (!cancelled) setGuests(data.guests || []);
+        if (!cancelled) {
+          const rawList: WaitingGuest[] = data.guests || [];
+          // Deduplicate by name so the host only sees one prompt per person
+          const dedupedMap = new Map<string, WaitingGuest>();
+          for (const item of rawList) {
+            const key = item.name.toLowerCase().trim();
+            if (!dedupedMap.has(key)) {
+              dedupedMap.set(key, item);
+            }
+          }
+          setGuests(Array.from(dedupedMap.values()));
+        }
       } catch {
         // Best-effort poll
       }
@@ -46,14 +57,16 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
     };
   }, [sessionId]);
 
-  const respond = async (id: string, action: 'admit' | 'deny') => {
-    setBusy(id);
-    setGuests((prev) => prev.filter((g) => g.id !== id));
+  const respond = async (guest: WaitingGuest, action: 'admit' | 'deny') => {
+    setBusy(guest.id);
+    // Remove this guest and any with the same name immediately
+    const targetName = guest.name.toLowerCase().trim();
+    setGuests((prev) => prev.filter((g) => g.id !== guest.id && g.name.toLowerCase().trim() !== targetName));
     try {
       await fetch(`/api/sessions/${sessionId}/guests`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: id, action }),
+        body: JSON.stringify({ requestId: guest.id, action }),
       });
     } catch {
       // Re-appears on next poll if failed
@@ -93,14 +106,14 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
             <div className="text-[11px] text-neutral-400">wants to join this class</div>
           </div>
           <button
-            onClick={() => respond(g.id, 'deny')}
+            onClick={() => respond(g, 'deny')}
             disabled={busy === g.id}
             className="px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer shrink-0 bg-white/10 text-neutral-300 hover:bg-white/15 transition"
           >
             Deny
           </button>
           <button
-            onClick={() => respond(g.id, 'admit')}
+            onClick={() => respond(g, 'admit')}
             disabled={busy === g.id}
             className="px-3.5 py-1.5 rounded-full text-xs font-bold text-white cursor-pointer shrink-0 transition active:scale-95"
             style={{

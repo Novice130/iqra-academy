@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { and, count, eq, gt } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
 import { resolveClassRoom } from "@/lib/class-room";
@@ -27,12 +27,11 @@ const JOINABLE_WINDOW_MS = 6 * 60 * 60 * 1000;
 const KNOCK_WINDOW_MS = 10 * 60 * 1000;
 
 /**
- * How long an admission is good for. The guest's requestId travels in a URL
- * they can forward, so an ADMITTED row that never expires is a bearer
- * credential for the whole class. Long enough to survive a page reload or a
- * phone waking up; short enough that a forwarded link is dead on arrival.
+ * How long an admission remains valid for a session (4 hours).
+ * Once admitted by the host, the guest can refresh or rejoin through the same link
+ * throughout the entire class without requiring host re-approval.
  */
-const ADMIT_GRACE_MS = 2 * 60 * 1000;
+const ADMIT_GRACE_MS = 4 * 60 * 60 * 1000;
 
 /** Enough guests to cover a real class; a script pointed at this endpoint stops here. */
 const MAX_PENDING_PER_SESSION = 12;
@@ -74,17 +73,60 @@ export async function POST(request: NextRequest) {
       const resolution = await resolveClassRoom(rawSession);
       const session = resolution.session;
 
+      if (!isJoinable(session)) {
+        throw new BusinessRuleError("This class has already ended.");
+      }
+
+      const targetSessionIds = Array.from(
+        new Set([sessionId, rawSession.id, session.id, session.mergedIntoId].filter(Boolean) as string[])
+      );
+
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, session.teacherId),
-        columns: { name: true },
+        columns: { name: true, email: true },
       });
+
+      const admittedSince = new Date(Date.now() - ADMIT_GRACE_MS);
+
+      // 1. If this guest was ALREADY ADMITTED by the host, grant instant direct entry!
+      const alreadyAdmitted = await db.query.guestJoinRequests.findFirst({
+        where: and(
+          inArray(guestJoinRequests.sessionId, targetSessionIds),
+          eq(guestJoinRequests.name, name),
+          eq(guestJoinRequests.status, "ADMITTED"),
+          gt(guestJoinRequests.createdAt, admittedSince)
+        ),
+        orderBy: [desc(guestJoinRequests.respondedAt)],
+      });
+
+      if (alreadyAdmitted) {
+        const { generateLiveKitToken, generateRoomName } = await import("@/lib/livekit");
+        const roomName = generateRoomName(session.id);
+        const token = await generateLiveKitToken({
+          roomName,
+          userName: name,
+          userEmail: `guest-${alreadyAdmitted.id}`,
+          isModerator: false,
+        });
+
+        return NextResponse.json({
+          status: "ADMITTED",
+          requestId: alreadyAdmitted.id,
+          token,
+          serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
+          userName: name,
+          sessionTitle: session.title,
+          teacherName: teacher?.name ?? null,
+          teacherIdentity: teacher?.email ?? null,
+        });
+      }
 
       const knockedSince = new Date(Date.now() - KNOCK_WINDOW_MS);
 
-      // Knocking twice is the same knock. Match on canonical session or requested session
+      // 2. Knocking twice is the same knock. Match on canonical session or requested session
       const existing = await db.query.guestJoinRequests.findFirst({
         where: and(
-          eq(guestJoinRequests.sessionId, session.id),
+          inArray(guestJoinRequests.sessionId, targetSessionIds),
           eq(guestJoinRequests.name, name),
           eq(guestJoinRequests.status, "PENDING"),
           gt(guestJoinRequests.createdAt, knockedSince)
@@ -92,6 +134,7 @@ export async function POST(request: NextRequest) {
       });
       if (existing) {
         return NextResponse.json({
+          status: "PENDING",
           requestId: existing.id,
           sessionTitle: session.title,
           teacherName: teacher?.name ?? null,
@@ -106,7 +149,7 @@ export async function POST(request: NextRequest) {
         .from(guestJoinRequests)
         .where(
           and(
-            eq(guestJoinRequests.sessionId, session.id),
+            inArray(guestJoinRequests.sessionId, targetSessionIds),
             eq(guestJoinRequests.status, "PENDING"),
             gt(guestJoinRequests.createdAt, knockedSince)
           )
@@ -125,6 +168,7 @@ export async function POST(request: NextRequest) {
       });
 
       return NextResponse.json({
+        status: "PENDING",
         requestId: id,
         sessionTitle: session.title,
         teacherName: teacher?.name ?? null,

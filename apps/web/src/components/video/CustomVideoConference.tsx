@@ -403,6 +403,44 @@ export default function CustomVideoConference({
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+
+  const [layoutPos, setLayoutPos] = useState<{ x: number; y: number } | null>(null);
+  const layoutDragRef = useRef<{ startX: number; startY: number; initX: number; initY: number; moved: boolean } | null>(null);
+
+  const handleLayoutPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    layoutDragRef.current = {
+      startX: e.clientX,
+      startY: e.clientY,
+      initX: layoutPos?.x ?? rect.left,
+      initY: layoutPos?.y ?? rect.top,
+      moved: false,
+    };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+
+  const handleLayoutPointerMove = (e: React.PointerEvent) => {
+    if (!layoutDragRef.current) return;
+    const dx = e.clientX - layoutDragRef.current.startX;
+    const dy = e.clientY - layoutDragRef.current.startY;
+    if (Math.hypot(dx, dy) > 4) {
+      layoutDragRef.current.moved = true;
+      const maxX = (typeof window !== 'undefined' ? window.innerWidth : 800) - 160;
+      const maxY = (typeof window !== 'undefined' ? window.innerHeight : 600) - 100;
+      const nextX = Math.max(12, Math.min(maxX, layoutDragRef.current.initX + dx));
+      const nextY = Math.max(12, Math.min(maxY, layoutDragRef.current.initY + dy));
+      setLayoutPos({ x: nextX, y: nextY });
+    }
+  };
+
+  const handleLayoutPointerUp = (e: React.PointerEvent) => {
+    if (!layoutDragRef.current) return;
+    if (!layoutDragRef.current.moved) {
+      setViewMenuOpen((v) => !v);
+    }
+    layoutDragRef.current = null;
+  };
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return;
@@ -632,26 +670,31 @@ export default function CustomVideoConference({
               );
             })}
 
+            {/* Movable Layout Switcher Pill — defaults to top-center (never collides with top-right video tile settings) */}
             <div
-              className={`absolute top-5 right-5 sm:top-6 sm:right-6 md:top-8 md:right-8 z-[60] pointer-events-auto transition-all duration-300 ${
-                chromeHidden ? 'opacity-0 -translate-y-4 pointer-events-none' : 'opacity-100 translate-y-0'
+              className={`fixed z-[60] pointer-events-auto transition-opacity duration-300 ${
+                chromeHidden && !viewMenuOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
-              style={{
-                marginTop: 'max(0px, env(safe-area-inset-top))',
-                marginRight: 'max(0px, env(safe-area-inset-right))',
-              }}
+              style={
+                layoutPos
+                  ? { left: `${layoutPos.x}px`, top: `${layoutPos.y}px` }
+                  : {
+                      top: 'max(16px, env(safe-area-inset-top))',
+                      left: '50%',
+                      transform: 'translateX(-50%)',
+                    }
+              }
             >
               <button
                 type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setViewMenuOpen((v) => !v);
-                }}
-                title="Switch layout"
+                onPointerDown={handleLayoutPointerDown}
+                onPointerMove={handleLayoutPointerMove}
+                onPointerUp={handleLayoutPointerUp}
+                title="Switch layout (drag anywhere to move)"
                 aria-label="Switch layout"
-                className="flex items-center gap-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs shadow-2xl hover:brightness-110"
+                className="flex items-center gap-2 px-3.5 py-2 sm:px-4 sm:py-2.5 rounded-full cursor-grab active:cursor-grabbing transition-transform duration-200 active:scale-95 text-white font-semibold text-xs shadow-2xl hover:brightness-110 select-none touch-none"
                 style={{
-                  background: 'rgba(24, 26, 34, 0.60)',
+                  background: 'rgba(24, 26, 34, 0.65)',
                   backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
                   WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
                   border: '1px solid rgba(255, 255, 255, 0.20)',
@@ -676,9 +719,9 @@ export default function CustomVideoConference({
                     }}
                   />
                   <div
-                    className="absolute right-0 top-12 z-[81] w-56 rounded-2xl p-1.5 shadow-2xl animate-fadeIn overflow-hidden"
+                    className="absolute left-1/2 -translate-x-1/2 top-12 z-[81] w-56 rounded-2xl p-1.5 shadow-2xl animate-fadeIn overflow-hidden"
                     style={{
-                      background: 'rgba(24, 26, 34, 0.78)',
+                      background: 'rgba(24, 26, 34, 0.85)',
                       backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
                       WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
                       border: '1px solid rgba(255, 255, 255, 0.20)',

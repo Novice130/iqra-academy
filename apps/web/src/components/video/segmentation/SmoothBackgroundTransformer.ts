@@ -112,7 +112,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
   /** Minimum gap between heavy ML segmentation passes (ms) to keep 60fps WebGL fluid */
   private lastInferenceTime = 0;
-  private static readonly MIN_INFERENCE_GAP_MS = 32; // ~30fps ML inference budget
+  private inferenceGapMs = 33; // adaptive gap (~30fps ML inference budget)
+  private isInferring = false;
+  private inferenceCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+  private inferenceCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
 
   constructor(options: SmoothBackgroundOptions) {
     super();
@@ -122,6 +125,21 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
   private get effectActive() {
     return typeof this.options.blurRadius === 'number' || typeof this.options.imagePath === 'string';
+  }
+
+  private setupInferenceCanvas() {
+    const INFER_W = 256;
+    const INFER_H = 144;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      this.inferenceCanvas = new OffscreenCanvas(INFER_W, INFER_H);
+    } else if (typeof document !== 'undefined') {
+      this.inferenceCanvas = document.createElement('canvas');
+      this.inferenceCanvas.width = INFER_W;
+      this.inferenceCanvas.height = INFER_H;
+    }
+    this.inferenceCtx = this.inferenceCanvas
+      ? (this.inferenceCanvas.getContext('2d') as any)
+      : null;
   }
 
   async init({ outputCanvas, inputElement: inputVideo }: VideoTransformerInitOptions) {
@@ -141,6 +159,8 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
     this.pipeline = createPipeline(outputCanvas);
     if (!this.pipeline) throw new Error('WebGL2 is unavailable');
+
+    this.setupInferenceCanvas();
 
     const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
     this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
@@ -165,6 +185,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.canvas = opts.outputCanvas;
     this.inputVideo = opts.inputElement;
     this.isDisabled = false;
+    this.setupInferenceCanvas();
     await this.applyMode();
     if (this.options.settings) this.pipeline?.setSettings(this.options.settings);
   }
@@ -178,6 +199,8 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.background?.image.close();
     this.background = null;
     this.canvas = undefined;
+    this.inferenceCanvas = null;
+    this.inferenceCtx = null;
   }
 
   async update(options: SmoothBackgroundOptions) {
@@ -252,14 +275,38 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
       }
 
       const now = performance.now();
-      const shouldRunInference = now - this.lastInferenceTime >= SmoothBackgroundTransformer.MIN_INFERENCE_GAP_MS || !this.pipeline.ready;
+      const shouldRunInference =
+        (now - this.lastInferenceTime >= this.inferenceGapMs && !this.isInferring) ||
+        !this.pipeline.ready;
 
-      if (shouldRunInference) {
+      if (shouldRunInference && this.segmenter) {
         this.lastInferenceTime = now;
+        this.isInferring = true;
         const timestamp = Math.max(this.lastTimestamp + 1, now);
         this.lastTimestamp = timestamp;
 
-        this.segmenter.segmentForVideo(frame, timestamp, (result) => {
+        // Downscale frame to 256x144 for ultra-fast GPU/CPU neural network inference
+        let inputSource: any = frame;
+        if (this.inferenceCtx && this.inferenceCanvas) {
+          try {
+            this.inferenceCtx.drawImage(frame, 0, 0, 256, 144);
+            inputSource = this.inferenceCanvas;
+          } catch {
+            inputSource = frame;
+          }
+        }
+
+        const startTime = performance.now();
+        this.segmenter.segmentForVideo(inputSource, timestamp, (result) => {
+          const inferDuration = performance.now() - startTime;
+          // Dynamically adapt inference frequency: if device is slow (>20ms per inference),
+          // reduce inference rate slightly (up to 50ms gap ~20fps) to keep main thread & audio lag-free!
+          if (inferDuration > 22) {
+            this.inferenceGapMs = Math.min(50, this.inferenceGapMs + 4);
+          } else if (inferDuration < 12 && this.inferenceGapMs > 30) {
+            this.inferenceGapMs = Math.max(30, this.inferenceGapMs - 2);
+          }
+
           const masks = result.confidenceMasks;
           const mask = masks?.[0];
           if (mask) {
@@ -267,6 +314,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
             this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
           }
           result.close();
+          this.isInferring = false;
         });
       }
 

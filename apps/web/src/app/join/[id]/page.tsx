@@ -11,7 +11,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Spinner from '@/components/Spinner';
 import { useParams, useRouter } from 'next/navigation';
-import PreJoinScreen, { type JoinChoices } from '@/components/video/PreJoinScreen';
+import type { JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 import { authClient } from '@/lib/auth-client';
 
@@ -52,6 +52,24 @@ export default function GuestJoinPage() {
       .catch(() => {});
   }, [sessionId, router]);
 
+  // Check if this guest was previously admitted for this session
+  useEffect(() => {
+    if (typeof window === 'undefined' || !sessionId) return;
+    try {
+      const saved = localStorage.getItem(`guest_session_${sessionId}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.name) {
+          setName(parsed.name);
+          // If admitted within the last 4 hours, auto-join immediately!
+          if (parsed.admittedAt && Date.now() - parsed.admittedAt < 4 * 60 * 60 * 1000) {
+            knock(parsed.name);
+          }
+        }
+      }
+    } catch {}
+  }, [sessionId]);
+
   // Poll our own request until the host answers.
   useEffect(() => {
     if (stage !== 'waiting') return;
@@ -69,9 +87,6 @@ export default function GuestJoinPage() {
       if (!requestIdRef.current || settledRef.current) return;
       try {
         const res = await fetch(`/api/guest/join?requestId=${requestIdRef.current}`);
-        // The request can vanish under us — the host deleting the session
-        // cascades it away. Without this the page polled a 404 forever and
-        // sat on the spinner with nothing to show for it.
         if (res.status === 404 || res.status === 410) {
           giveUp('This class is no longer available.');
           return;
@@ -89,7 +104,14 @@ export default function GuestJoinPage() {
           setToken(data.token);
           setServerUrl(data.serverUrl);
           setTeacherIdentity(data.teacherIdentity ?? null);
+          setChoices({ videoEnabled: true, audioEnabled: true });
           setStage('admitted');
+          try {
+            localStorage.setItem(
+              `guest_session_${sessionId}`,
+              JSON.stringify({ name: data.userName || name, admittedAt: Date.now() })
+            );
+          } catch {}
         } else if (data.status === 'DENIED') {
           giveUp('The host didn’t admit you to this class.');
         } else if (data.status === 'EXPIRED') {
@@ -98,8 +120,6 @@ export default function GuestJoinPage() {
           giveUp('Nobody answered. The host may have stepped away — try again.');
         }
       } catch {
-        // Keep waiting — a dropped poll isn't a refusal — unless we've been
-        // waiting long enough that nothing is coming.
         if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
           giveUp('We couldn’t reach the classroom. Try the link again.');
         }
@@ -112,21 +132,20 @@ export default function GuestJoinPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [stage]);
+  }, [stage, name, sessionId]);
 
-  const knock = async () => {
+  const knock = async (customName?: string) => {
+    const candidateName = (customName || name).trim();
+    if (!candidateName) return;
     setMessage(null);
     setDeniedReason(null);
     settledRef.current = false;
-    // Without this the button sits there looking untapped while the request
-    // is in flight, and the natural response is to tap it again — which asks
-    // the teacher to admit the same guest twice.
     setKnocking(true);
     try {
       const res = await fetch('/api/guest/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, name }),
+        body: JSON.stringify({ sessionId, name: candidateName }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -134,6 +153,24 @@ export default function GuestJoinPage() {
         setStage('error');
         return;
       }
+
+      // If already admitted (e.g. rejoining with the same link), enter immediately!
+      if (data.status === 'ADMITTED' && data.token) {
+        settledRef.current = true;
+        setToken(data.token);
+        setServerUrl(data.serverUrl);
+        setTeacherIdentity(data.teacherIdentity ?? null);
+        setChoices({ videoEnabled: true, audioEnabled: true });
+        setStage('admitted');
+        try {
+          localStorage.setItem(
+            `guest_session_${sessionId}`,
+            JSON.stringify({ name: candidateName, admittedAt: Date.now() })
+          );
+        } catch {}
+        return;
+      }
+
       requestIdRef.current = data.requestId;
       setMessage(
         data.teacherName ? `${data.teacherName} will let you in shortly.` : 'The host will let you in shortly.'
@@ -143,15 +180,11 @@ export default function GuestJoinPage() {
       setMessage('Could not reach the classroom. Check your connection and try again.');
       setStage('error');
     } finally {
-      // Safe in a finally here, unlike the sign-in pages: this stays on the
-      // same page and re-renders into the waiting stage rather than handing
-      // over to a full page load.
       setKnocking(false);
     }
   };
 
   if (stage === 'admitted' && token && serverUrl) {
-    if (!choices) return <PreJoinScreen userName={name} onJoin={setChoices} />;
     return (
       <LiveKitRoom
         token={token}
@@ -160,11 +193,8 @@ export default function GuestJoinPage() {
         isModerator={false}
         // A guest is never the host: leaving must not end the class.
         isHost={false}
-        choices={choices}
+        choices={choices || { videoEnabled: true, audioEnabled: true }}
         teacherIdentity={teacherIdentity}
-        // A guest has no dashboard. Sending them there put them on a login
-        // page for an account they don't have, so leaving drops them back on
-        // the knock screen instead.
         onLeave={() => {
           settledRef.current = false;
           requestIdRef.current = null;
@@ -238,7 +268,7 @@ export default function GuestJoinPage() {
               </p>
             )}
             <button
-              onClick={knock}
+              onClick={() => knock()}
               disabled={name.trim().length < 2 || knocking}
               className="mt-4 w-full py-3 rounded-full text-sm font-semibold cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
               style={{ background: '#8ab4f8', color: '#202124' }}

@@ -107,10 +107,22 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         throw new BusinessRuleError("That request has already been answered.");
       }
 
+      const resolution = await resolveClassRoom(guard.session);
+      const targetSessionIds = Array.from(
+        new Set([sessionId, guard.session.id, resolution.session.id, guard.session.mergedIntoId].filter(Boolean) as string[])
+      );
+
+      // Admit/Deny the target request AND any duplicate pending knocks for the same guest name
       await db
         .update(guestJoinRequests)
         .set({ status: action === "admit" ? "ADMITTED" : "DENIED", respondedAt: new Date() })
-        .where(and(eq(guestJoinRequests.id, requestId), eq(guestJoinRequests.status, "PENDING")));
+        .where(
+          and(
+            inArray(guestJoinRequests.sessionId, targetSessionIds),
+            eq(guestJoinRequests.name, req.name),
+            eq(guestJoinRequests.status, "PENDING")
+          )
+        );
 
       return NextResponse.json({ success: true });
     } catch (error) {
