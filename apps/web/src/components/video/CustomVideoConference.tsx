@@ -600,7 +600,7 @@ export default function CustomVideoConference({
       isLocal={p.isLocal}
       isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
       actions={actionsFor(p)}
-      fit={p.isLocal ? tileFit : fit}
+      fit={p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit}
     />
   );
 

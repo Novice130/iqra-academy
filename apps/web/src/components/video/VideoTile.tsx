@@ -9,6 +9,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { Track } from 'livekit-client';
 import { isTrackReference, type TrackReferenceOrPlaceholder } from '@livekit/components-core';
 import { VideoTrack, useIsSpeaking } from '@livekit/components-react';
 import { MicOffIcon, MoreIcon, SpeakingBarsIcon } from './CallIcons';
@@ -127,6 +128,11 @@ export default function VideoTile({
     setMenuOpen((v) => !v);
   };
 
+  const isScreenShare =
+    isTrackReference(trackRef) &&
+    (trackRef.source === Track.Source.ScreenShare ||
+      trackRef.publication?.source === Track.Source.ScreenShare);
+
   return (
     <div
       ref={rootRef}
@@ -148,7 +154,10 @@ export default function VideoTile({
         <VideoTrack
           trackRef={trackRef}
           className="w-full h-full"
-          style={{ objectFit: fit, transform: isLocal ? 'scaleX(-1)' : undefined }}
+          style={{
+            objectFit: fit,
+            transform: isLocal && !isScreenShare ? 'scaleX(-1)' : undefined,
+          }}
         />
       ) : (
         <div className="w-full h-full flex items-center justify-center bg-gradient-to-b from-neutral-900 to-black">

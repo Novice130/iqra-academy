@@ -1,26 +1,15 @@
 "use client";
 
 /**
- * The teacher's weekly hours.
+ * The teacher's weekly hours — 24/7 Around-the-Clock availability editor.
  *
- * ── The zone is the whole point ─────────────────────────────────────────────
- * The previous version of this screen never asked for a time zone and never
- * sent one, so every row it saved took the database default of
- * America/New_York while the teacher filling it in sat in Asia/Kolkata. The
- * stored hours were not merely unlabelled — they were labelled wrongly, which
- * is worse, because it looks like an answer. So the zone is now the first
- * thing on the page, it is stated in words rather than implied, and the grid
- * stays disabled until it has been confirmed once.
- *
- * ── Ranges, not cells ───────────────────────────────────────────────────────
- * The grid is a 30-minute checkbox grid, but contiguous ticks are coalesced
- * into ranges before saving: 16:00, 16:30, 17:00 becomes one 16:00-17:30 row,
- * not three. lib/slots.ts slices them back into bookable slots per occurrence.
- *
- * ── The preview strip ───────────────────────────────────────────────────────
- * A teacher cannot check their own work here without seeing what a student
- * sees. "Your Monday 6:00 PM is 7:30 AM in Chicago" is where a mis-set zone
- * gets caught, and it costs one Intl call per zone.
+ * ── Features ─────────────────────────────────────────────────────────────────
+ * - 24/7 round-the-clock selection (00:00 to 23:30 across 48 half-hour slots).
+ * - Empty default state (unselected by default; only selected slots turn blue).
+ * - Quick Period Filter Pills: All 24h, Morning, Afternoon, Evening, Night.
+ * - 1-Click Presets: "Weekdays 9am–5pm", "Weekdays 5pm–10pm", "Weekends", "Clear All".
+ * - Clickable Day Column headers to toggle/fill/clear entire days.
+ * - Timezone validation with instant multi-city preview strip.
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -28,34 +17,79 @@ import { useSearchParams } from "next/navigation";
 import { ZONES, isValidZone } from "@/lib/zones";
 
 const DAYS = [
-  { id: "MONDAY", short: "Mon" },
-  { id: "TUESDAY", short: "Tue" },
-  { id: "WEDNESDAY", short: "Wed" },
-  { id: "THURSDAY", short: "Thu" },
-  { id: "FRIDAY", short: "Fri" },
-  { id: "SATURDAY", short: "Sat" },
-  { id: "SUNDAY", short: "Sun" },
+  { id: "MONDAY", short: "Mon", full: "Monday" },
+  { id: "TUESDAY", short: "Tue", full: "Tuesday" },
+  { id: "WEDNESDAY", short: "Wed", full: "Wednesday" },
+  { id: "THURSDAY", short: "Thu", full: "Thursday" },
+  { id: "FRIDAY", short: "Fri", full: "Friday" },
+  { id: "SATURDAY", short: "Sat", full: "Saturday" },
+  { id: "SUNDAY", short: "Sun", full: "Sunday" },
 ] as const;
 
 const SLOT_MINUTES = 30;
 
-/** 06:00 through 22:30 — wide enough for both a morning and an evening school. */
-const GRID_START = 6 * 60;
-const GRID_END = 22 * 60 + 30;
-
-const CELLS: string[] = [];
-for (let m = GRID_START; m <= GRID_END; m += SLOT_MINUTES) {
-  CELLS.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
+/** Full 24 hours: 00:00 through 23:30 (48 half-hour slots per day) */
+const ALL_CELLS: string[] = [];
+for (let m = 0; m < 24 * 60; m += SLOT_MINUTES) {
+  ALL_CELLS.push(`${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`);
 }
+
+type PeriodFilter = "all" | "morning" | "afternoon" | "evening" | "night";
+
+const PERIODS: { id: PeriodFilter; label: string; range: string; filter: (t: string) => boolean }[] = [
+  {
+    id: "all",
+    label: "All 24 Hours",
+    range: "12:00 AM – 11:30 PM",
+    filter: () => true,
+  },
+  {
+    id: "morning",
+    label: "🌅 Morning",
+    range: "06:00 AM – 12:00 PM",
+    filter: (t) => {
+      const m = toMinutes(t);
+      return m >= 6 * 60 && m < 12 * 60;
+    },
+  },
+  {
+    id: "afternoon",
+    label: "☀️ Afternoon",
+    range: "12:00 PM – 05:00 PM",
+    filter: (t) => {
+      const m = toMinutes(t);
+      return m >= 12 * 60 && m < 17 * 60;
+    },
+  },
+  {
+    id: "evening",
+    label: "🌆 Evening",
+    range: "05:00 PM – 10:00 PM",
+    filter: (t) => {
+      const m = toMinutes(t);
+      return m >= 17 * 60 && m < 22 * 60;
+    },
+  },
+  {
+    id: "night",
+    label: "🌙 Night / Early",
+    range: "10:00 PM – 06:00 AM",
+    filter: (t) => {
+      const m = toMinutes(t);
+      return m >= 22 * 60 || m < 6 * 60;
+    },
+  },
+];
 
 const toMinutes = (t: string) => {
   const [h, m] = t.slice(0, 5).split(":").map(Number);
   return h * 60 + m;
 };
+
 const fromMinutes = (m: number) =>
   `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
-/** 14:30 → "2:30 PM", without pulling in a formatting library. */
+/** 14:30 → "2:30 PM" */
 function pretty(hhmm: string): string {
   const [h, m] = hhmm.split(":").map(Number);
   const suffix = h >= 12 ? "PM" : "AM";
@@ -63,28 +97,25 @@ function pretty(hhmm: string): string {
   return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
 }
 
-/**
- * What a given wall-clock reading in `fromZone` looks like in `toZone`.
- *
- * Anchored on an actual upcoming date rather than "today", because the answer
- * genuinely depends on the date: India has no DST and the US does, so the same
- * pair of zones is an hour apart in July and not in January.
- */
+/** Converts wall-clock in fromZone to preview in toZone */
 function inOtherZone(hhmm: string, fromZone: string, toZone: string, weekdayIndex: number): string {
   try {
     const now = new Date();
-    // Next occurrence of that weekday, so the preview reflects a real date.
     const probe = new Date(now.getTime());
     probe.setUTCDate(probe.getUTCDate() + ((weekdayIndex + 8 - probe.getUTCDay()) % 7 || 7));
     const [h, m] = hhmm.split(":").map(Number);
 
-    // Wall clock in fromZone → instant. Same two-pass trick as lib/slots.ts.
     const naive = Date.UTC(probe.getUTCFullYear(), probe.getUTCMonth(), probe.getUTCDate(), h, m);
-    const offsetAt = (instant: number, zone: string) => {
+    const offsetAt = (instant: number, zoneName: string) => {
       const f = new Intl.DateTimeFormat("en-US", {
-        timeZone: zone, hour12: false,
-        year: "numeric", month: "2-digit", day: "2-digit",
-        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        timeZone: zoneName,
+        hour12: false,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
       });
       const p: Record<string, string> = {};
       for (const part of f.formatToParts(new Date(instant))) p[part.type] = part.value;
@@ -95,7 +126,10 @@ function inOtherZone(hhmm: string, fromZone: string, toZone: string, weekdayInde
     const instant = naive - offsetAt(guess, fromZone);
 
     return new Intl.DateTimeFormat("en-US", {
-      timeZone: toZone, weekday: "short", hour: "numeric", minute: "2-digit",
+      timeZone: toZone,
+      weekday: "short",
+      hour: "numeric",
+      minute: "2-digit",
     }).format(new Date(instant));
   } catch {
     return "—";
@@ -110,7 +144,6 @@ interface ApiSlot {
 
 export default function AvailabilityPage() {
   const searchParams = useSearchParams();
-  // An admin can land here for somebody else, from /admin/users.
   const teacherId = searchParams.get("teacherId");
   const onboarding = searchParams.get("onboarding") === "1";
 
@@ -121,6 +154,7 @@ export default function AvailabilityPage() {
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
   const [dragging, setDragging] = useState<null | boolean>(null);
+  const [activePeriod, setActivePeriod] = useState<PeriodFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -138,7 +172,6 @@ export default function AvailabilityPage() {
         const map: Record<string, Set<string>> = {};
         for (const s of data.slots) {
           const set = map[s.dayOfWeek] ?? new Set<string>();
-          // Ranges come back from the API; expand them into grid cells.
           for (let m = toMinutes(s.startTime); m + SLOT_MINUTES <= toMinutes(s.endTime); m += SLOT_MINUTES) {
             set.add(fromMinutes(m));
           }
@@ -146,10 +179,6 @@ export default function AvailabilityPage() {
         }
         setSelected(map);
 
-        // A stored zone means this was set deliberately before, so don't make
-        // them confirm it again. Otherwise fall back to the browser's guess
-        // and require an explicit confirmation — that unconfirmed guess is the
-        // exact thing that went wrong last time.
         if (data.timezone && isValidZone(data.timezone)) {
           setZone(data.timezone);
           setZoneConfirmed(!onboarding);
@@ -177,7 +206,68 @@ export default function AvailabilityPage() {
     });
   }, []);
 
-  /** Contiguous ticks become one range. */
+  const clearAll = useCallback(() => {
+    setSelected({});
+  }, []);
+
+  const applyPreset = useCallback((preset: "weekdays-day" | "weekdays-eve" | "weekends" | "all-247") => {
+    setSelected((prev) => {
+      const next: Record<string, Set<string>> = { ...prev };
+      const weekdayIds = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"];
+      const weekendIds = ["SATURDAY", "SUNDAY"];
+
+      if (preset === "weekdays-day") {
+        for (const day of weekdayIds) {
+          const set = new Set(next[day] ?? []);
+          for (let m = 9 * 60; m < 17 * 60; m += SLOT_MINUTES) set.add(fromMinutes(m));
+          next[day] = set;
+        }
+      } else if (preset === "weekdays-eve") {
+        for (const day of weekdayIds) {
+          const set = new Set(next[day] ?? []);
+          for (let m = 17 * 60; m < 22 * 60; m += SLOT_MINUTES) set.add(fromMinutes(m));
+          next[day] = set;
+        }
+      } else if (preset === "weekends") {
+        for (const day of weekendIds) {
+          const set = new Set(next[day] ?? []);
+          for (let m = 10 * 60; m < 18 * 60; m += SLOT_MINUTES) set.add(fromMinutes(m));
+          next[day] = set;
+        }
+      } else if (preset === "all-247") {
+        for (const day of DAYS) {
+          next[day.id] = new Set(ALL_CELLS);
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const toggleDay = useCallback(
+    (dayId: string, targetCells: string[]) => {
+      setSelected((prev) => {
+        const current = prev[dayId] ?? new Set<string>();
+        const allVisibleSelected = targetCells.every((c) => current.has(c));
+        const nextSet = new Set(current);
+
+        if (allVisibleSelected) {
+          targetCells.forEach((c) => nextSet.delete(c));
+        } else {
+          targetCells.forEach((c) => nextSet.add(c));
+        }
+
+        return { ...prev, [dayId]: nextSet };
+      });
+    },
+    []
+  );
+
+  const visibleCells = useMemo(() => {
+    const period = PERIODS.find((p) => p.id === activePeriod) ?? PERIODS[0];
+    return ALL_CELLS.filter(period.filter);
+  }, [activePeriod]);
+
+  /** Contiguous ticks become one range */
   const ranges = useMemo(() => {
     const out: ApiSlot[] = [];
     for (const day of DAYS) {
@@ -201,8 +291,8 @@ export default function AvailabilityPage() {
     () => Object.values(selected).reduce((n, s) => n + s.size, 0),
     [selected]
   );
+  const totalHours = (totalCells * SLOT_MINUTES) / 60;
 
-  /** The first tick of the week, for the preview strip. */
   const previewAnchor = useMemo(() => {
     for (const [i, day] of DAYS.entries()) {
       const cells = [...(selected[day.id] ?? [])].sort();
@@ -228,9 +318,6 @@ export default function AvailabilityPage() {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error || "Save failed.");
 
-      // Keep the teacher's own dashboard agreeing with their calendar. Only
-      // for their own row — an admin editing someone else must not have their
-      // own zone rewritten.
       if (!teacherId) {
         await fetch("/api/me/timezone", {
           method: "PATCH",
@@ -252,7 +339,7 @@ export default function AvailabilityPage() {
 
   return (
     <div
-      style={{ padding: "24px 16px", maxWidth: "1100px" }}
+      style={{ padding: "24px 16px", maxWidth: "1160px" }}
       onMouseUp={() => setDragging(null)}
       onMouseLeave={() => setDragging(null)}
     >
@@ -262,12 +349,12 @@ export default function AvailabilityPage() {
         </h1>
         <p style={{ fontSize: "14px", color: "var(--text-secondary)", marginTop: "4px" }}>
           {totalCells === 0
-            ? "Nothing set yet — students can't book until there is."
-            : `${totalCells} half-hour slots across ${ranges.length} blocks`}
+            ? "No availability selected — grid is empty. Click and drag or use presets below."
+            : `${totalHours.toFixed(1)} hrs selected (${totalCells} half-hour slots across ${ranges.length} time blocks)`}
         </p>
       </div>
 
-      {/* The zone comes first, and says so in words. */}
+      {/* Timezone verification */}
       <div
         style={{
           border: `1px solid ${zoneConfirmed ? "var(--border)" : "#f59e0b"}`,
@@ -325,8 +412,7 @@ export default function AvailabilityPage() {
           )}
         </div>
         <p style={{ fontSize: "12.5px", color: "var(--text-tertiary)", marginTop: "10px", marginBottom: 0 }}>
-          Students always see these hours converted to their own local time. You never
-          have to do the maths.
+          Students worldwide see these hours converted to their own local time around the clock.
         </p>
       </div>
 
@@ -361,13 +447,126 @@ export default function AvailabilityPage() {
             Your {previewAnchor.day.short} {pretty(previewAnchor.cell)}
           </strong>{" "}
           is{" "}
-          {["America/Chicago", "America/New_York", "Europe/London"]
+          {["America/Chicago", "America/New_York", "Europe/London", "Asia/Dubai"]
             .filter((z) => z !== zone)
             .map((z) => `${inOtherZone(previewAnchor.cell, zone, z, previewAnchor.weekdayIndex)} in ${z.split("/")[1].replace("_", " ")}`)
             .join(" · ")}
         </div>
       )}
 
+      {/* Quick Action Presets & Tools Bar */}
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "12px",
+          flexWrap: "wrap",
+          marginBottom: "16px",
+        }}
+      >
+        {/* Period Filter Tabs */}
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          {PERIODS.map((p) => {
+            const active = activePeriod === p.id;
+            return (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => setActivePeriod(p.id)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "20px",
+                  border: active ? "1px solid var(--accent)" : "1px solid var(--border)",
+                  background: active ? "var(--accent)" : "var(--bg-elevated)",
+                  color: active ? "#fff" : "var(--text-secondary)",
+                  fontSize: "12.5px",
+                  fontWeight: active ? 600 : 500,
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+                title={p.range}
+              >
+                {p.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 1-Click Quick Fill & Clear Tools */}
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: "12px", color: "var(--text-tertiary)", marginRight: "2px" }}>
+            Presets:
+          </span>
+          <button
+            type="button"
+            onClick={() => applyPreset("weekdays-day")}
+            disabled={gridLocked}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              fontSize: "11.5px",
+              cursor: gridLocked ? "not-allowed" : "pointer",
+            }}
+          >
+            + Weekdays 9–5
+          </button>
+          <button
+            type="button"
+            onClick={() => applyPreset("weekdays-eve")}
+            disabled={gridLocked}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              fontSize: "11.5px",
+              cursor: gridLocked ? "not-allowed" : "pointer",
+            }}
+          >
+            + Weekdays 5–10 PM
+          </button>
+          <button
+            type="button"
+            onClick={() => applyPreset("weekends")}
+            disabled={gridLocked}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid var(--border)",
+              background: "var(--bg-secondary)",
+              color: "var(--text-primary)",
+              fontSize: "11.5px",
+              cursor: gridLocked ? "not-allowed" : "pointer",
+            }}
+          >
+            + Weekends
+          </button>
+          <button
+            type="button"
+            onClick={clearAll}
+            disabled={gridLocked || totalCells === 0}
+            style={{
+              padding: "5px 10px",
+              borderRadius: "6px",
+              border: "1px solid rgba(239, 68, 68, 0.3)",
+              background: totalCells > 0 ? "rgba(239, 68, 68, 0.1)" : "var(--bg-secondary)",
+              color: totalCells > 0 ? "#ef4444" : "var(--text-tertiary)",
+              fontSize: "11.5px",
+              fontWeight: 600,
+              cursor: gridLocked || totalCells === 0 ? "not-allowed" : "pointer",
+            }}
+          >
+            Clear All
+          </button>
+        </div>
+      </div>
+
+      {/* Main 24-Hour Availability Grid */}
       <div
         style={{
           border: "1px solid var(--border)",
@@ -375,105 +574,162 @@ export default function AvailabilityPage() {
           overflow: "hidden",
           opacity: gridLocked ? 0.45 : 1,
           pointerEvents: gridLocked ? "none" : "auto",
+          background: "var(--bg-primary)",
         }}
       >
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "620px" }}>
-            <thead>
-              <tr style={{ background: "var(--bg-elevated)" }}>
+        <div style={{ overflowX: "auto", maxHeight: activePeriod === "all" ? "650px" : "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "660px" }}>
+            <thead style={{ position: "sticky", top: 0, zIndex: 10 }}>
+              <tr style={{ background: "var(--bg-elevated)", borderBottom: "1px solid var(--border)" }}>
                 <th
                   style={{
-                    padding: "10px",
+                    padding: "10px 12px",
                     fontSize: "12px",
                     color: "var(--text-tertiary)",
                     textAlign: "left",
-                    width: "84px",
+                    width: "100px",
                     position: "sticky",
                     left: 0,
                     background: "var(--bg-elevated)",
+                    zIndex: 11,
                   }}
                 >
                   Time
                 </th>
-                {DAYS.map((d) => (
-                  <th
-                    key={d.id}
-                    style={{ padding: "10px", fontSize: "12px", color: "var(--text-primary)" }}
-                  >
-                    {d.short}
-                  </th>
-                ))}
+                {DAYS.map((d) => {
+                  const daySet = selected[d.id] ?? new Set<string>();
+                  const visibleSelectedCount = visibleCells.filter((c) => daySet.has(c)).length;
+                  const allSelected = visibleSelectedCount === visibleCells.length && visibleCells.length > 0;
+                  return (
+                    <th
+                      key={d.id}
+                      onClick={() => toggleDay(d.id, visibleCells)}
+                      title={`Click to ${allSelected ? "clear" : "select all in view"} for ${d.full}`}
+                      style={{
+                        padding: "8px 6px",
+                        fontSize: "12.5px",
+                        color: "var(--text-primary)",
+                        textAlign: "center",
+                        cursor: "pointer",
+                        userSelect: "none",
+                        transition: "background 0.15s ease",
+                      }}
+                      className="hover:bg-white/5"
+                    >
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "2px" }}>
+                        <span>{d.short}</span>
+                        <span
+                          style={{
+                            fontSize: "10px",
+                            padding: "1px 5px",
+                            borderRadius: "10px",
+                            background: visibleSelectedCount > 0 ? "rgba(0, 122, 255, 0.18)" : "transparent",
+                            color: visibleSelectedCount > 0 ? "#007aff" : "var(--text-tertiary)",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {(visibleSelectedCount * 0.5).toFixed(1)}h
+                        </span>
+                      </div>
+                    </th>
+                  );
+                })}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={8} style={{ padding: "48px", textAlign: "center", color: "var(--text-tertiary)" }}>
-                    Loading…
+                    Loading your availability…
+                  </td>
+                </tr>
+              ) : visibleCells.length === 0 ? (
+                <tr>
+                  <td colSpan={8} style={{ padding: "48px", textAlign: "center", color: "var(--text-tertiary)" }}>
+                    No slots in this period.
                   </td>
                 </tr>
               ) : (
-                CELLS.map((cell) => (
-                  <tr key={cell}>
-                    <td
+                visibleCells.map((cell, idx) => {
+                  const isHour = cell.endsWith(":00");
+                  const hourInt = parseInt(cell.split(":")[0], 10);
+                  const isPeriodBoundary = isHour && (hourInt === 6 || hourInt === 12 || hourInt === 17 || hourInt === 22);
+
+                  return (
+                    <tr
+                      key={cell}
                       style={{
-                        padding: "4px 10px",
-                        fontSize: "11.5px",
-                        fontFamily: "monospace",
-                        color: "var(--text-tertiary)",
-                        borderTop: "1px solid var(--border)",
-                        position: "sticky",
-                        left: 0,
-                        background: "var(--bg-primary)",
-                        whiteSpace: "nowrap",
+                        background: idx % 2 === 0 ? "transparent" : "rgba(255, 255, 255, 0.015)",
+                        borderTop: isPeriodBoundary ? "2px solid rgba(0, 122, 255, 0.35)" : isHour ? "1px solid var(--border)" : "1px dashed rgba(255, 255, 255, 0.05)",
                       }}
                     >
-                      {cell.endsWith(":00") ? pretty(cell) : ""}
-                    </td>
-                    {DAYS.map((d) => {
-                      const on = selected[d.id]?.has(cell) ?? false;
-                      return (
-                        <td
-                          key={d.id}
-                          onMouseDown={() => {
-                            setDragging(!on);
-                            setCell(d.id, cell, !on);
-                          }}
-                          onMouseEnter={() => {
-                            if (dragging !== null) setCell(d.id, cell, dragging);
-                          }}
-                          style={{
-                            borderTop: "1px solid var(--border)",
-                            borderLeft: "1px solid var(--border)",
-                            padding: "2px",
-                            cursor: "pointer",
-                            userSelect: "none",
-                          }}
-                        >
-                          <div
-                            style={{
-                              height: "22px",
-                              borderRadius: "5px",
-                              background: on ? "var(--accent)" : "transparent",
+                      <td
+                        style={{
+                          padding: "4px 10px",
+                          fontSize: "11px",
+                          fontFamily: "monospace",
+                          color: isHour ? "var(--text-secondary)" : "var(--text-tertiary)",
+                          fontWeight: isHour ? 600 : 400,
+                          position: "sticky",
+                          left: 0,
+                          background: "var(--bg-primary)",
+                          whiteSpace: "nowrap",
+                          borderRight: "1px solid var(--border)",
+                          zIndex: 5,
+                        }}
+                      >
+                        {pretty(cell)}
+                      </td>
+                      {DAYS.map((d) => {
+                        const on = selected[d.id]?.has(cell) ?? false;
+                        return (
+                          <td
+                            key={d.id}
+                            onMouseDown={() => {
+                              setDragging(!on);
+                              setCell(d.id, cell, !on);
                             }}
-                          />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))
+                            onMouseEnter={() => {
+                              if (dragging !== null) setCell(d.id, cell, dragging);
+                            }}
+                            style={{
+                              borderRight: "1px solid var(--border)",
+                              padding: "2px",
+                              cursor: "pointer",
+                              userSelect: "none",
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "22px",
+                                borderRadius: "4px",
+                                background: on
+                                  ? "linear-gradient(135deg, #007aff 0%, #0056d6 100%)"
+                                  : "transparent",
+                                boxShadow: on ? "0 2px 6px rgba(0, 122, 255, 0.35)" : "none",
+                                border: on ? "1px solid rgba(120, 190, 255, 0.5)" : "1px solid transparent",
+                                transition: "all 0.12s ease",
+                              }}
+                            />
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "18px", flexWrap: "wrap" }}>
+      {/* Save Button & Guidance */}
+      <div style={{ display: "flex", gap: "14px", alignItems: "center", marginTop: "20px", flexWrap: "wrap" }}>
         <button
           onClick={save}
           disabled={saving || loading || gridLocked}
           style={{
-            padding: "11px 22px",
+            padding: "11px 24px",
             borderRadius: "10px",
             border: "none",
             background: "var(--accent)",
@@ -482,12 +738,13 @@ export default function AvailabilityPage() {
             fontWeight: 600,
             cursor: saving || gridLocked ? "not-allowed" : "pointer",
             opacity: saving || gridLocked ? 0.55 : 1,
+            boxShadow: "0 4px 14px rgba(0, 122, 255, 0.35)",
           }}
         >
           {saving ? "Saving…" : onboarding ? "Save & finish" : "Save hours"}
         </button>
-        <span style={{ fontSize: "12.5px", color: "var(--text-tertiary)" }}>
-          Click and drag to paint a block.
+        <span style={{ fontSize: "13px", color: "var(--text-secondary)" }}>
+          💡 <strong>Tip:</strong> Click & drag to paint blocks. Click any day column header (e.g. <em>Mon</em>) to toggle visible hours.
         </span>
       </div>
     </div>

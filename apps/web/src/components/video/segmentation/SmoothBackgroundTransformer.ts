@@ -285,18 +285,8 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         this.lastTimestamp = timestamp;
 
         // Downscale frame to 256x144 for ultra-fast GPU/CPU neural network inference
-        let inputSource: any = frame;
-        if (this.inferenceCtx && this.inferenceCanvas) {
-          try {
-            this.inferenceCtx.drawImage(frame, 0, 0, 256, 144);
-            inputSource = this.inferenceCanvas;
-          } catch {
-            inputSource = frame;
-          }
-        }
-
         const startTime = performance.now();
-        this.segmenter.segmentForVideo(inputSource, timestamp, (result) => {
+        this.segmenter.segmentForVideo(frame, timestamp, (result) => {
           const inferDuration = performance.now() - startTime;
           // Dynamically adapt inference frequency: if device is slow (>20ms per inference),
           // reduce inference rate slightly (up to 50ms gap ~20fps) to keep main thread & audio lag-free!
@@ -310,7 +300,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
           const mask = masks?.[0];
           if (mask) {
             const invert = masks.length > 1;
-            this.pipeline!.updateMask(mask.getAsFloat32Array(), mask.width, mask.height, invert);
+            const f32 = mask.getAsFloat32Array();
+            const u8 = new Uint8Array(f32.length);
+            for (let i = 0; i < f32.length; i++) u8[i] = f32[i] * 255;
+            this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
           }
           result.close();
           this.isInferring = false;

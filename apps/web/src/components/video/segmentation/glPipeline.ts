@@ -385,7 +385,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       }
     },
 
-    updateMask(mask: WebGLTexture | Float32Array, width: number, height: number, invert: boolean) {
+    updateMask(mask: WebGLTexture | Uint8Array, width: number, height: number, invert: boolean) {
       ensureMaskTargets(width, height);
       if (!maskHistory || !maskBlur) return;
 
@@ -393,14 +393,14 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       const next = maskHistory[1 - historyIndex];
 
       let maskTex: WebGLTexture;
-      if (mask instanceof Float32Array) {
+      if (mask instanceof Uint8Array) {
         if (!cpuMaskTex) {
           cpuMaskTex = createTexture(gl);
         }
         maskTex = cpuMaskTex;
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, maskTex);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, mask);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, mask);
       } else {
         maskTex = mask;
       }
