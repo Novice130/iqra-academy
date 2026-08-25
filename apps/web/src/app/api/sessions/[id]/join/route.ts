@@ -24,10 +24,10 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withHttpDb } from "@/lib/db";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { sessions, bookings, studentProfiles, sessionAttendance } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
-import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName, getRoomServiceClient, makeIdentity } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { resolveClassRoom } from "@/lib/class-room";
@@ -35,6 +35,14 @@ import { ringClassStudents } from "@/lib/class-ring";
 import { afterResponse } from "@/lib/after-response";
 import { createTimings, withTimings } from "@/lib/server-timing";
 import { createId } from "@paralleldrive/cuid2";
+
+function normalizeJoinCode(code: string) {
+  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (clean.length === 12) {
+    return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
+  }
+  return code;
+}
 
 export async function GET(
   request: NextRequest,
@@ -59,22 +67,13 @@ export async function GET(
       const authResult = await timings.track("auth", requireAuth(request));
       if (authResult instanceof NextResponse) return withTimings(authResult, timings);
       const ctx = authResult;
-      const { id: sessionId } = await params;
+      const { id: rawId } = await params;
+      const sessionId = normalizeJoinCode(rawId);
 
-      // One query, not three. This route is on the critical path between
-      // tapping Join and seeing video, and every Neon round trip here is
-      // ~500ms of a student staring at a spinner — measured at ~4s for this
-      // function before a token was even minted.
-      //
-      // `requireAuth` has already read this user's row, so `ctx` stands in
-      // for the second lookup that used to sit in this Promise.all, and the
-      // class teacher — who may not be the caller, since an admin can join to
-      // observe — comes back through the `teacher` relation rather than as a
-      // follow-up query that had to wait for `session` to resolve first.
       const session = await timings.track(
         "load",
         db.query.sessions.findFirst({
-          where: eq(sessions.id, sessionId),
+          where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
           with: {
             bookings: true,
             teacher: { columns: { email: true, name: true } },
@@ -318,7 +317,7 @@ export async function GET(
           .insert(sessionAttendance)
           .values({
             orgId: session.orgId,
-            sessionId,
+            sessionId: session.id,
             userId: ctx.userId,
             studentProfileId,
             role: isOwningTeacher ? "TEACHER" : isStudent ? "STUDENT" : "OBSERVER",
@@ -331,21 +330,7 @@ export async function GET(
       };
 
       // Deferred, not awaited — see lib/after-response.
-      //
-      // The teacher arriving is what rings the class. Gated on `connecting=1`
-      // like the attendance write, for the same reason: this route is also hit
-      // on page mount, and a teacher who opens a class and then sits on the
-      // device picker has not started it.
-      //
-      // Only the *owning* teacher — an admin dropping in to observe must not
-      // summon a class. Re-ringing on reconnect is handled inside
-      // ringClassStudents, which matters now that a teacher who drops off
-      // comes straight back through here.
-      //
-      // A push per booked student used to sit between the teacher tapping Join
-      // and their own token coming back, which is the one person in the class
-      // who should never be waiting on it.
-      if (isConnecting && isOwningTeacher) {
+      if (isOwningTeacher && isConnecting) {
         afterResponse(
           ringClassStudents({
             canonical: session,
@@ -359,17 +344,16 @@ export async function GET(
       // Seed the spotlight whoever opens the room — it always names the class
       // teacher, so a student opening early still lands everyone on the
       // teacher once they arrive.
-      //
-      // Also deferred: it is two or three LiveKit round trips, and the client
-      // does not need it to connect. The response already carries
-      // `teacherIdentity` precisely so a client can focus the teacher before
-      // any spotlight metadata lands, and ensureSpotlight's own backfill is
-      // written to cope with a room that got auto-created first — which is the
-      // same race whether it runs before the response or just after it.
       if (isAttending) {
         afterResponse(ensureSpotlight());
       }
 
+      // Mark started and remember the room name atomically before answering.
+      //
+      // Two separate updates were racing: a student arriving first updated
+      // videoRoomName, the teacher arriving seconds later updated status, and
+      // both were reading a stale row. Bundled into one Promise.all so the
+      // caller holds a coherent row the moment the token is handed back.
       const [token] = await timings.track("token", Promise.all([
         generateLiveKitToken({
           roomName,
@@ -383,22 +367,23 @@ export async function GET(
           ? db
               .update(sessions)
               .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
-              .where(eq(sessions.id, sessionId))
+              .where(eq(sessions.id, session.id))
           : Promise.resolve(),
         !session.videoRoomName
           ? db
               .update(sessions)
               .set({ videoRoomName: roomName })
-              .where(eq(sessions.id, sessionId))
+              .where(eq(sessions.id, session.id))
           : Promise.resolve(),
       ]));
 
       return withTimings(NextResponse.json({
         roomName,
         token,
+        sessionId: session.id,
         serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
         userName: user?.name || "Participant",
-        joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
+        joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${session.id}`,
         isModerator: isTeacher,
         // The identity inside the token. The client sends it back when it
         // leaves, so the right connection's attendance row gets closed even

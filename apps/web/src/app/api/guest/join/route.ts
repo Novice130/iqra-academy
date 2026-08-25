@@ -14,7 +14,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { and, count, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
 import { resolveClassRoom } from "@/lib/class-room";
@@ -49,23 +49,33 @@ function isJoinable(session: SessionRow): boolean {
   return true;
 }
 
+function normalizeJoinCode(code: string) {
+  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (clean.length === 12) {
+    return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
+  }
+  return code;
+}
+
 export async function POST(request: NextRequest) {
   return withDb(async () => {
     try {
       const body = await request.json().catch(() => ({}));
-      const sessionId: string | undefined = body?.sessionId;
+      const sessionIdRaw: string | undefined = body?.sessionId;
       const rawName: string | undefined = body?.name;
 
-      if (typeof sessionId !== "string" || typeof rawName !== "string") {
+      if (typeof sessionIdRaw !== "string" || typeof rawName !== "string") {
         throw new BusinessRuleError("sessionId and name are required");
       }
+
+      const sessionId = normalizeJoinCode(sessionIdRaw);
       const name = rawName.trim().slice(0, 60);
       if (name.length < 2) {
         throw new BusinessRuleError("Please enter your name.");
       }
 
       const rawSession = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
+        where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
       });
       if (!rawSession) throw new NotFoundError("Session");
 
@@ -170,6 +180,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         status: "PENDING",
         requestId: id,
+        sessionId: session.id,
         sessionTitle: session.title,
         teacherName: teacher?.name ?? null,
       });
@@ -248,6 +259,7 @@ export async function GET(request: NextRequest) {
         token,
         serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
         userName: req.name,
+        sessionId: session.id,
         teacherIdentity: teacher?.email ?? null,
       });
     } catch (error) {

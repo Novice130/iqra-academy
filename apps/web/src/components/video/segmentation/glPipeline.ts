@@ -241,8 +241,8 @@ export const DEFAULT_SETTINGS: PipelineSettings = {
   lightWrap: 0.18,
 };
 
-/** How much the background is downscaled before being blurred. */
-const BLUR_DOWNSCALE = 4;
+/** How much the background is downscaled before being blurred (2 = 360p/540p for crisp Gaussian blur). */
+const BLUR_DOWNSCALE = 2;
 
 export type BackgroundMode =
   | { kind: 'blur'; radius: number }
@@ -400,7 +400,9 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
         maskTex = cpuMaskTex;
         gl.activeTexture(gl.TEXTURE0);
         gl.bindTexture(gl.TEXTURE_2D, maskTex);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
         gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, width, height, 0, gl.RED, gl.UNSIGNED_BYTE, mask);
+        gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
       } else {
         maskTex = mask;
       }

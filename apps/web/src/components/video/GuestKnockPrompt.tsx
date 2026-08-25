@@ -5,7 +5,7 @@
  * "Ahmed wants to join", with Admit / Deny.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 const POLL_INTERVAL_MS = 2500;
 
@@ -18,6 +18,7 @@ interface WaitingGuest {
 export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
   const [guests, setGuests] = useState<WaitingGuest[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const answeredNames = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     let cancelled = false;
@@ -36,7 +37,7 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
           const dedupedMap = new Map<string, WaitingGuest>();
           for (const item of rawList) {
             const key = item.name.toLowerCase().trim();
-            if (!dedupedMap.has(key)) {
+            if (!dedupedMap.has(key) && !answeredNames.current.has(key)) {
               dedupedMap.set(key, item);
             }
           }
@@ -61,6 +62,7 @@ export default function GuestKnockPrompt({ sessionId }: { sessionId: string }) {
     setBusy(guest.id);
     // Remove this guest and any with the same name immediately
     const targetName = guest.name.toLowerCase().trim();
+    answeredNames.current.add(targetName);
     setGuests((prev) => prev.filter((g) => g.id !== guest.id && g.name.toLowerCase().trim() !== targetName));
     try {
       await fetch(`/api/sessions/${sessionId}/guests`, {

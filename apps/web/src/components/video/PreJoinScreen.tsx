@@ -148,7 +148,13 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
 
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: videoEnabled ? (videoDeviceId ? { deviceId: { exact: videoDeviceId } } : true) : false,
+          video: videoEnabled
+            ? {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                ...(videoDeviceId ? { deviceId: { exact: videoDeviceId } } : {}),
+              }
+            : false,
           audio: audioEnabled ? (audioDeviceId ? { deviceId: { exact: audioDeviceId } } : true) : false,
         });
         if (cancelled) {

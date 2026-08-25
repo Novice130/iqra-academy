@@ -11,7 +11,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb, withHttpDb } from "@/lib/db";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
@@ -20,13 +20,23 @@ import { resolveClassRoom } from "@/lib/class-room";
 /** Knocks older than this are stale — nobody is still sitting there waiting. */
 const KNOCK_WINDOW_MS = 10 * 60 * 1000;
 
-async function assertHost(request: NextRequest, sessionId: string) {
+function normalizeJoinCode(code: string) {
+  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (clean.length === 12) {
+    return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
+  }
+  return code;
+}
+
+async function assertHost(request: NextRequest, sessionIdRaw: string) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return { response: authResult };
   const ctx = authResult;
 
+  const sessionId = normalizeJoinCode(sessionIdRaw);
+
   const session = await db.query.sessions.findFirst({
-    where: eq(sessions.id, sessionId),
+    where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
     with: { bookings: true },
   });
   if (!session) throw new NotFoundError("Session");

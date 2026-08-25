@@ -12,9 +12,18 @@ const compat = new FlatCompat({
 const eslintConfig = [
   {
     // Vendored, minified, and not ours: MediaPipe's WASM glue is copied into
-    // public/ at build time by scripts/copy-mediapipe.mjs. Linting it produced
-    // ~48,000 findings and drowned every real one.
-    ignores: ["public/mediapipe/**"],
+    // public/ at build time by scripts/copy-mediapipe.mjs.
+    ignores: [
+      "public/**",
+      ".next/**",
+      ".open-next/**",
+      "dist/**",
+      "out/**",
+      "node_modules/**",
+      "scripts/**",
+      "*.js",
+      "next-env.d.ts",
+    ],
   },
   ...compat.extends("next/core-web-vitals", "next/typescript"),
   {

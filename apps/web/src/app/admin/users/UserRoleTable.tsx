@@ -1,45 +1,48 @@
 "use client";
 
 /**
- * The role-change table.
+ * User & Teacher Management Workspace (Twenty CRM Style).
  *
- * Optimistic, with a revert on failure: a role dropdown that sits there doing
- * nothing for a second reads as broken, but one that lies about the result is
- * worse — so a rejected change snaps back and says why.
- *
- * Demotions ask for confirmation. Promotions do not: granting is recoverable
- * by demoting, whereas taking someone's access away mid-term is the change
- * somebody makes by mis-clicking a dropdown.
- *
- * Inline styles throughout, matching the rest of /admin, which does not use
- * the dashboard's Tailwind theme.
+ * Provides real-time filtering, role elevation, 24h teacher availability editing,
+ * and user management matching the Twenty CRM design language.
  */
 
-import { useMemo, useState } from "react";
+import { useState, useTransition, useMemo } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export interface AdminUserRow {
   id: string;
   email: string;
   name: string | null;
-  role: string;
+  role: "SUPER_ADMIN" | "ORG_ADMIN" | "TEACHER" | "STUDENT";
   phone: string | null;
   timezone: string | null;
   createdAt: string;
 }
 
 const ROLE_RANK: Record<string, number> = {
-  STUDENT: 0,
-  TEACHER: 1,
-  ORG_ADMIN: 2,
-  SUPER_ADMIN: 3,
+  STUDENT: 1,
+  TEACHER: 2,
+  ORG_ADMIN: 3,
+  SUPER_ADMIN: 4,
 };
 
 const ROLE_LABEL: Record<string, string> = {
   STUDENT: "Student",
   TEACHER: "Teacher",
-  ORG_ADMIN: "Admin",
-  SUPER_ADMIN: "Super admin",
+  ORG_ADMIN: "Administrator",
+  SUPER_ADMIN: "Super Admin",
 };
+
+const ROLE_STYLES: Record<string, { bg: string; text: string; border: string }> = {
+  SUPER_ADMIN: { bg: "bg-purple-500/10", text: "text-purple-600 dark:text-purple-400", border: "border-purple-500/20" },
+  ORG_ADMIN: { bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400", border: "border-blue-500/20" },
+  TEACHER: { bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-500/20" },
+  STUDENT: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20" },
+};
+
+type RoleFilter = "ALL" | "TEACHER" | "STUDENT" | "ORG_ADMIN" | "SUPER_ADMIN";
 
 export default function UserRoleTable({
   initialUsers,
@@ -50,436 +53,297 @@ export default function UserRoleTable({
   currentUserId: string;
   currentRole: string;
 }) {
-  const [rows, setRows] = useState(initialUsers);
+  const router = useRouter();
+  const [users, setUsers] = useState<AdminUserRow[]>(initialUsers);
   const [search, setSearch] = useState("");
-  const [roleFilter, setRoleFilter] = useState("");
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ text: string; bad: boolean } | null>(null);
+  const [activeFilter, setActiveFilter] = useState<RoleFilter>("ALL");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [, startTransition] = useTransition();
 
   const callerLevel = ROLE_RANK[currentRole] ?? 0;
 
-  const visible = useMemo(() => {
+  // Counts for Twenty-style filter badges
+  const counts = useMemo(() => {
+    return {
+      ALL: users.length,
+      TEACHER: users.filter((u) => u.role === "TEACHER").length,
+      STUDENT: users.filter((u) => u.role === "STUDENT").length,
+      ORG_ADMIN: users.filter((u) => u.role === "ORG_ADMIN" || u.role === "SUPER_ADMIN").length,
+    };
+  }, [users]);
+
+  // Filtered rows
+  const visibleUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((u) => {
-      if (roleFilter && u.role !== roleFilter) return false;
+    return users.filter((u) => {
+      // Role filter
+      if (activeFilter === "TEACHER" && u.role !== "TEACHER") return false;
+      if (activeFilter === "STUDENT" && u.role !== "STUDENT") return false;
+      if (activeFilter === "ORG_ADMIN" && u.role !== "ORG_ADMIN" && u.role !== "SUPER_ADMIN") return false;
+
+      // Search filter
       if (!q) return true;
       return (
-        (u.name ?? "").toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+        (u.name && u.name.toLowerCase().includes(q)) ||
+        u.email.toLowerCase().includes(q) ||
+        (u.phone && u.phone.toLowerCase().includes(q))
       );
     });
-  }, [rows, search, roleFilter]);
+  }, [users, search, activeFilter]);
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const u of rows) c[u.role] = (c[u.role] ?? 0) + 1;
-    return c;
-  }, [rows]);
-
-  async function changeRole(user: AdminUserRow, nextRole: string) {
-    if (nextRole === user.role) return;
-
-    if (ROLE_RANK[nextRole] < ROLE_RANK[user.role]) {
-      const ok = window.confirm(
-        `Change ${user.name || user.email} from ${ROLE_LABEL[user.role]} to ${ROLE_LABEL[nextRole]}?\n\n` +
-          `They will immediately lose access to everything the ${ROLE_LABEL[user.role].toLowerCase()} role gives them.`
-      );
-      if (!ok) return;
-    }
-
-    const previous = user.role;
-    setBusyId(user.id);
-    setMessage(null);
-    setRows((rs) => rs.map((r) => (r.id === user.id ? { ...r, role: nextRole } : r)));
+  async function updateRole(userId: string, nextRole: AdminUserRow["role"]) {
+    setError(null);
+    setSuccess(null);
+    setPendingId(userId);
 
     try {
       const res = await fetch("/api/admin/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: user.id, role: nextRole }),
+        body: JSON.stringify({ userId, role: nextRole }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error || "That change didn't go through.");
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not update role.");
 
-      setMessage({
-        text:
-          nextRole === "TEACHER"
-            ? `${user.name || user.email} is now a teacher, and has been asked to set their hours.`
-            : `${user.name || user.email} is now ${ROLE_LABEL[nextRole].toLowerCase()}.`,
-        bad: false,
-      });
-    } catch (err) {
-      setRows((rs) => rs.map((r) => (r.id === user.id ? { ...r, role: previous } : r)));
-      setMessage({ text: err instanceof Error ? err.message : "Something went wrong.", bad: true });
+      setUsers((prev) =>
+        prev.map((u) => (u.id === userId ? { ...u, role: nextRole } : u))
+      );
+      setSuccess(`Updated role to ${ROLE_LABEL[nextRole]}!`);
+      setTimeout(() => setSuccess(null), 3000);
+      startTransition(() => router.refresh());
+    } catch (err: any) {
+      setError(err.message || "Failed to update role.");
     } finally {
-      setBusyId(null);
+      setPendingId(null);
     }
   }
 
-  const inputStyle: React.CSSProperties = {
-    background: "#1e293b",
-    border: "1px solid #334155",
-    color: "#e2e8f0",
-    borderRadius: "8px",
-    padding: "9px 12px",
-    fontSize: "14px",
-  };
-
-  const th: React.CSSProperties = {
-    textAlign: "left",
-    padding: "10px 12px",
-    fontSize: "12px",
-    textTransform: "uppercase",
-    letterSpacing: "0.04em",
-    color: "#94a3b8",
-    borderBottom: "1px solid #334155",
-    whiteSpace: "nowrap",
-  };
-
-  const td: React.CSSProperties = {
-    padding: "12px",
-    borderBottom: "1px solid #1e293b",
-    fontSize: "14px",
-    verticalAlign: "middle",
-  };
-
-  const [addOpen, setAddOpen] = useState(false);
-  const [newEmail, setNewEmail] = useState("");
-  const [newName, setNewName] = useState("");
-  const [newTz, setNewTz] = useState("America/New_York");
-  const [adding, setAdding] = useState(false);
-
-  async function handleAddTeacher(e: React.FormEvent) {
-    e.preventDefault();
-    if (!newEmail.trim()) return;
-
-    setAdding(true);
-    setMessage(null);
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: newEmail.trim(),
-          name: newName.trim() || undefined,
-          role: "TEACHER",
-          timezone: newTz,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to add teacher");
-
-      const createdUser = data.user;
-      setRows((prev) => {
-        const existingIdx = prev.findIndex((u) => u.id === createdUser.id || u.email.toLowerCase() === createdUser.email.toLowerCase());
-        const row: AdminUserRow = {
-          id: createdUser.id,
-          email: createdUser.email,
-          name: createdUser.name,
-          role: createdUser.role,
-          phone: createdUser.phone || null,
-          timezone: createdUser.timezone || newTz,
-          createdAt: createdUser.createdAt || new Date().toISOString(),
-        };
-        if (existingIdx >= 0) {
-          const copy = [...prev];
-          copy[existingIdx] = row;
-          return copy;
-        }
-        return [row, ...prev];
-      });
-
-      setMessage({
-        text: `Teacher ${createdUser.email} has been added! When they log in, they will automatically have all teacher features.`,
-        bad: false,
-      });
-      setAddOpen(false);
-      setNewEmail("");
-      setNewName("");
-    } catch (err) {
-      setMessage({
-        text: err instanceof Error ? err.message : "Failed to add teacher.",
-        bad: true,
-      });
-    } finally {
-      setAdding(false);
+  function getInitials(name: string | null, email: string) {
+    if (name) {
+      const parts = name.trim().split(" ");
+      if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+      return name.slice(0, 2).toUpperCase();
     }
+    return email.slice(0, 2).toUpperCase();
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "16px", alignItems: "center" }}>
-        <input
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search name or email"
-          style={{ ...inputStyle, flex: "1 1 240px", minWidth: 0 }}
-        />
-        <select
-          value={roleFilter}
-          onChange={(e) => setRoleFilter(e.target.value)}
-          style={inputStyle}
-        >
-          <option value="">Everyone ({rows.length})</option>
-          {Object.keys(ROLE_LABEL).map((r) => (
-            <option key={r} value={r}>
-              {ROLE_LABEL[r]} ({counts[r] ?? 0})
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          style={{
-            background: "linear-gradient(135deg, #007aff 0%, #0056b3 100%)",
-            color: "#fff",
-            border: "none",
-            borderRadius: "8px",
-            padding: "9px 16px",
-            fontSize: "14px",
-            fontWeight: 600,
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px",
-          }}
-        >
-          + Add Teacher
-        </button>
-      </div>
+    <div className="space-y-6">
+      {/* Top Metrics Cards (Twenty CRM Style) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
+        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
+          <div className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
+            Total Users
+          </div>
+          <div className="text-2xl font-bold text-[var(--text-primary)] mt-1">{counts.ALL}</div>
+        </div>
 
-      {addOpen && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 100,
-            background: "rgba(0,0,0,0.65)",
-            backdropFilter: "blur(6px)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px",
-          }}
-          onClick={() => setAddOpen(false)}
-        >
-          <div
-            style={{
-              background: "#1e293b",
-              border: "1px solid #334155",
-              borderRadius: "16px",
-              padding: "24px",
-              width: "100%",
-              maxWidth: "460px",
-              boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-              <h3 style={{ color: "#fff", margin: 0, fontSize: "18px", fontWeight: 700 }}>Add New Teacher</h3>
-              <button
-                onClick={() => setAddOpen(false)}
-                style={{ background: "transparent", border: "none", color: "#94a3b8", fontSize: "18px", cursor: "pointer" }}
-              >
-                ✕
-              </button>
-            </div>
-            <p style={{ color: "#94a3b8", fontSize: "13px", marginTop: 0, marginBottom: "16px", lineHeight: "1.5" }}>
-              Enter the teacher&apos;s email address. Once added, when this person logs in with this email (via Google or password), they will automatically get full teacher dashboard and classroom access.
-            </p>
-            <form onSubmit={handleAddTeacher} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div>
-                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
-                  Teacher Email *
-                </label>
-                <input
-                  type="email"
-                  required
-                  placeholder="teacher@example.com"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
-                  Full Name (Optional)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Ustadha Fatima"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
-                />
-              </div>
-              <div>
-                <label style={{ display: "block", color: "#e2e8f0", fontSize: "12px", fontWeight: 600, marginBottom: "4px" }}>
-                  Time Zone
-                </label>
-                <select
-                  value={newTz}
-                  onChange={(e) => setNewTz(e.target.value)}
-                  style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
-                >
-                  <option value="America/New_York">America/New_York (Eastern)</option>
-                  <option value="America/Chicago">America/Chicago (Central)</option>
-                  <option value="America/Denver">America/Denver (Mountain)</option>
-                  <option value="America/Los_Angeles">America/Los_Angeles (Pacific)</option>
-                  <option value="Europe/London">Europe/London (GMT/BST)</option>
-                  <option value="Asia/Dubai">Asia/Dubai (GST)</option>
-                  <option value="Asia/Karachi">Asia/Karachi (PKT)</option>
-                  <option value="Asia/Kolkata">Asia/Kolkata (IST)</option>
-                  <option value="Asia/Riyadh">Asia/Riyadh (AST)</option>
-                </select>
-              </div>
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                <button
-                  type="button"
-                  onClick={() => setAddOpen(false)}
-                  style={{
-                    flex: 1,
-                    padding: "10px",
-                    borderRadius: "8px",
-                    border: "1px solid #475569",
-                    background: "#334155",
-                    color: "#e2e8f0",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={adding || !newEmail.trim()}
-                  style={{
-                    flex: 1,
-                    padding: "10px",
-                    borderRadius: "8px",
-                    border: "none",
-                    background: "linear-gradient(135deg, #007aff 0%, #0056b3 100%)",
-                    color: "#fff",
-                    fontWeight: 600,
-                    cursor: adding ? "not-allowed" : "pointer",
-                    opacity: adding ? 0.7 : 1,
-                  }}
-                >
-                  {adding ? "Adding..." : "Add Teacher"}
-                </button>
-              </div>
-            </form>
+        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
+          <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
+            Teachers
+          </div>
+          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+            {counts.TEACHER}
           </div>
         </div>
-      )}
 
-      {message && (
-        <div
-          style={{
-            marginBottom: "16px",
-            padding: "11px 14px",
-            borderRadius: "8px",
-            fontSize: "14px",
-            background: message.bad ? "#7f1d1d" : "#065f46",
-            color: message.bad ? "#fecaca" : "#a7f3d0",
-          }}
-        >
-          {message.text}
+        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
+          <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
+            Students
+          </div>
+          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
+            {counts.STUDENT}
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
+          <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
+            Admins
+          </div>
+          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+            {counts.ORG_ADMIN}
+          </div>
+        </div>
+      </div>
+
+      {/* Action Banners */}
+      {error && (
+        <div className="p-3.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
+          ✕ {error}
+        </div>
+      )}
+      {success && (
+        <div className="p-3.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 animate-fadeIn">
+          ✓ {success}
         </div>
       )}
 
-      <div style={{ overflowX: "auto", background: "#111c33", borderRadius: "12px" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", minWidth: "760px" }}>
-          <thead>
-            <tr>
-              <th style={th}>Name</th>
-              <th style={th}>Email</th>
-              <th style={th}>Time zone</th>
-              <th style={th}>Role</th>
-              <th style={th} />
-            </tr>
-          </thead>
-          <tbody>
-            {visible.map((u) => {
-              const isSelf = u.id === currentUserId;
-              // Mirrors the server's ceiling so the UI doesn't offer a change
-              // the API will refuse.
-              const outranksMe = ROLE_RANK[u.role] > callerLevel;
-              const locked = isSelf || outranksMe || busyId === u.id;
+      {/* Twenty CRM Search & Filter Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+        {/* Filter Pills */}
+        <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border)] self-start">
+          <button
+            type="button"
+            onClick={() => setActiveFilter("ALL")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeFilter === "ALL"
+                ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            All <span className="text-[10px] opacity-70 ml-0.5">({counts.ALL})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter("TEACHER")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeFilter === "TEACHER"
+                ? "bg-[var(--bg-elevated)] text-emerald-600 dark:text-emerald-400 shadow-xs"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            Teachers <span className="text-[10px] opacity-70 ml-0.5">({counts.TEACHER})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter("STUDENT")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeFilter === "STUDENT"
+                ? "bg-[var(--bg-elevated)] text-amber-600 dark:text-amber-400 shadow-xs"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            Students <span className="text-[10px] opacity-70 ml-0.5">({counts.STUDENT})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveFilter("ORG_ADMIN")}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeFilter === "ORG_ADMIN"
+                ? "bg-[var(--bg-elevated)] text-blue-600 dark:text-blue-400 shadow-xs"
+                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            }`}
+          >
+            Admins <span className="text-[10px] opacity-70 ml-0.5">({counts.ORG_ADMIN})</span>
+          </button>
+        </div>
 
-              return (
-                <tr key={u.id}>
-                  <td style={td}>
-                    {u.name || <span style={{ color: "#64748b" }}>No name</span>}
-                    {isSelf && (
-                      <span style={{ color: "#64748b", fontSize: "12px" }}> · you</span>
-                    )}
-                  </td>
-                  <td style={{ ...td, color: "#94a3b8" }}>{u.email}</td>
-                  <td style={td}>
-                    {u.timezone || (
-                      <span
-                        style={{ color: u.role === "TEACHER" ? "#fbbf24" : "#64748b" }}
-                        title={
-                          u.role === "TEACHER"
-                            ? "A teacher with no time zone can't publish usable hours."
-                            : undefined
-                        }
-                      >
-                        {u.role === "TEACHER" ? "Not set ⚠" : "Not set"}
-                      </span>
-                    )}
-                  </td>
-                  <td style={td}>
-                    <select
-                      value={u.role}
-                      disabled={locked}
-                      onChange={(e) => changeRole(u, e.target.value)}
-                      style={{
-                        ...inputStyle,
-                        padding: "7px 10px",
-                        opacity: locked ? 0.5 : 1,
-                        cursor: locked ? "not-allowed" : "pointer",
-                      }}
-                      title={
-                        isSelf
-                          ? "You can't change your own role — ask another admin."
-                          : outranksMe
-                            ? "This person outranks you."
-                            : undefined
-                      }
-                    >
-                      {Object.keys(ROLE_LABEL)
-                        .filter((r) => ROLE_RANK[r] <= callerLevel || r === u.role)
-                        .map((r) => (
-                          <option key={r} value={r}>
-                            {ROLE_LABEL[r]}
-                          </option>
-                        ))}
-                    </select>
-                  </td>
-                  <td style={{ ...td, textAlign: "right" }}>
-                    {u.role === "TEACHER" && (
-                      <a
-                        href={`/dashboard/teacher/availability?teacherId=${u.id}`}
-                        style={{ color: "#34d399", textDecoration: "none", fontSize: "13px" }}
-                      >
-                        Hours →
-                      </a>
-                    )}
+        {/* Real-time Search Box */}
+        <div className="relative w-full sm:w-72">
+          <input
+            type="text"
+            placeholder="Search users (name, email, phone)…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full pl-9 pr-4 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+          />
+          <span className="absolute left-3 top-2.5 text-xs text-[var(--text-tertiary)]">🔍</span>
+        </div>
+      </div>
+
+      {/* Twenty CRM User Table */}
+      <div className="rounded-2xl border border-[var(--border)] overflow-hidden bg-[var(--bg-primary)]">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead>
+              <tr className="border-b border-[var(--border)] bg-[var(--bg-secondary)]/50 text-[11px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
+                <th className="px-5 py-3.5">User</th>
+                <th className="px-4 py-3.5">Contact / Timezone</th>
+                <th className="px-4 py-3.5">Role & Access</th>
+                <th className="px-5 py-3.5 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--border)] text-xs">
+              {visibleUsers.map((u) => {
+                const isSelf = u.id === currentUserId;
+                const targetLevel = ROLE_RANK[u.role] ?? 0;
+                const outranksMe = targetLevel >= callerLevel && !isSelf;
+                const locked = isSelf || outranksMe || pendingId === u.id;
+                const roleBadge = ROLE_STYLES[u.role] || ROLE_STYLES.STUDENT;
+
+                return (
+                  <tr key={u.id} className="hover:bg-white/[0.02] transition">
+                    {/* User Info */}
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/30 text-emerald-600 dark:text-emerald-400 font-bold flex items-center justify-center text-xs border border-emerald-500/30 shrink-0">
+                          {getInitials(u.name, u.email)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-[var(--text-primary)] truncate">
+                            {u.name || "Unnamed User"}
+                            {isSelf && (
+                              <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-[var(--text-secondary)]">
+                                You
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-[11px] font-mono text-[var(--text-secondary)] truncate">
+                            {u.email}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Contact & Timezone */}
+                    <td className="px-4 py-3.5">
+                      <div className="text-[var(--text-primary)] font-medium">
+                        {u.phone || "No phone added"}
+                      </div>
+                      <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                        🌍 {u.timezone || "UTC"}
+                      </div>
+                    </td>
+
+                    {/* Role Dropdown */}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={u.role}
+                          onChange={(e) => updateRole(u.id, e.target.value as AdminUserRow["role"])}
+                          disabled={locked}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${roleBadge.bg} ${roleBadge.text} ${roleBadge.border} focus:outline-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed`}
+                        >
+                          {Object.keys(ROLE_LABEL)
+                            .filter((r) => ROLE_RANK[r] <= callerLevel || r === u.role)
+                            .map((r) => (
+                              <option key={r} value={r} className="bg-[var(--bg-elevated)] text-[var(--text-primary)]">
+                                {ROLE_LABEL[r]}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="px-5 py-3.5 text-right">
+                      {u.role === "TEACHER" ? (
+                        <Link
+                          href={`/dashboard/teacher/availability?teacherId=${u.id}`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition"
+                        >
+                          Edit 24h Hours →
+                        </Link>
+                      ) : (
+                        <span className="text-[11px] text-[var(--text-tertiary)]">—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {visibleUsers.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-[var(--text-secondary)]">
+                    No users found matching &quot;{search}&quot;.
                   </td>
                 </tr>
-              );
-            })}
-            {visible.length === 0 && (
-              <tr>
-                <td style={{ ...td, color: "#64748b", textAlign: "center" }} colSpan={5}>
-                  Nobody matches that.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );

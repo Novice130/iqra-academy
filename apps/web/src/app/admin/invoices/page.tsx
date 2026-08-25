@@ -1,13 +1,8 @@
 /**
- * @fileoverview /admin/invoices — raise an invoice, and see who has paid.
+ * @fileoverview /admin/invoices — Raise invoices and record manual/wire payments.
  *
- * The counterpart to api/admin/invoices. Before this page, sendInvoiceEmail()
- * had been written and was called by nothing at all: invoicing happened in
- * WhatsApp and lived nowhere the school could total up.
- *
- * Server component for the auth gate and the first paint. The desk itself is
- * a client component because raising an invoice and recording a payment are
- * both mutations.
+ * Server component for the auth gate and first paint.
+ * Uses Tailwind CSS layout integrated with AdminLayout.
  */
 
 import { redirect } from "next/navigation";
@@ -37,10 +32,6 @@ export default async function AdminInvoicesPage() {
     if (!canAccessAdmin(role)) redirect("/dashboard?error=unauthorized");
     const orgId = dbUser!.orgId;
 
-    // Everybody who can be invoiced, with the plan that supplies the default
-    // amount. Left join: a family with no subscription is exactly who an
-    // admin needs to invoice by hand, so they must still appear in the list —
-    // they just arrive with no suggested figure.
     const familyRows = await db
       .select({
         id: users.id,
@@ -64,9 +55,6 @@ export default async function AdminInvoicesPage() {
       )
       .orderBy(users.name);
 
-    // The left join can return a family twice if they somehow hold two live
-    // subscriptions. First row wins — they are ordered by name, and a
-    // duplicated option in a <select> is a bug report.
     const seen = new Set<string>();
     const families: FamilyOption[] = [];
     for (const f of familyRows) {
@@ -125,34 +113,37 @@ export default async function AdminInvoicesPage() {
     }));
 
     return (
-      <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e2e8f0" }}>
-        <header
-          style={{
-            background: "linear-gradient(135deg, #065f46 0%, #10b981 100%)",
-            padding: "24px 32px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            flexWrap: "wrap",
-            gap: "12px",
-          }}
-        >
+      <div className="space-y-6 animate-fadeIn">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
           <div>
-            <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "#fff" }}>
-              Invoices
+            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] mb-1">
+              <Link href="/admin" className="hover:text-[var(--accent)] transition">
+                Admin
+              </Link>
+              <span>/</span>
+              <span>Invoices & Payments</span>
+            </div>
+            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+              Invoices & Billing Desk
             </h1>
-            <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#a7f3d0" }}>
-              Raise one, email it, and record the payment when it lands
+            <p className="text-sm text-[var(--text-secondary)] mt-1">
+              Issue custom or manual invoices, email payment reminders, and record bank wire transfers.
             </p>
           </div>
-          <Link href="/admin" style={{ color: "#a7f3d0", textDecoration: "none", fontSize: "14px" }}>
-            ← Admin
-          </Link>
-        </header>
 
-        <main style={{ padding: "24px 32px" }}>
+          <Link
+            href="/admin"
+            className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition self-start sm:self-auto"
+          >
+            ← Back to Overview
+          </Link>
+        </div>
+
+        {/* Invoice Desk Component */}
+        <div className="p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
           <InvoiceDesk families={families} initialInvoices={initial} />
-        </main>
+        </div>
       </div>
     );
   });

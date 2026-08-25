@@ -1,320 +1,275 @@
 /**
- * @fileoverview Admin Panel Page
+ * @fileoverview Admin Panel Dashboard Page
  *
- * 📚 This page renders a server-side admin dashboard at /admin.
- * It uses our existing RBAC to restrict access and provides
- * a table-based CRUD interface for all 25 database tables.
- *
- * ROUTE: /admin (catch-all with [[...slug]])
- * ACCESS: ORG_ADMIN + SUPER_ADMIN only
- *
- * WHY SERVER COMPONENT?
- * The admin panel reads directly from the database on the server.
- * No client-side JavaScript bundle needed — fast and secure.
+ * Server-side admin dashboard at /admin.
+ * Uses Tailwind CSS design system matching the main application.
  */
 
-import { redirect } from "next/navigation";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
+import Link from "next/link";
 import { canAccessAdmin, adminResources, adminMeta } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
-import { users, sessions } from "@/db/schema";
-import { sql, eq, inArray } from "drizzle-orm";
+import { sessions } from "@/db/schema";
+import { sql, inArray } from "drizzle-orm";
 import { getRoomServiceClient } from "@/lib/livekit";
 
-
-/**
- * Which table names have a real page behind them.
- *
- * Everything in `adminResources` used to render as a link to
- * `/admin/tables/<name>`, and not one of those routes was ever built — the
- * whole panel was a wall of dead links. A card with no destination now renders
- * as plain text saying so, which is worse-looking and considerably more
- * honest. Add an entry here as each page gets built.
- */
 const TABLE_PAGES: Record<string, string> = {
   users: "/admin/users",
   invoices: "/admin/invoices",
+  sessions: "/dashboard/attendance",
 };
 
-/**
- * Server-side admin panel page.
- * Verifies auth and role before rendering.
- */
 export default async function AdminPage() {
   return withDb(async () => {
-  // Verify authentication
-  const headersList = await headers();
-  const session = await auth.api.getSession({ headers: headersList });
+    const tableCounts = await getTableCounts();
+    const liveClasses = await getLiveClasses();
 
-  if (!session) {
-    redirect("/login?redirect=/admin");
-  }
+    return (
+      <div className="space-y-8 animate-fadeIn">
+        {/* Page Header */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="text-2xl">🕌</span>
+              <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
+                {adminMeta.title}
+              </h1>
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                v{adminMeta.version}
+              </span>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)] mt-1">
+              {adminMeta.description} • {adminMeta.totalTables} Database Tables Managed
+            </p>
+          </div>
 
-  // Verify admin role
-  const dbUser = await db.query.users.findFirst({
-    where: eq(users.id, session.user.id),
-    columns: { role: true },
-  });
-
-  const role = dbUser?.role || "STUDENT";
-  if (!canAccessAdmin(role)) {
-    redirect("/dashboard?error=unauthorized");
-  }
-
-  const user = { ...session.user, role };
-
-  // Fetch table counts for the dashboard
-  const tableCounts = await getTableCounts();
-  const liveClasses = await getLiveClasses();
-
-  return (
-    <div style={{ minHeight: "100vh", background: "#0f172a", color: "#e2e8f0" }}>
-      {/* Header */}
-      <header style={{
-        background: "linear-gradient(135deg, #065f46 0%, #10b981 100%)",
-        padding: "24px 32px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-      }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: "24px", fontWeight: 700, color: "#fff" }}>
-            🕌 {adminMeta.title}
-          </h1>
-          <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#a7f3d0" }}>
-            {adminMeta.description} • {adminMeta.totalTables} tables • v{adminMeta.version}
-          </p>
+          <div className="flex items-center gap-2.5">
+            <Link
+              href="/admin/users"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--accent)] text-white shadow-sm hover:opacity-95 transition"
+            >
+              + Add Teacher
+            </Link>
+            <Link
+              href="/admin/invoices"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition"
+            >
+              Manage Invoices
+            </Link>
+          </div>
         </div>
-        <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-          <span style={{
-            background: "#065f46",
-            padding: "6px 14px",
-            borderRadius: "20px",
-            fontSize: "13px",
-            color: "#a7f3d0",
-          }}>
-            {user.role}
-          </span>
-          <a href="/dashboard" style={{
-            color: "#a7f3d0",
-            textDecoration: "none",
-            fontSize: "14px",
-          }}>
-            ← Back to App
-          </a>
-        </div>
-      </header>
 
-      {/* Dashboard */}
-      <main style={{ maxWidth: "1200px", margin: "0 auto", padding: "32px" }}>
-        {/* Stats Cards */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-          gap: "16px",
-          marginBottom: "32px",
-        }}>
+        {/* Overview Stats Cards */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           {tableCounts.map((stat) => (
-            <div key={stat.label} style={{
-              background: "#1e293b",
-              borderRadius: "12px",
-              padding: "20px",
-              border: "1px solid #334155",
-            }}>
-              <div style={{ fontSize: "32px", fontWeight: 700, color: "#10b981" }}>
+            <div
+              key={stat.label}
+              className="p-4 sm:p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm hover:border-emerald-500/40 transition flex flex-col justify-between"
+            >
+              <div className="text-2xl sm:text-3xl font-bold text-emerald-600 dark:text-emerald-400 tracking-tight">
                 {stat.count}
               </div>
-              <div style={{ fontSize: "14px", color: "#94a3b8", marginTop: "4px" }}>
+              <div className="text-xs sm:text-sm font-medium text-[var(--text-secondary)] mt-2">
                 {stat.label}
               </div>
             </div>
           ))}
         </div>
 
-        {/* Live Classes — reads directly from LiveKit, not the DB session
-            status column, so a session stuck at SCHEDULED/COMPLETED in the
-            DB but still actually connected on LiveKit still shows up here. */}
-        <section style={{ marginBottom: "32px" }}>
-          <h2 style={{
-            fontSize: "18px",
-            fontWeight: 600,
-            color: "#ef4444",
-            borderBottom: "1px solid #334155",
-            paddingBottom: "8px",
-            marginBottom: "16px",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-          }}>
-            🔴 Live Now ({liveClasses.length})
-          </h2>
-          {liveClasses.length === 0 ? (
-            <div style={{ color: "#64748b", fontSize: "14px" }}>No classes currently live.</div>
-          ) : (
-            <div style={{ display: "grid", gap: "10px" }}>
-              {liveClasses.map((room) => (
-                <div key={room.name} style={{
-                  background: "#1e293b",
-                  borderRadius: "8px",
-                  padding: "14px 16px",
-                  border: "1px solid #334155",
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                }}>
-                  <div>
-                    <div style={{ fontSize: "14px", fontWeight: 500 }}>
-                      {room.session ? (room.session.title || room.session.track || "Quran Class") : room.name}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
-                      {room.session ? `Teacher: ${room.session.teacherName}` : "No matching session record"}
-                      {room.creationTime && ` • started ${new Date(room.creationTime).toLocaleTimeString()}`}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span style={{ fontSize: "13px", color: "#a7f3d0" }}>
-                      {room.numParticipants} participant{room.numParticipants === 1 ? "" : "s"}
-                    </span>
-                    {room.session && (
-                      <a href={`/dashboard/session/${room.session.id}`} style={{ fontSize: "12px", color: "#10b981", textDecoration: "none" }}>
-                        View →
-                      </a>
-                    )}
-                  </div>
-                </div>
-              ))}
+        {/* Live Classes Monitor */}
+        <section className="rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
+            <div className="flex items-center gap-2.5">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+              <h2 className="text-base font-bold text-[var(--text-primary)]">
+                Live Classes Now ({liveClasses.length})
+              </h2>
             </div>
-          )}
+            <Link
+              href="/dashboard/attendance"
+              className="text-xs font-semibold text-[var(--accent)] hover:underline"
+            >
+              View Attendance Log →
+            </Link>
+          </div>
+
+          <div className="p-6">
+            {liveClasses.length === 0 ? (
+              <div className="text-center py-8 text-sm text-[var(--text-secondary)]">
+                No classes currently running on LiveKit.
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {liveClasses.map((room) => (
+                  <div
+                    key={room.name}
+                    className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] flex flex-col justify-between space-y-3"
+                  >
+                    <div>
+                      <div className="font-semibold text-sm text-[var(--text-primary)] truncate">
+                        {room.session ? (room.session.title || room.session.track || "Quran Class") : room.name}
+                      </div>
+                      <div className="text-xs text-[var(--text-secondary)] mt-1">
+                        {room.session ? `Teacher: ${room.session.teacherName}` : "Direct LiveKit Room"}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-[var(--border)] text-xs">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium">
+                        {room.numParticipants} online
+                      </span>
+                      {room.session && (
+                        <Link
+                          href={`/dashboard/session/${room.session.id}`}
+                          className="font-semibold text-[var(--accent)] hover:underline"
+                        >
+                          Join/Inspect →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </section>
 
-        {/* Table Navigation */}
-        {Object.entries(adminResources).map(([key, group]) => (
-          <section key={key} style={{ marginBottom: "32px" }}>
-            <h2 style={{
-              fontSize: "18px",
-              fontWeight: 600,
-              color: "#10b981",
-              borderBottom: "1px solid #334155",
-              paddingBottom: "8px",
-              marginBottom: "16px",
-            }}>
-              {group.navigation}
-            </h2>
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
-              gap: "12px",
-            }}>
-              {group.tables.map((table) => {
-                const href = TABLE_PAGES[table];
-                const label = table.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
-                const boxStyle: React.CSSProperties = {
-                  background: "#1e293b",
-                  borderRadius: "8px",
-                  padding: "16px",
-                  border: href ? "1px solid #10b981" : "1px solid #334155",
-                  textDecoration: "none",
-                  color: href ? "#e2e8f0" : "#64748b",
-                  display: "block",
-                };
-                const body = (
-                  <>
-                    <div style={{ fontSize: "14px", fontWeight: 500 }}>{label}</div>
-                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                      {href ? table : `${table} · no page yet`}
-                    </div>
-                  </>
-                );
-                return href ? (
-                  <a key={table} href={href} style={boxStyle}>{body}</a>
-                ) : (
-                  <div key={table} style={boxStyle}>{body}</div>
-                );
-              })}
-            </div>
-          </section>
-        ))}
-
-        {/* Quick Actions */}
-        <section style={{ marginBottom: "32px" }}>
-          <h2 style={{
-            fontSize: "18px",
-            fontWeight: 600,
-            color: "#f59e0b",
-            borderBottom: "1px solid #334155",
-            paddingBottom: "8px",
-            marginBottom: "16px",
-          }}>
-            ⚡ Quick Actions
+        {/* Quick Admin Actions */}
+        <section className="space-y-4">
+          <h2 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <span>⚡</span> Quick Management Tools
           </h2>
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))",
-            gap: "12px",
-          }}>
-            {[
-              { label: "👥 People & Roles", href: "/admin/users", desc: "Make someone a teacher" },
-            ].map((action) => (
-              <a
-                key={action.label}
-                href={action.href}
-                style={{
-                  background: "linear-gradient(135deg, #1e293b 0%, #0f172a 100%)",
-                  borderRadius: "8px",
-                  padding: "16px",
-                  border: "1px solid #334155",
-                  textDecoration: "none",
-                  color: "#e2e8f0",
-                }}
-              >
-                <div style={{ fontSize: "14px", fontWeight: 500 }}>{action.label}</div>
-                <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
-                  {action.desc}
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Link
+              href="/admin/users"
+              className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] hover:border-emerald-500/50 shadow-sm transition group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center text-lg">
+                  👥
                 </div>
-              </a>
+                <div>
+                  <h3 className="font-semibold text-sm text-[var(--text-primary)] group-hover:text-emerald-600 transition">
+                    People & Roles
+                  </h3>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    Promote users to teacher, manage roles and permissions
+                  </p>
+                </div>
+              </div>
+            </Link>
+
+            <Link
+              href="/admin/invoices"
+              className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] hover:border-emerald-500/50 shadow-sm transition group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center text-lg">
+                  💳
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-[var(--text-primary)] group-hover:text-blue-600 transition">
+                    Invoices & Payments
+                  </h3>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    Issue invoices, record manual wire payments, track status
+                  </p>
+                </div>
+              </div>
+            </Link>
+
+            <Link
+              href="/dashboard/attendance"
+              className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] hover:border-emerald-500/50 shadow-sm transition group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center text-lg">
+                  📋
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-[var(--text-primary)] group-hover:text-purple-600 transition">
+                    Attendance & Class Log
+                  </h3>
+                  <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                    Inspect class history, teacher duration, and attendee records
+                  </p>
+                </div>
+              </div>
+            </Link>
+          </div>
+        </section>
+
+        {/* Database Tables & Schema Resources */}
+        <section className="space-y-6">
+          <h2 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <span>🗄️</span> Database Tables & Schema
+          </h2>
+
+          <div className="space-y-6">
+            {Object.entries(adminResources).map(([key, group]) => (
+              <div key={key} className="rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] p-6 shadow-sm space-y-4">
+                <h3 className="text-sm font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
+                  {group.navigation}
+                </h3>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {group.tables.map((table) => {
+                    const href = TABLE_PAGES[table];
+                    const label = table.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase());
+
+                    return href ? (
+                      <Link
+                        key={table}
+                        href={href}
+                        className="p-3.5 rounded-xl bg-[var(--bg-secondary)] border border-emerald-500/30 hover:border-emerald-500 shadow-xs transition group flex flex-col justify-between"
+                      >
+                        <div className="font-semibold text-xs text-[var(--text-primary)] group-hover:text-emerald-600 transition">
+                          {label}
+                        </div>
+                        <div className="text-[11px] font-mono text-emerald-600 dark:text-emerald-400 mt-1">
+                          {table} →
+                        </div>
+                      </Link>
+                    ) : (
+                      <div
+                        key={table}
+                        className="p-3.5 rounded-xl bg-[var(--bg-secondary)]/50 border border-[var(--border)] flex flex-col justify-between opacity-80"
+                      >
+                        <div className="font-medium text-xs text-[var(--text-secondary)]">
+                          {label}
+                        </div>
+                        <div className="text-[11px] font-mono text-[var(--text-tertiary)] mt-1">
+                          {table}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
           </div>
         </section>
 
-        {/* API Routes Reference */}
-        <section>
-          <h2 style={{
-            fontSize: "18px",
-            fontWeight: 600,
-            color: "#64748b",
-            borderBottom: "1px solid #334155",
-            paddingBottom: "8px",
-            marginBottom: "16px",
-          }}>
-            📡 API Health
-          </h2>
-          <div style={{
-            background: "#1e293b",
-            borderRadius: "8px",
-            padding: "16px",
-            border: "1px solid #334155",
-            fontSize: "13px",
-            fontFamily: "monospace",
-            color: "#94a3b8",
-          }}>
-            <a href="/api/health" target="_blank" style={{ color: "#10b981" }}>
-              GET /api/health
-            </a>
-            {" — Check API and database status"}
+        {/* API Health & Diagnostics */}
+        <section className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="font-semibold text-[var(--text-primary)]">System API Health</span>
+            <span className="text-[var(--text-secondary)]">• PostgreSQL connection active</span>
           </div>
+          <a
+            href="/api/health"
+            target="_blank"
+            rel="noreferrer"
+            className="font-mono text-emerald-600 dark:text-emerald-400 hover:underline"
+          >
+            GET /api/health ↗
+          </a>
         </section>
-      </main>
-    </div>
-  );
+      </div>
+    );
   });
 }
 
-/**
- * Fetch every room currently open on LiveKit — the actual billing/live
- * source of truth — and match each back to its session row for display.
- * A room can be live here even if its DB session status disagrees.
- */
 async function getLiveClasses() {
   try {
     const rooms = await getRoomServiceClient().listRooms();
@@ -326,8 +281,6 @@ async function getLiveClasses() {
       with: { teacher: { columns: { name: true } } },
     });
     const byId = new Map(matchedSessions.map((s) => [s.id, s]));
-    // Fallback for rooms whose videoRoomName was set explicitly instead of
-    // following the default qlms-<sessionId> naming.
     const byVideoRoomName = new Map(
       matchedSessions.filter((s) => s.videoRoomName).map((s) => [s.videoRoomName, s])
     );
@@ -344,14 +297,10 @@ async function getLiveClasses() {
       };
     });
   } catch {
-    // LiveKit unreachable or not configured — don't break the whole page.
     return [];
   }
 }
 
-/**
- * Fetch row counts for key tables to display on the dashboard.
- */
 async function getTableCounts() {
   try {
     const counts = await Promise.all([
@@ -366,17 +315,16 @@ async function getTableCounts() {
     return [
       { label: "Organizations", count: (counts[0] as unknown as { c: number }[])[0]?.c ?? 0 },
       { label: "Users", count: (counts[1] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Student Profiles", count: (counts[2] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Students", count: (counts[2] as unknown as { c: number }[])[0]?.c ?? 0 },
       { label: "Subscriptions", count: (counts[3] as unknown as { c: number }[])[0]?.c ?? 0 },
       { label: "Sessions", count: (counts[4] as unknown as { c: number }[])[0]?.c ?? 0 },
       { label: "Bookings", count: (counts[5] as unknown as { c: number }[])[0]?.c ?? 0 },
     ];
   } catch {
-    // If DB is not connected, show zeros
     return [
       { label: "Organizations", count: 0 },
       { label: "Users", count: 0 },
-      { label: "Student Profiles", count: 0 },
+      { label: "Students", count: 0 },
       { label: "Subscriptions", count: 0 },
       { label: "Sessions", count: 0 },
       { label: "Bookings", count: 0 },

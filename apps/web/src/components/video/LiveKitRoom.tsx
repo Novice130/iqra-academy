@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { DisconnectReason } from 'livekit-client';
+import { DisconnectReason, VideoPresets } from 'livekit-client';
 import {
   LiveKitRoom as LKRoom,
   useRoomContext,
@@ -365,7 +365,12 @@ export default function LiveKitRoom({
       // joining with the camera or mic switched off turned them straight
       // back on the moment the room connected.
       video={
-        choices.videoEnabled ? (choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : true) : false
+        choices.videoEnabled
+          ? {
+              resolution: VideoPresets.h720.resolution,
+              ...(choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : {}),
+            }
+          : false
       }
       audio={
         choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false

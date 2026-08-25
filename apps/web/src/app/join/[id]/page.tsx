@@ -24,8 +24,10 @@ type Stage = 'form' | 'waiting' | 'denied' | 'admitted' | 'error';
 export default function GuestJoinPage() {
   const params = useParams();
   const router = useRouter();
-  const sessionId = params.id as string;
+  const rawId = params.id as string;
+  const sessionId = rawId?.trim();
 
+  const [canonicalSessionId, setCanonicalSessionId] = useState(sessionId);
   const [stage, setStage] = useState<Stage>('form');
   const [name, setName] = useState('');
   const [knocking, setKnocking] = useState(false);
@@ -103,6 +105,7 @@ export default function GuestJoinPage() {
           settledRef.current = true;
           setToken(data.token);
           setServerUrl(data.serverUrl);
+          if (data.sessionId) setCanonicalSessionId(data.sessionId);
           setTeacherIdentity(data.teacherIdentity ?? null);
           setChoices({ videoEnabled: true, audioEnabled: true });
           setStage('admitted');
@@ -154,6 +157,8 @@ export default function GuestJoinPage() {
         return;
       }
 
+      if (data.sessionId) setCanonicalSessionId(data.sessionId);
+
       // If already admitted (e.g. rejoining with the same link), enter immediately!
       if (data.status === 'ADMITTED' && data.token) {
         settledRef.current = true;
@@ -189,7 +194,7 @@ export default function GuestJoinPage() {
       <LiveKitRoom
         token={token}
         url={serverUrl}
-        sessionId={sessionId}
+        sessionId={canonicalSessionId || sessionId}
         isModerator={false}
         // A guest is never the host: leaving must not end the class.
         isHost={false}

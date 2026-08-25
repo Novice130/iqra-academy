@@ -692,6 +692,15 @@ export const sessions = pgTable(
   "sessions",
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
+    joinCode: text("join_code").unique().$defaultFn(() => {
+      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      let result = '';
+      for (let i = 0; i < 12; i++) {
+        if (i > 0 && i % 4 === 0) result += '-';
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return result;
+    }),
     orgId: text("org_id").notNull().references(() => organizations.id),
     teacherId: text("teacher_id").notNull().references(() => users.id),
     type: sessionTypeEnum("type").notNull(),

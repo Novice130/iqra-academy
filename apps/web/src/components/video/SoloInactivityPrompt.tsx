@@ -6,7 +6,7 @@
  */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { useRemoteParticipants } from '@livekit/components-react';
+import { useRemoteParticipants, useRoomContext } from '@livekit/components-react';
 
 interface SoloInactivityPromptProps {
   isHost: boolean;
@@ -28,6 +28,7 @@ export default function SoloInactivityPrompt({
   customWarningWindowSec,
 }: SoloInactivityPromptProps) {
   const remotes = useRemoteParticipants();
+  const room = useRoomContext();
   const isSolo = remotes.length === 0;
 
   const [showPrompt, setShowPrompt] = useState(false);
@@ -76,6 +77,7 @@ export default function SoloInactivityPrompt({
         if (prev <= 1) {
           if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
           onLeaveOrEnd();
+          room.disconnect();
           return 0;
         }
         return prev - 1;
@@ -85,7 +87,7 @@ export default function SoloInactivityPrompt({
     return () => {
       if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
     };
-  }, [showPrompt, onLeaveOrEnd]);
+  }, [showPrompt, onLeaveOrEnd, room]);
 
   const handleStay = () => {
     setShowPrompt(false);
@@ -95,6 +97,7 @@ export default function SoloInactivityPrompt({
   const handleLeave = () => {
     setShowPrompt(false);
     onLeaveOrEnd();
+    room.disconnect();
   };
 
   if (!showPrompt || !isHost) return null;

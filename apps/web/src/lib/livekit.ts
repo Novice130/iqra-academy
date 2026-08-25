@@ -2,8 +2,8 @@ import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
 
 const LIVEKIT_CONFIG = {
   host: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
-  apiKey: process.env.LIVEKIT_API_KEY || "",
-  apiSecret: process.env.LIVEKIT_API_SECRET || "",
+  apiKey: process.env.LIVEKIT_API_KEY || "devkey",
+  apiSecret: process.env.LIVEKIT_API_SECRET || "secret",
 };
 
 export interface LiveKitRoomParams {
