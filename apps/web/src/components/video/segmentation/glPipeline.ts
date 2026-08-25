@@ -287,6 +287,8 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
   let bgTargets: [RenderTarget, RenderTarget] | null = null;
   let bgSize = { width: 0, height: 0 };
 
+  let cpuMaskTex: WebGLTexture | null = null;
+
   let settings = { ...DEFAULT_SETTINGS };
   let mode: BackgroundMode | null = null;
   let backgroundAspect = 1;
@@ -383,20 +385,28 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       }
     },
 
-    /**
-     * Folds a freshly segmented mask into the running average and feathers it.
-     * `invert` is for models whose channel 0 is the background rather than the
-     * person — which is every model in the selfie family, so it is the norm.
-     */
-    updateMask(mask: WebGLTexture, width: number, height: number, invert: boolean) {
+    updateMask(mask: WebGLTexture | Float32Array, width: number, height: number, invert: boolean) {
       ensureMaskTargets(width, height);
       if (!maskHistory || !maskBlur) return;
 
       const previous = maskHistory[historyIndex];
       const next = maskHistory[1 - historyIndex];
 
+      let maskTex: WebGLTexture;
+      if (mask instanceof Float32Array) {
+        if (!cpuMaskTex) {
+          cpuMaskTex = createTexture(gl);
+        }
+        maskTex = cpuMaskTex;
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, maskTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R32F, width, height, 0, gl.RED, gl.FLOAT, mask);
+      } else {
+        maskTex = mask;
+      }
+
       bindQuad(programs.temporal);
-      bindTextureUniform(programs.temporal, 'u_current', 0, mask);
+      bindTextureUniform(programs.temporal, 'u_current', 0, maskTex);
       bindTextureUniform(programs.temporal, 'u_previous', 1, previous.texture);
       gl.uniform1f(gl.getUniformLocation(programs.temporal, 'u_blend'), settings.temporalBlend);
       gl.uniform1i(gl.getUniformLocation(programs.temporal, 'u_reset'), needsReset ? 1 : 0);
@@ -476,6 +486,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       destroyMaskTargets();
       bgTargets?.forEach((t) => destroyTarget(gl, t));
       bgTargets = null;
+      if (cpuMaskTex) gl.deleteTexture(cpuMaskTex);
       gl.deleteTexture(frameTexture);
       gl.deleteTexture(backgroundTexture);
       gl.deleteBuffer(quad);

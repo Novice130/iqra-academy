@@ -165,7 +165,6 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
     this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
       baseOptions: { modelAssetPath: MODELS[this.quality], delegate: 'GPU' },
-      canvas: this.canvas,
       runningMode: 'VIDEO',
       // Confidence, not category. This is the whole point: a category mask is
       // a per-pixel yes/no and there is no such thing as a soft edge in one.
@@ -311,11 +310,16 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
           const mask = masks?.[0];
           if (mask) {
             const invert = masks.length > 1;
-            this.pipeline!.updateMask(mask.getAsWebGLTexture(), mask.width, mask.height, invert);
+            this.pipeline!.updateMask(mask.getAsFloat32Array(), mask.width, mask.height, invert);
           }
           result.close();
           this.isInferring = false;
         });
+      }
+
+      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
+        canvas.width = frame.displayWidth;
+        canvas.height = frame.displayHeight;
       }
 
       if (this.pipeline.ready && this.pipeline.render(frame)) {
