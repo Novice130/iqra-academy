@@ -419,23 +419,23 @@ export default function AvailabilityPage() {
         </div>
 
         {/* Step 1: Time of Day Wheel Pickers & Repeat Selector */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-12 gap-8 p-6 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)]">
-          <div className="lg:col-span-4 flex flex-col items-center sm:items-start gap-2.5">
-            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
-              Start Time
+        <div className="flex flex-wrap xl:flex-nowrap items-center justify-center xl:justify-between gap-6 p-6 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)]">
+          <div className="flex flex-col items-center justify-center text-center gap-2.5 shrink-0">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-center flex items-center justify-center gap-1.5">
+              <span>🌅</span> Start Time
             </label>
             <TimeWheelPicker value={quickStart} onChange={setQuickStart} />
           </div>
 
-          <div className="lg:col-span-4 flex flex-col items-center sm:items-start gap-2.5">
-            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
-              End Time
+          <div className="flex flex-col items-center justify-center text-center gap-2.5 shrink-0">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-center flex items-center justify-center gap-1.5">
+              <span>🌇</span> End Time
             </label>
             <TimeWheelPicker value={quickEnd} onChange={setQuickEnd} />
           </div>
 
-          <div className="sm:col-span-2 lg:col-span-4 flex flex-col justify-end gap-3">
-            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+          <div className="flex flex-col justify-end gap-3 min-w-[260px] grow xl:grow-0">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-center xl:text-left">
               Repeat Days Schedule
             </label>
             <div className="grid grid-cols-2 gap-2.5">
@@ -472,7 +472,7 @@ export default function AvailabilityPage() {
                     : "bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-emerald-500/40"
                 }`}
               >
-                Mon – Sun (7d)
+                Everyday
               </button>
 
               <button
