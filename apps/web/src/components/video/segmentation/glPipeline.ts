@@ -484,6 +484,10 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       return gl;
     },
 
+    get canvas() {
+      return canvas;
+    },
+
     destroy() {
       destroyMaskTargets();
       bgTargets?.forEach((t) => destroyTarget(gl, t));

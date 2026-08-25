@@ -12,7 +12,7 @@
  * - Works for teachers editing own availability and admins editing any teacher via ?teacherId=...
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { ZONES, isValidZone } from "@/lib/zones";
 
@@ -106,7 +106,7 @@ export default function AvailabilityPage() {
           setZoneConfirmed(!onboarding);
         } else {
           setZone(Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
-          setZoneConfirmed(false);
+          setZoneConfirmed(!onboarding);
         }
       } catch (err) {
         if (!cancelled) setNote({ text: err instanceof Error ? err.message : "Load failed.", bad: true });
@@ -211,6 +211,17 @@ export default function AvailabilityPage() {
     return out;
   }, [selected]);
 
+  const summaryByDay = useMemo(() => {
+    const summary: Record<string, string[]> = {};
+    for (const r of ranges) {
+      if (!summary[r.dayOfWeek]) {
+        summary[r.dayOfWeek] = [];
+      }
+      summary[r.dayOfWeek].push(`${pretty(r.startTime)} – ${pretty(r.endTime)}`);
+    }
+    return summary;
+  }, [ranges]);
+
   const totalCells = useMemo(
     () => Object.values(selected).reduce((n, s) => n + s.size, 0),
     [selected]
@@ -255,7 +266,7 @@ export default function AvailabilityPage() {
 
   return (
     <div
-      className="space-y-6 animate-fadeIn pb-12 max-w-6xl"
+      className="p-6 sm:p-8 md:p-10 space-y-6 animate-fadeIn pb-12 max-w-6xl mx-auto"
       onMouseUp={() => setDragging(null)}
       onMouseLeave={() => setDragging(null)}
     >
@@ -353,8 +364,51 @@ export default function AvailabilityPage() {
         </div>
       )}
 
+      {/* Current Schedule Summary */}
+      {totalCells > 0 && (
+        <div className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
+                <span>📅</span> Your Current Active Hours
+              </h2>
+              <p className="text-xs text-[var(--text-secondary)] mt-1">
+                These are the hours students can book lessons with you. Use the Quick Repeat Scheduler or click Custom Days below to edit.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={clearAll}
+              disabled={gridLocked}
+              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 select-none shrink-0"
+            >
+              Start Fresh (Clear All)
+            </button>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {DAYS.map((d) => {
+              const dayRanges = summaryByDay[d.id];
+              if (!dayRanges || dayRanges.length === 0) return null;
+              return (
+                <div key={d.id} className="p-3.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] flex flex-col gap-1.5 shadow-2xs">
+                  <div className="text-xs font-bold text-[var(--text-primary)]">{d.full}</div>
+                  <div className="flex flex-wrap gap-1">
+                    {dayRanges.map((rangeStr, idx) => (
+                      <div key={idx} className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-lg border border-emerald-500/10 w-fit">
+                        {rangeStr}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Fast Repeat & 24h Time Selection Desk (Primary Mode) */}
-      <section className="p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-xs space-y-5">
+      <section className="sm:p-8 p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-xs space-y-6">
         <div>
           <h2 className="text-base font-bold text-[var(--text-primary)] flex items-center gap-2">
             <span>⚡</span> Quick 24-Hour Availability & Repeat Scheduler
@@ -364,51 +418,31 @@ export default function AvailabilityPage() {
           </p>
         </div>
 
-        {/* Step 1: Time of Day Selector */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)]">
-          <div>
-            <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
-              Start Time (24h)
+        {/* Step 1: Time of Day Wheel Pickers & Repeat Selector */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-12 gap-8 p-6 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)]">
+          <div className="lg:col-span-4 flex flex-col items-center sm:items-start gap-2.5">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+              Start Time
             </label>
-            <select
-              value={quickStart}
-              onChange={(e) => setQuickStart(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border)] text-sm font-medium text-[var(--text-primary)]"
-            >
-              {ALL_CELLS.map((c) => (
-                <option key={c} value={c}>
-                  {pretty(c)} ({c})
-                </option>
-              ))}
-            </select>
+            <TimeWheelPicker value={quickStart} onChange={setQuickStart} />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
-              End Time (24h)
+          <div className="lg:col-span-4 flex flex-col items-center sm:items-start gap-2.5">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
+              End Time
             </label>
-            <select
-              value={quickEnd}
-              onChange={(e) => setQuickEnd(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl bg-[var(--bg-elevated)] border border-[var(--border)] text-sm font-medium text-[var(--text-primary)]"
-            >
-              {ALL_CELLS.map((c) => (
-                <option key={c} value={c}>
-                  {pretty(c)} ({c})
-                </option>
-              ))}
-            </select>
+            <TimeWheelPicker value={quickEnd} onChange={setQuickEnd} />
           </div>
 
-          <div className="lg:col-span-2 flex flex-col justify-end">
-            <label className="block text-xs font-semibold text-[var(--text-secondary)] mb-1">
+          <div className="sm:col-span-2 lg:col-span-4 flex flex-col justify-end gap-3">
+            <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider">
               Repeat Days Schedule
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 gap-2.5">
               <button
                 type="button"
                 onClick={() => setRepeatMode("weekdays")}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition ${
                   repeatMode === "weekdays"
                     ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                     : "bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-emerald-500/40"
@@ -420,7 +454,7 @@ export default function AvailabilityPage() {
               <button
                 type="button"
                 onClick={() => setRepeatMode("six_days")}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition ${
                   repeatMode === "six_days"
                     ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                     : "bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-emerald-500/40"
@@ -432,7 +466,7 @@ export default function AvailabilityPage() {
               <button
                 type="button"
                 onClick={() => setRepeatMode("every_day")}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition ${
                   repeatMode === "every_day"
                     ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                     : "bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-emerald-500/40"
@@ -444,7 +478,7 @@ export default function AvailabilityPage() {
               <button
                 type="button"
                 onClick={() => setRepeatMode("custom")}
-                className={`px-3 py-2 rounded-xl text-xs font-semibold border transition ${
+                className={`px-4 py-2.5 rounded-xl text-xs font-bold border transition ${
                   repeatMode === "custom"
                     ? "bg-emerald-500/15 border-emerald-500 text-emerald-600 dark:text-emerald-400"
                     : "bg-[var(--bg-elevated)] border-[var(--border)] text-[var(--text-secondary)] hover:border-emerald-500/40"
@@ -457,8 +491,8 @@ export default function AvailabilityPage() {
         </div>
 
         {repeatMode !== "custom" && (
-          <div className="flex items-center justify-between pt-2">
-            <div className="text-xs text-[var(--text-secondary)]">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pt-5 border-t border-[var(--border)]">
+            <div className="text-xs text-[var(--text-secondary)] leading-relaxed">
               Applying from <strong>{pretty(quickStart)}</strong> to <strong>{pretty(quickEnd)}</strong> on{" "}
               <strong>
                 {repeatMode === "weekdays"
@@ -473,7 +507,7 @@ export default function AvailabilityPage() {
               type="button"
               onClick={applyQuickRepeat}
               disabled={gridLocked}
-              className="px-4 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-sm transition active:scale-95 disabled:opacity-50"
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md hover:shadow-emerald-600/15 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none shrink-0"
             >
               + Apply Repeat Hours
             </button>
@@ -600,3 +634,144 @@ export default function AvailabilityPage() {
     </div>
   );
 }
+
+/* ═════════════════════════════════════════════════════════════════════════════
+   WHEEL TIME PICKER COMPONENT (3D PERSPECTIVE SYSTEM)
+   ═════════════════════════════════════════════════════════════════════════════ */
+
+interface WheelColumnProps {
+  items: string[];
+  value: string;
+  onChange: (value: string) => void;
+}
+
+function WheelColumn({ items, value, onChange }: WheelColumnProps) {
+  const [scrollTop, setScrollTop] = useState(0);
+  const itemHeight = 36; // 36px item height matches CSS h-9
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const node = containerRef.current;
+    if (node) {
+      const idx = items.indexOf(value);
+      if (idx !== -1) {
+        const expected = idx * itemHeight;
+        if (Math.abs(node.scrollTop - expected) > 5) {
+          node.scrollTop = expected;
+        }
+      }
+    }
+  }, [value, items]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const container = e.currentTarget;
+    const currentScrollTop = container.scrollTop;
+    setScrollTop(currentScrollTop);
+
+    const index = Math.round(currentScrollTop / itemHeight);
+    if (index >= 0 && index < items.length) {
+      const activeValue = items[index];
+      if (activeValue !== value) {
+        onChange(activeValue);
+      }
+    }
+  };
+
+  return (
+    <div
+      className="relative w-16 h-32 overflow-hidden select-none bg-[var(--bg-elevated)] border border-[var(--border)] rounded-xl"
+      style={{ perspective: "600px" }}
+    >
+      {/* Top and Bottom gradient overlays to fade out items */}
+      <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[var(--bg-elevated)] to-transparent pointer-events-none z-10" />
+      <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[var(--bg-elevated)] to-transparent pointer-events-none z-10" />
+
+      {/* Selected item highlight border lines */}
+      <div className="absolute top-1/2 left-0 right-0 h-9 -translate-y-1/2 border-y border-emerald-500/20 bg-emerald-500/5 pointer-events-none z-10" />
+
+      {/* Scrollable list */}
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        className="w-full h-full overflow-y-scroll snap-y snap-mandatory scrollbar-none"
+        style={{ scrollbarWidth: "none", transformStyle: "preserve-3d" }}
+      >
+        <div
+          className="pt-[46px] pb-[46px]" // (128px container height - 36px item height) / 2 = 46px
+          style={{ transformStyle: "preserve-3d" }}
+        >
+          {items.map((item, idx) => {
+            const offset = (idx * itemHeight - scrollTop) / itemHeight;
+            const angle = offset * 24; // cylinder rotation angle
+            const opacity = Math.max(0.15, 1 - Math.min(0.85, Math.abs(offset) * 0.4));
+            const scale = Math.max(0.75, 1.2 - Math.min(0.45, Math.abs(offset) * 0.18));
+            const translateZ = Math.abs(offset) * -12; // push back
+
+            return (
+              <div
+                key={item}
+                className="h-9 flex items-center justify-center text-xs font-bold snap-center transition-all duration-75 select-none"
+                style={{
+                  transform: `rotateX(${angle}deg) scale(${scale}) translateZ(${translateZ}px)`,
+                  opacity: opacity,
+                  transformStyle: "preserve-3d",
+                  color: Math.abs(offset) < 0.4 ? "var(--text-primary)" : "var(--text-tertiary)"
+                }}
+              >
+                {item}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface TimeWheelPickerProps {
+  value: string; // "HH:MM" e.g., "14:30"
+  onChange: (value: string) => void;
+}
+
+const HOURS = ["12", "01", "02", "03", "04", "05", "06", "07", "08", "09", "10", "11"];
+const MINUTES = ["00", "30"];
+const PERIODS = ["AM", "PM"];
+
+function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
+  const { hour12, minute, ampm } = useMemo(() => {
+    const [hStr, mStr] = value.split(":");
+    const h = parseInt(hStr, 10);
+    const m = parseInt(mStr, 10);
+    const p = h >= 12 ? "PM" : "AM";
+    let h12 = h % 12;
+    if (h12 === 0) h12 = 12;
+    const h12Str = String(h12).padStart(2, "0");
+    const mStrNew = String(m).padStart(2, "0");
+    return { hour12: h12Str, minute: mStrNew, ampm: p };
+  }, [value]);
+
+  const updateVal = (h12: string, min: string, p: string) => {
+    let h = parseInt(h12, 10);
+    const m = parseInt(min, 10);
+    if (p === "PM" && h < 12) h += 12;
+    if (p === "AM" && h === 12) h = 0;
+    const formatted = `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    onChange(formatted);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-xs relative">
+      <style dangerouslySetInnerHTML={{ __html: `
+        .scrollbar-none::-webkit-scrollbar {
+          display: none;
+        }
+      ` }} />
+      <WheelColumn items={HOURS} value={hour12} onChange={(h) => updateVal(h, minute, ampm)} />
+      <div className="text-base font-bold text-[var(--text-secondary)] self-center px-1">:</div>
+      <WheelColumn items={MINUTES} value={minute} onChange={(m) => updateVal(hour12, m, ampm)} />
+      <div className="w-1.5" />
+      <WheelColumn items={PERIODS} value={ampm} onChange={(p) => updateVal(hour12, minute, p)} />
+    </div>
+  );
+}
+

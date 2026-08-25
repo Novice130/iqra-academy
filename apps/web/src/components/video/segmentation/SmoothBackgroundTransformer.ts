@@ -112,7 +112,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
   /** Minimum gap between heavy ML segmentation passes (ms) to keep 60fps WebGL fluid */
   private lastInferenceTime = 0;
-  private inferenceGapMs = 33; // adaptive gap (~30fps ML inference budget)
+  private inferenceGapMs = 66; // adaptive gap (~15fps ML inference budget)
   private isInferring = false;
   private inferenceCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private inferenceCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
@@ -165,6 +165,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
     this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
       baseOptions: { modelAssetPath: MODELS[this.quality], delegate: 'GPU' },
+      canvas: outputCanvas, // Share WebGL2 context
       runningMode: 'VIDEO',
       // Confidence, not category. This is the whole point: a category mask is
       // a per-pixel yes/no and there is no such thing as a soft edge in one.
@@ -187,7 +188,11 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.setupInferenceCanvas();
     await this.applyMode();
     if (this.options.settings) this.pipeline?.setSettings(this.options.settings);
+    if (this.segmenter) {
+      await this.segmenter.setOptions({ canvas: opts.outputCanvas });
+    }
   }
+
 
   async destroy() {
     this.isDisabled = true;
@@ -261,6 +266,13 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         return;
       }
 
+      // Add a resolution floor — if the incoming frame is below 320p wide,
+      // pass through unprocessed to break the WebRTC degradation spiral.
+      if (frame.displayWidth < 320) {
+        passThrough();
+        return;
+      }
+
       if (this.isDisabled || !this.effectActive || !this.pipeline || !this.segmenter) {
         passThrough();
         return;
@@ -288,22 +300,31 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         const startTime = performance.now();
         this.segmenter.segmentForVideo(frame, timestamp, (result) => {
           const inferDuration = performance.now() - startTime;
-          // Dynamically adapt inference frequency: if device is slow (>20ms per inference),
-          // reduce inference rate slightly (up to 50ms gap ~20fps) to keep main thread & audio lag-free!
+          // Dynamically adapt inference frequency: if device is slow (>22ms per inference),
+          // reduce inference rate slightly (up to 120ms gap ~8fps) to keep main thread & audio lag-free!
           if (inferDuration > 22) {
-            this.inferenceGapMs = Math.min(50, this.inferenceGapMs + 4);
-          } else if (inferDuration < 12 && this.inferenceGapMs > 30) {
-            this.inferenceGapMs = Math.max(30, this.inferenceGapMs - 2);
+            this.inferenceGapMs = Math.min(120, this.inferenceGapMs + 6);
+          } else if (inferDuration < 12 && this.inferenceGapMs > 66) {
+            this.inferenceGapMs = Math.max(66, this.inferenceGapMs - 3);
           }
 
           const masks = result.confidenceMasks;
           const mask = masks?.[0];
           if (mask) {
             const invert = masks.length > 1;
-            const f32 = mask.getAsFloat32Array();
-            const u8 = new Uint8Array(f32.length);
-            for (let i = 0; i < f32.length; i++) u8[i] = f32[i] * 255;
-            this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
+            if (mask.hasWebGLTexture()) {
+              try {
+                const glTex = mask.getAsWebGLTexture();
+                this.pipeline!.updateMask(glTex, mask.width, mask.height, invert);
+              } catch (e) {
+                console.warn('Failed to get WebGLTexture from MediaPipe, falling back to CPU', e);
+                const u8 = mask.getAsUint8Array();
+                this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
+              }
+            } else {
+              const u8 = mask.getAsUint8Array();
+              this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
+            }
           }
           result.close();
           this.isInferring = false;
