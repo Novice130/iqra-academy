@@ -111,6 +111,10 @@ export async function GET(
       const resolution = await timings.track("resolve", resolveClassRoom(session));
       const isTheRoom = resolution.session.id === sessionId && resolution.kind !== "too-early";
 
+      if (session.status === "COMPLETED" || session.status === "CANCELLED" || resolution.session.status === "COMPLETED" || resolution.session.status === "CANCELLED") {
+        throw new BusinessRuleError("This class has already ended.");
+      }
+
       // Auto-book on the way in. Ensures anyone holding the class link with an account can join.
       if (!isStudent && !isTeacher) {
         const existingProfiles = await db.query.studentProfiles.findMany({

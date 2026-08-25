@@ -222,8 +222,8 @@ export async function GET(request: NextRequest) {
       const session = await db.query.sessions.findFirst({
         where: eq(sessions.id, req.sessionId),
       });
-      if (!session) {
-        throw new BusinessRuleError("This class is no longer available.");
+      if (!session || !isJoinable(session)) {
+        throw new BusinessRuleError("This class has already ended.");
       }
 
       const teacher = await db.query.users.findFirst({
