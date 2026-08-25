@@ -422,14 +422,14 @@ export default function AvailabilityPage() {
         <div className="flex flex-wrap xl:flex-nowrap items-center justify-center xl:justify-between gap-6 p-6 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)]">
           <div className="flex flex-col items-center justify-center text-center gap-2.5 shrink-0">
             <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-center flex items-center justify-center gap-1.5">
-              <span>🌅</span> Start Time
+              <span>🔔</span> Start Time
             </label>
             <TimeWheelPicker value={quickStart} onChange={setQuickStart} />
           </div>
 
           <div className="flex flex-col items-center justify-center text-center gap-2.5 shrink-0">
             <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase tracking-wider text-center flex items-center justify-center gap-1.5">
-              <span>🌇</span> End Time
+              <span>🚪</span> End Time
             </label>
             <TimeWheelPicker value={quickEnd} onChange={setQuickEnd} />
           </div>
