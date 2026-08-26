@@ -20,11 +20,11 @@ export const metadata: Metadata = {
     "Live 1:1 and group Quran lessons with certified teachers. Qaidah, Quran reading, and Hifz — from anywhere.",
   icons: {
     icon: [
-      { url: "/favicon.ico?v=3" },
-      { url: "/logo.png?v=3", type: "image/png" },
+      { url: "/favicon.ico?v=4" },
+      { url: "/logo.png?v=4", type: "image/png" },
     ],
-    shortcut: "/favicon.ico?v=3",
-    apple: "/apple-touch-icon.png?v=3",
+    shortcut: "/favicon.ico?v=4",
+    apple: "/apple-touch-icon.png?v=4",
   },
 };
 
