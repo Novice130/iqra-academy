@@ -9,7 +9,7 @@
  */
 
 const CALL_TAG = 'novice-tutor-call';
-const STATIC_CACHE = 'novice-tutor-static-v4';
+const STATIC_CACHE = 'novice-tutor-static-v5';
 
 self.addEventListener('install', () => self.skipWaiting());
 
