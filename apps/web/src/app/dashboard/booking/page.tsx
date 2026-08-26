@@ -19,7 +19,7 @@
  * No prices anywhere on this page — see lib/pricing-visibility.ts.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import LocalTime, { formatInZone, useViewerTimeZone } from "@/components/LocalTime";
 
 interface Teacher {
@@ -68,32 +68,101 @@ export default function BookingPage() {
     })();
   }, []);
 
+  const fetchSlots = useCallback(
+    async (quiet = false) => {
+      if (!teacherId) {
+        setSlots([]);
+        return;
+      }
+      if (!quiet) setLoadingSlots(true);
+      try {
+        const res = await fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`, {
+          cache: "no-store",
+          headers: { Pragma: "no-cache" },
+        });
+        if (!res.ok) throw new Error("Couldn't load available times.");
+        const data = (await res.json()) as { slots: Slot[] };
+        setSlots(data.slots);
+        setChosen((prevChosen) => {
+          if (!prevChosen) return null;
+          const stillValid = data.slots.some(
+            (s) => s.teacherId === prevChosen.teacherId && s.startsAt === prevChosen.startsAt
+          );
+          return stillValid ? prevChosen : null;
+        });
+      } catch (err) {
+        if (!quiet) setError(err instanceof Error ? err.message : "Something went wrong.");
+      } finally {
+        if (!quiet) setLoadingSlots(false);
+      }
+    },
+    [teacherId]
+  );
+
   useEffect(() => {
     if (!teacherId) {
       setSlots([]);
       return;
     }
-    let cancelled = false;
-    setLoadingSlots(true);
     setChosen(null);
-    (async () => {
-      try {
-        const res = await fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`);
-        if (!res.ok) throw new Error("Couldn't load available times.");
-        const data = (await res.json()) as { slots: Slot[] };
-        if (cancelled) return;
-        setSlots(data.slots);
-        setDayKey("");
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Something went wrong.");
-      } finally {
-        if (!cancelled) setLoadingSlots(false);
+    setDayKey("");
+    fetchSlots(false);
+
+    // Background live sync polling every 5 seconds when visible
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        fetchSlots(true);
       }
-    })();
-    return () => {
-      cancelled = true;
+    }, 5000);
+
+    // Re-fetch immediately when window gains focus or tab becomes visible
+    const handleFocus = () => fetchSlots(true);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+
+    // Listen for custom broadcast event in current window
+    const handleCustomEvent = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (!detail?.teacherId || detail.teacherId === teacherId) {
+        fetchSlots(true);
+      }
     };
-  }, [teacherId]);
+    window.addEventListener("teacher-availability-updated", handleCustomEvent);
+
+    // Listen for storage event (cross-tab sync via localStorage)
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "teacher_availability_updated") {
+        fetchSlots(true);
+      }
+    };
+    window.addEventListener("storage", handleStorage);
+
+    // Listen for BroadcastChannel sync across browser context
+    let bc: BroadcastChannel | null = null;
+    if (typeof window !== "undefined" && "BroadcastChannel" in window) {
+      try {
+        bc = new BroadcastChannel("teacher-availability-sync");
+        bc.onmessage = (event) => {
+          if (event.data?.type === "AVAILABILITY_UPDATED") {
+            if (!event.data.teacherId || event.data.teacherId === teacherId) {
+              fetchSlots(true);
+            }
+          }
+        };
+      } catch {
+        // BroadcastChannel optional fallback
+      }
+    }
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+      window.removeEventListener("teacher-availability-updated", handleCustomEvent);
+      window.removeEventListener("storage", handleStorage);
+      if (bc) bc.close();
+    };
+  }, [teacherId, fetchSlots]);
 
   /**
    * Group by the viewer's calendar day, not by UTC's. A 7:30 PM Chicago class

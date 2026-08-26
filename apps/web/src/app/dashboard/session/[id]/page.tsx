@@ -42,6 +42,9 @@ export default function SessionRoomPage() {
   const [isModerator, setIsModerator] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [teacherIdentity, setTeacherIdentity] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** Our own LiveKit identity, sent back on leaving so the right attendance row closes. */
   const [identity, setIdentity] = useState<string | null>(null);
   const [choices, setChoices] = useState<JoinChoices | null>(null);
@@ -86,6 +89,9 @@ export default function SessionRoomPage() {
       setIsModerator(!!data.isModerator);
       setIsHost(!!data.isHost);
       setTeacherIdentity(data.teacherIdentity ?? null);
+      setTeacherName(data.teacherName ?? null);
+      setJoinCode(data.joinCode ?? null);
+      setSessionTitle(data.sessionTitle ?? null);
       setIdentity(data.identity ?? null);
       if (data.userName) {
         setUserName(data.userName);
@@ -218,6 +224,9 @@ export default function SessionRoomPage() {
         isHost={isHost}
         choices={choices}
         teacherIdentity={teacherIdentity}
+        teacherName={teacherName}
+        joinCode={joinCode}
+        sessionTitle={sessionTitle}
         identity={identity}
       />
     );

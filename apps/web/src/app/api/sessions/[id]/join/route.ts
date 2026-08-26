@@ -37,11 +37,17 @@ import { createTimings, withTimings } from "@/lib/server-timing";
 import { createId } from "@paralleldrive/cuid2";
 
 function normalizeJoinCode(code: string) {
-  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (!code) return code;
+  const trimmed = code.trim();
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  if (digitsOnly.length === 12) {
+    return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+  }
+  const clean = trimmed.replace(/[^a-zA-Z]/g, '').toLowerCase();
   if (clean.length === 12) {
     return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
   }
-  return code;
+  return trimmed;
 }
 
 export async function GET(
@@ -69,11 +75,20 @@ export async function GET(
       const ctx = authResult;
       const { id: rawId } = await params;
       const sessionId = normalizeJoinCode(rawId);
+      const rawTrimmed = (rawId || "").trim();
+      const rawClean = rawTrimmed.replace(/[\s-]/g, "");
 
       const session = await timings.track(
         "load",
         db.query.sessions.findFirst({
-          where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
+          where: or(
+            eq(sessions.id, sessionId),
+            eq(sessions.joinCode, sessionId),
+            eq(sessions.joinCode, rawTrimmed),
+            eq(sessions.joinCode, rawClean),
+            eq(sessions.id, rawTrimmed),
+            eq(sessions.id, rawClean)
+          ),
           with: {
             bookings: true,
             teacher: { columns: { email: true, name: true } },
@@ -393,6 +408,8 @@ export async function GET(
         // default even before any spotlight metadata has landed.
         teacherIdentity: sessionTeacher?.email || null,
         teacherName: sessionTeacher?.name || null,
+        joinCode: session.joinCode || null,
+        sessionTitle: session.title || "Novice Tutor Classroom",
         // Distinct from isModerator on purpose: an admin observing another
         // teacher's class gets moderator *controls*, but is not the host.
         // Leaving must not end the class for the teacher still teaching it.

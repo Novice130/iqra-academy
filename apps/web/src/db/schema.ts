@@ -693,11 +693,16 @@ export const sessions = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
     joinCode: text("join_code").unique().$defaultFn(() => {
-      const chars = 'abcdefghijklmnopqrstuvwxyz';
+      // 12-digit easily readable numeric meeting ID (e.g. 482-910-374-819)
+      const digits = '0123456789';
       let result = '';
       for (let i = 0; i < 12; i++) {
-        if (i > 0 && i % 4 === 0) result += '-';
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
+        if (i > 0 && i % 3 === 0) result += '-';
+        if (i % 3 === 0) {
+          result += digits.charAt(1 + Math.floor(Math.random() * 9));
+        } else {
+          result += digits.charAt(Math.floor(Math.random() * 10));
+        }
       }
       return result;
     }),

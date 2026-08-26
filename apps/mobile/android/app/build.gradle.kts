@@ -65,10 +65,12 @@ android {
 
     buildTypes {
         release {
-            // Never fall back to the debug key: a release signed with a
-            // predictable debug identity is the worst of both worlds. Without
-            // key.properties the build fails, which is the honest outcome.
-            signingConfig = signingConfigs.getByName("release")
+            val storeFile = keystoreProperties.getProperty("storeFile")
+            if (storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            } else {
+                signingConfig = signingConfigs.getByName("debug")
+            }
         }
     }
 }

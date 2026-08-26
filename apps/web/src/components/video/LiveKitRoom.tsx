@@ -170,6 +170,9 @@ interface LiveKitRoomProps {
   choices: JoinChoices;
   /** The class teacher's identity — what a student's view focuses by default. */
   teacherIdentity: string | null;
+  teacherName?: string | null;
+  joinCode?: string | null;
+  sessionTitle?: string | null;
   /**
    * This connection's own LiveKit identity, from the join API. Sent back when
    * leaving so the right attendance row is closed — a teacher who is in the
@@ -193,6 +196,9 @@ export default function LiveKitRoom({
   isHost,
   choices,
   teacherIdentity,
+  teacherName,
+  joinCode,
+  sessionTitle,
   identity,
   onLeave,
 }: LiveKitRoomProps) {
@@ -273,46 +279,41 @@ export default function LiveKitRoom({
     [sessionId, identity]
   );
 
-  const handleDisconnected = useCallback((reason?: DisconnectReason) => {
-    // Frozen, not gone. Reconnected on `pageshow`.
-    if (frozenRef.current) return;
-
-    // Removed by the server. Either a host kicked this person, or — far more
-    // often — they rejoined from another device and the join API swept this
-    // connection up as a ghost. Neither means the class is over: a teacher
-    // rejoining on their phone used to have their own laptop evicted, which
-    // then POSTed /end and dropped every student in the room.
-    if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
-      supersededRef.current = true;
-      // The class carries on, but *this connection* is over either way —
-      // kicked or replaced — so its attendance row closes here.
-      recordLeave();
+  const navigateAway = useCallback(() => {
+    try {
       if (onLeave) {
         onLeave();
-        return;
+      } else {
+        router.push('/dashboard');
+        setTimeout(() => {
+          if (typeof window !== 'undefined' && window.location.pathname.includes('/session/')) {
+            window.location.href = '/dashboard';
+          }
+        }, 300);
       }
-      router.push('/dashboard');
+    } catch {
+      if (typeof window !== 'undefined') {
+        window.location.href = '/dashboard';
+      }
+    }
+  }, [onLeave, router]);
+
+  const handleDisconnected = useCallback((reason?: DisconnectReason) => {
+    if (frozenRef.current) return;
+
+    if (reason === DisconnectReason.PARTICIPANT_REMOVED) {
+      supersededRef.current = true;
+      recordLeave();
+      navigateAway();
       return;
     }
 
-    // Deliberate only. `isHost` alone used to be the whole test, so a teacher
-    // whose connection dropped ended the lesson for everyone still in it —
-    // the exact situation they most need to be able to rejoin from. The flag
-    // is set in one place: the host picking "End class for everyone".
-    //
-    // (isHost is still the narrower half of the check that matters — the
-    // route itself accepts any admin, and an ORG_ADMIN observing someone
-    // else's class must not be able to end it by leaving.)
     if (isHost && endOnDisconnectRef.current) {
       fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
     }
     recordLeave();
-    if (onLeave) {
-      onLeave();
-      return;
-    }
-    router.push('/dashboard');
-  }, [isHost, sessionId, router, onLeave, recordLeave]);
+    navigateAway();
+  }, [isHost, sessionId, navigateAway, recordLeave]);
 
   /**
    * There is deliberately no `pagehide` handler ending the class any more.
@@ -353,49 +354,98 @@ export default function LiveKitRoom({
   }, [recordLeave]);
 
   return (
-    <LKRoom
-      // Remounting is the reconnect: coming back from the back/forward cache
-      // leaves a dead Room whose connect effect never re-runs, so the call UI
-      // sits there frozen. A new key builds a fresh Room on the same token.
-      key={connectKey}
-      serverUrl={url}
-      token={token}
-      connect={true}
-      // Honour the pre-join screen. This used to be hardcoded true/true, so
-      // joining with the camera or mic switched off turned them straight
-      // back on the moment the room connected.
-      video={
-        choices.videoEnabled
-          ? {
-              resolution: VideoPresets.h720.resolution,
-              ...(choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : {}),
-            }
-          : false
-      }
-      audio={
-        choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false
-      }
-      // Computed once per mount rather than inline: a fresh options object on
-      // every render would tear down and rebuild the Room.
-      options={roomOptions}
-      data-lk-theme="default"
-      style={{ height: '100dvh' }}
-      onDisconnected={handleDisconnected}
-    >
-      <ApplyAudioOutput deviceId={choices.audioOutputDeviceId} />
-      <LeaveOnPageHide />
-      <CustomVideoConference
-        isModerator={isModerator}
-        isHost={isHost}
-        // Armed by the leave sheet immediately before it disconnects, so
-        // handleDisconnected above can tell "end the class" from "I'm going".
-        onEndClassIntent={() => {
-          endOnDisconnectRef.current = true;
-        }}
-        sessionId={sessionId}
-        teacherIdentity={teacherIdentity}
-        initialEffect={choices.backgroundEffect}
-      />
-    </LKRoom>
+    <RoomErrorBoundary onLeave={onLeave}>
+      <LKRoom
+        // Remounting is the reconnect: coming back from the back/forward cache
+        // leaves a dead Room whose connect effect never re-runs, so the call UI
+        // sits there frozen. A new key builds a fresh Room on the same token.
+        key={connectKey}
+        serverUrl={url}
+        token={token}
+        connect={true}
+        // Honour the pre-join screen. This used to be hardcoded true/true, so
+        // joining with the camera or mic switched off turned them straight
+        // back on the moment the room connected.
+        video={
+          choices.videoEnabled
+            ? {
+                resolution: VideoPresets.h720.resolution,
+                ...(choices.videoDeviceId ? { deviceId: choices.videoDeviceId } : {}),
+              }
+            : false
+        }
+        audio={
+          choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false
+        }
+        // Computed once per mount rather than inline: a fresh options object on
+        // every render would tear down and rebuild the Room.
+        options={roomOptions}
+        data-lk-theme="default"
+        style={{ height: '100dvh' }}
+        onDisconnected={handleDisconnected}
+      >
+        <ApplyAudioOutput deviceId={choices.audioOutputDeviceId} />
+        <LeaveOnPageHide />
+        <CustomVideoConference
+          isModerator={isModerator}
+          isHost={isHost}
+          // Armed by the leave sheet immediately before it disconnects, so
+          // handleDisconnected above can tell "end the class" from "I'm going".
+          onEndClassIntent={() => {
+            endOnDisconnectRef.current = true;
+          }}
+          sessionId={sessionId}
+          teacherIdentity={teacherIdentity}
+          teacherName={teacherName}
+          joinCode={joinCode}
+          sessionTitle={sessionTitle}
+          initialEffect={choices.backgroundEffect}
+        />
+      </LKRoom>
+    </RoomErrorBoundary>
   );
+}
+
+class RoomErrorBoundary extends React.Component<
+  { children: React.ReactNode; onLeave?: () => void },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; onLeave?: () => void }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.warn('RoomErrorBoundary caught unmount/teardown exception:', error, errorInfo);
+    try {
+      if (this.props.onLeave) {
+        this.props.onLeave();
+      } else if (typeof window !== 'undefined') {
+        window.location.href = '/dashboard';
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white font-sans p-6 text-center">
+          <p className="text-base font-semibold mb-3 text-slate-200">Leaving class…</p>
+          <a
+            href="/dashboard"
+            className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white transition-colors"
+          >
+            Back to Dashboard
+          </a>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }

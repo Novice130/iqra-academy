@@ -56,6 +56,8 @@ async function cadence(userId: string, isLive: boolean) {
   }
 }
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   return withHttpDb(async () => {
     try {
@@ -65,28 +67,81 @@ export async function GET(request: NextRequest) {
 
       const cutoff = new Date(Date.now() - LIVE_WINDOW_MS);
 
-      // Every teacher this user has ever had a class with.
-      const teacherRows = await db
-        .selectDistinct({ teacherId: sessions.teacherId })
+      // Strategy 1: Check if student has a direct booking for an IN_PROGRESS session right now
+      const directBookedSession = await db
+        .select({
+          id: sessions.id,
+          title: sessions.title,
+          teacherId: sessions.teacherId,
+          actualStart: sessions.actualStart,
+        })
         .from(bookings)
         .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-        .where(eq(bookings.userId, ctx.userId));
+        .where(
+          and(
+            eq(bookings.userId, ctx.userId),
+            eq(sessions.status, "IN_PROGRESS"),
+            gt(sessions.actualStart, cutoff)
+          )
+        )
+        .orderBy(desc(sessions.actualStart))
+        .limit(1);
 
-      const teacherIds = teacherRows.map((r) => r.teacherId);
-      if (teacherIds.length === 0)
-        return NextResponse.json(
-          { live: null, poll: await cadence(ctx.userId, false) },
-          { headers: NO_STORE }
-        );
+      let liveSession: {
+        id: string;
+        title: string | null;
+        teacherId: string;
+        actualStart: Date | null;
+      } | null = directBookedSession[0] ?? null;
 
-      const liveSession = await db.query.sessions.findFirst({
-        where: and(
-          inArray(sessions.teacherId, teacherIds),
-          eq(sessions.status, "IN_PROGRESS"),
-          gt(sessions.actualStart, cutoff)
-        ),
-        orderBy: [desc(sessions.actualStart)],
-      });
+      // Strategy 2: Check if any teacher this student has had classes with is running an IN_PROGRESS session
+      if (!liveSession) {
+        const teacherRows = await db
+          .selectDistinct({ teacherId: sessions.teacherId })
+          .from(bookings)
+          .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+          .where(eq(bookings.userId, ctx.userId));
+
+        const teacherIds = teacherRows.map((r) => r.teacherId);
+        if (teacherIds.length > 0) {
+          const found = await db.query.sessions.findFirst({
+            where: and(
+              inArray(sessions.teacherId, teacherIds),
+              eq(sessions.status, "IN_PROGRESS"),
+              gt(sessions.actualStart, cutoff)
+            ),
+            orderBy: [desc(sessions.actualStart)],
+          });
+          if (found) {
+            liveSession = {
+              id: found.id,
+              title: found.title,
+              teacherId: found.teacherId,
+              actualStart: found.actualStart,
+            };
+          }
+        }
+      }
+
+      // Strategy 3: Fallback check for any active IN_PROGRESS session in student's organization
+      if (!liveSession && ctx.orgId) {
+        const orgFound = await db.query.sessions.findFirst({
+          where: and(
+            eq(sessions.orgId, ctx.orgId),
+            eq(sessions.status, "IN_PROGRESS"),
+            gt(sessions.actualStart, cutoff)
+          ),
+          orderBy: [desc(sessions.actualStart)],
+        });
+        if (orgFound) {
+          liveSession = {
+            id: orgFound.id,
+            title: orgFound.title,
+            teacherId: orgFound.teacherId,
+            actualStart: orgFound.actualStart,
+          };
+        }
+      }
 
       if (!liveSession)
         return NextResponse.json(

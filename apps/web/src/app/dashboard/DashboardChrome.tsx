@@ -83,7 +83,7 @@ export default function DashboardChrome({
           style={{ borderBottom: "1px solid var(--border)" }}
         >
           <img
-            src="/logo.png"
+            src="/logo.png?v=3"
             alt="Novice Tutor"
             className="w-10 h-10 object-contain"
           />
@@ -209,7 +209,7 @@ export default function DashboardChrome({
           <div className="flex items-center gap-2.5">
             <div className="flex items-center gap-2 lg:hidden">
               <img
-                src="/logo.png"
+                src="/logo.png?v=3"
                 alt="Novice Tutor"
                 className="w-9 h-9 object-contain"
               />

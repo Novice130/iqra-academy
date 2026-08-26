@@ -73,7 +73,7 @@ function Header() {
       <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-2.5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Novice Tutor" className="w-9 h-9 object-contain" />
+          <img src="/logo.png?v=3" alt="Novice Tutor" className="w-9 h-9 object-contain" />
           <span className="font-bold text-[var(--color-charcoal)]">Novice Tutor</span>
         </Link>
         <div className="flex items-center gap-6 text-sm">

@@ -88,7 +88,7 @@ export default async function AppDownloadPage() {
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 flex items-center justify-center">
-              <img src="/logo.png" className="w-full h-full object-contain" alt="Novice Tutor" />
+              <img src="/logo.png?v=3" className="w-full h-full object-contain" alt="Novice Tutor" />
             </div>
             <span className="font-bold text-[var(--color-charcoal)]">
               Novice <span className="text-[var(--color-gold)]">Tutor</span>

@@ -37,16 +37,25 @@ import { gainForSlider } from '@/lib/audio-gain';
 
 function useLiveRoomMetadata(): string | undefined {
   const room = useRoomContext();
-  const [metadata, setMetadata] = useState<string | undefined>(room.metadata);
+  const [metadata, setMetadata] = useState<string | undefined>(() => room?.metadata);
 
   useEffect(() => {
-    const handler = () => setMetadata(room.metadata);
+    if (!room) return;
+    const handler = () => {
+      try {
+        setMetadata(room.metadata);
+      } catch {}
+    };
     handler();
-    room.on(RoomEvent.RoomMetadataChanged, handler);
-    room.on(RoomEvent.Connected, handler);
+    try {
+      room.on(RoomEvent.RoomMetadataChanged, handler);
+      room.on(RoomEvent.Connected, handler);
+    } catch {}
     return () => {
-      room.off(RoomEvent.RoomMetadataChanged, handler);
-      room.off(RoomEvent.Connected, handler);
+      try {
+        room.off(RoomEvent.RoomMetadataChanged, handler);
+        room.off(RoomEvent.Connected, handler);
+      } catch {}
     };
   }, [room]);
 
@@ -59,6 +68,9 @@ interface CustomVideoConferenceProps {
   onEndClassIntent: () => void;
   sessionId: string;
   teacherIdentity: string | null;
+  teacherName?: string | null;
+  joinCode?: string | null;
+  sessionTitle?: string | null;
   initialEffect?: EffectSelection;
 }
 
@@ -120,20 +132,29 @@ function useAppliedVolumes(volumes: Record<string, number>) {
   const room = useRoomContext();
 
   useEffect(() => {
+    if (!room) return;
     const apply = () => {
-      room.remoteParticipants.forEach((participant) => {
-        const base = baseIdentity(participant.identity);
-        const gain = gainForSlider(base ? volumes[base] ?? 1 : 1);
-        participant.setVolume(gain);
-        participant.setVolume(gain, Track.Source.ScreenShareAudio);
-      });
+      try {
+        if (!room || !room.remoteParticipants) return;
+        room.remoteParticipants.forEach((participant) => {
+          if (!participant) return;
+          const base = baseIdentity(participant.identity);
+          const gain = gainForSlider(base ? volumes[base] ?? 1 : 1);
+          participant.setVolume(gain);
+          participant.setVolume(gain, Track.Source.ScreenShareAudio);
+        });
+      } catch {}
     };
     apply();
-    room.on(RoomEvent.ParticipantConnected, apply);
-    room.on(RoomEvent.TrackSubscribed, apply);
+    try {
+      room.on(RoomEvent.ParticipantConnected, apply);
+      room.on(RoomEvent.TrackSubscribed, apply);
+    } catch {}
     return () => {
-      room.off(RoomEvent.ParticipantConnected, apply);
-      room.off(RoomEvent.TrackSubscribed, apply);
+      try {
+        room.off(RoomEvent.ParticipantConnected, apply);
+        room.off(RoomEvent.TrackSubscribed, apply);
+      } catch {}
     };
   }, [room, volumes]);
 }
@@ -142,6 +163,7 @@ function useAudioPlaybackUnlock() {
   const room = useRoomContext();
 
   useEffect(() => {
+    if (!room) return;
     let armed: (() => void) | null = null;
 
     const disarm = () => {
@@ -151,22 +173,30 @@ function useAudioPlaybackUnlock() {
     };
 
     const check = () => {
-      if (room.canPlaybackAudio) {
+      try {
+        if (!room || room.canPlaybackAudio) {
+          disarm();
+          return;
+        }
+        if (armed) return;
+        armed = () => {
+          room.startAudio().catch(() => {});
+          disarm();
+        };
+        window.addEventListener('pointerdown', armed);
+      } catch {
         disarm();
-        return;
       }
-      if (armed) return;
-      armed = () => {
-        room.startAudio().catch(() => {});
-        disarm();
-      };
-      window.addEventListener('pointerdown', armed);
     };
 
     check();
-    room.on(RoomEvent.AudioPlaybackStatusChanged, check);
+    try {
+      room.on(RoomEvent.AudioPlaybackStatusChanged, check);
+    } catch {}
     return () => {
-      room.off(RoomEvent.AudioPlaybackStatusChanged, check);
+      try {
+        room.off(RoomEvent.AudioPlaybackStatusChanged, check);
+      } catch {}
       disarm();
     };
   }, [room]);
@@ -396,6 +426,9 @@ export default function CustomVideoConference({
   onEndClassIntent,
   sessionId,
   teacherIdentity,
+  teacherName,
+  joinCode,
+  sessionTitle,
   initialEffect,
 }: CustomVideoConferenceProps) {
   const layoutContext = useCreateLayoutContext();
@@ -409,6 +442,50 @@ export default function CustomVideoConference({
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const metadata = useLiveRoomMetadata();
   const { muteTrack, askToUnmute, askForCamera, rename, removeParticipant } = useHostControls(sessionId);
+
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const meetingInfo = useMemo(() => {
+    const rawCode = (joinCode || sessionId || '').trim();
+    const digitsOnly = rawCode.replace(/\D/g, '');
+    let displayMeetingId = rawCode;
+    let urlCode = rawCode;
+
+    if (digitsOnly.length === 12) {
+      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
+      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+    } else {
+      const alphaOnly = rawCode.replace(/[^a-zA-Z]/g, '').toLowerCase();
+      if (alphaOnly.length === 12) {
+        displayMeetingId = `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
+        urlCode = `${alphaOnly.slice(0, 4)}-${alphaOnly.slice(4, 8)}-${alphaOnly.slice(8, 12)}`;
+      }
+    }
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://novicetutor.com';
+    const inviteUrl = `${baseUrl}/join/${urlCode}`;
+    const fullInvitation = `Join Novice Tutor Live Class\nTopic: ${sessionTitle || 'Quran & Islamic Studies'}\n${teacherName ? `Teacher: ${teacherName}\n` : ''}Meeting ID: ${displayMeetingId}\nInvite Link: ${inviteUrl}\n\n* Note: Registered and approved students only. Guests wait in the waiting room until the teacher admits them.`;
+
+    return {
+      displayMeetingId,
+      urlCode,
+      inviteUrl,
+      fullInvitation,
+      title: sessionTitle || 'Novice Tutor Classroom',
+      teacher: teacherName || (teacherIdentity ? teacherIdentity.split('@')[0] : 'Teacher'),
+    };
+  }, [joinCode, sessionId, sessionTitle, teacherName, teacherIdentity]);
+
+  const copyToClipboard = useCallback(async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2500);
+    } catch {
+      // Fallback
+    }
+  }, []);
 
   const [pendingSpotlight, setPendingSpotlight] = useState<string | null | undefined>(undefined);
   useEffect(() => {
@@ -749,6 +826,191 @@ export default function CustomVideoConference({
                 </DraggableTile>
               );
             })}
+
+            {/* Top-Left Olive Tree Brand Logo / Zoom-Style Meeting Details Button */}
+            <div
+              className={`fixed z-[60] pointer-events-auto transition-all duration-300 ${
+                chromeHidden && !inviteOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
+              }`}
+              style={{
+                top: 'max(16px, env(safe-area-inset-top))',
+                left: 'max(16px, env(safe-area-inset-left))',
+              }}
+            >
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInviteOpen((v) => !v);
+                }}
+                title="Class Details & Invite Link"
+                aria-label="Class Details and Invite Link"
+                className="group flex items-center gap-2.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs shadow-2xl hover:brightness-115 select-none"
+                style={{
+                  background: 'rgba(24, 26, 34, 0.70)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  boxShadow:
+                    '0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
+                }}
+              >
+                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform">
+                  <img src="/logo.png?v=3" alt="Novice Tutor" className="w-full h-full object-contain p-0.5" />
+                </div>
+                <div className="flex flex-col text-left">
+                  <span className="text-[11px] sm:text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
+                    <span>Meeting Info</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
+                  </span>
+                  <span className="text-[9px] text-white/50 font-mono tracking-wider">
+                    {meetingInfo.displayMeetingId.slice(0, 7)}…
+                  </span>
+                </div>
+              </button>
+
+              {/* Meeting Info & Invite Modal (Zoom / FaceTime style) */}
+              {inviteOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-sm animate-fadeIn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setInviteOpen(false);
+                    }}
+                  />
+                  <div
+                    className="fixed left-4 sm:left-6 top-16 sm:top-20 z-[81] w-[calc(100vw-32px)] max-w-sm rounded-3xl p-5 shadow-2xl animate-fadeIn overflow-hidden text-left"
+                    style={{
+                      background: 'rgba(24, 26, 34, 0.92)',
+                      backdropFilter: 'blur(40px) saturate(200%) contrast(105%)',
+                      WebkitBackdropFilter: 'blur(40px) saturate(200%) contrast(105%)',
+                      border: '1px solid rgba(255, 255, 255, 0.22)',
+                      boxShadow:
+                        '0 28px 64px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
+                    }}
+                  >
+                    {/* Header */}
+                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 p-1 flex items-center justify-center shrink-0 shadow-md">
+                          <img src="/logo.png?v=3" alt="Novice Tutor" className="w-full h-full object-contain" />
+                        </div>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-bold text-white truncate tracking-tight">
+                            {meetingInfo.title}
+                          </h3>
+                          <p className="text-[11px] text-white/50 truncate flex items-center gap-1.5 mt-0.5">
+                            <span>Teacher: {meetingInfo.teacher}</span>
+                            <span className="text-emerald-400 font-medium">● Live</span>
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setInviteOpen(false)}
+                        className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center text-xs transition-colors shrink-0 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Meeting ID Section */}
+                    <div className="mt-4 space-y-3.5">
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-white/45 block mb-1">
+                          Meeting ID
+                        </label>
+                        <div
+                          className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl border"
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            borderColor: 'rgba(255, 255, 255, 0.12)',
+                          }}
+                        >
+                          <span className="text-sm sm:text-base font-bold font-mono text-emerald-400 tracking-wider">
+                            {meetingInfo.displayMeetingId}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(meetingInfo.displayMeetingId, 'id')}
+                            className="px-2.5 py-1 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 flex items-center gap-1.5"
+                            style={{
+                              background: copiedKey === 'id' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
+                              color: copiedKey === 'id' ? '#6ee7b7' : '#ffffff',
+                            }}
+                          >
+                            {copiedKey === 'id' ? '✓ Copied' : 'Copy ID'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Invite Link Section */}
+                      <div>
+                        <label className="text-[10px] font-bold uppercase tracking-wider text-white/45 block mb-1">
+                          Invite Link
+                        </label>
+                        <div
+                          className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl border gap-2"
+                          style={{
+                            background: 'rgba(255, 255, 255, 0.06)',
+                            borderColor: 'rgba(255, 255, 255, 0.12)',
+                          }}
+                        >
+                          <span className="text-xs font-mono text-white/80 truncate">
+                            {meetingInfo.inviteUrl}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(meetingInfo.inviteUrl, 'link')}
+                            className="px-2.5 py-1 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 shrink-0 flex items-center gap-1.5"
+                            style={{
+                              background: copiedKey === 'link' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(59, 130, 246, 0.35)',
+                              color: copiedKey === 'link' ? '#6ee7b7' : '#93c5fd',
+                            }}
+                          >
+                            {copiedKey === 'link' ? '✓ Copied' : 'Copy Link'}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Copy Full Invitation Action */}
+                      <button
+                        type="button"
+                        onClick={() => copyToClipboard(meetingInfo.fullInvitation, 'all')}
+                        className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md"
+                        style={{
+                          background:
+                            copiedKey === 'all'
+                              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.85), rgba(5, 150, 105, 0.85))'
+                              : 'linear-gradient(135deg, rgba(37, 99, 235, 0.85), rgba(29, 78, 216, 0.85))',
+                        }}
+                      >
+                        <span>{copiedKey === 'all' ? '✓ Invitation Copied!' : '📋 Copy Full Invitation'}</span>
+                      </button>
+
+                      {/* Security & Waiting Room Notice */}
+                      <div
+                        className="p-3 rounded-2xl border flex items-start gap-2.5 text-[11px] leading-relaxed"
+                        style={{
+                          background: 'rgba(245, 158, 11, 0.08)',
+                          borderColor: 'rgba(245, 158, 11, 0.22)',
+                          color: 'rgba(253, 230, 138, 0.90)',
+                        }}
+                      >
+                        <span className="text-amber-400 text-sm mt-0.5">🛡️</span>
+                        <div>
+                          <strong className="font-semibold text-amber-300 block mb-0.5">
+                            Teacher Admission Gated
+                          </strong>
+                          Only registered and approved students can join. Anyone with this link waits in the waiting room until the teacher admits them.
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
 
             {/* Movable Layout Switcher Pill — defaults to top-center (never collides with top-right video tile settings) */}
             <div

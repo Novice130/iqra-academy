@@ -345,8 +345,15 @@ export default function CallControlBar({
           <button
             type="button"
             onClick={() => {
-              if (isHost) onEndClassIntent();
-              room.disconnect();
+              try {
+                if (isHost) onEndClassIntent();
+                room.disconnect();
+              } catch (err) {
+                console.warn("Disconnect error caught:", err);
+                if (typeof window !== "undefined") {
+                  window.location.href = "/dashboard";
+                }
+              }
             }}
             title={isHost ? 'End class for everyone' : 'Leave call'}
             aria-label={isHost ? 'End class for everyone' : 'Leave call'}

@@ -255,6 +255,21 @@ export default function AvailabilityPage() {
 
       setZoneConfirmed(true);
       setNote({ text: "✓ Availability saved! Students will see these hours in their local timezone.", bad: false });
+
+      // Broadcast live availability update signal for open student views/tabs
+      try {
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("teacher-availability-updated", { detail: { teacherId } }));
+          localStorage.setItem("teacher_availability_updated", Date.now().toString());
+          if ("BroadcastChannel" in window) {
+            const bc = new BroadcastChannel("teacher-availability-sync");
+            bc.postMessage({ type: "AVAILABILITY_UPDATED", teacherId, timestamp: Date.now() });
+            bc.close();
+          }
+        }
+      } catch {
+        // Best-effort client notification
+      }
     } catch (err) {
       setNote({ text: err instanceof Error ? err.message : "Save failed.", bad: true });
     } finally {

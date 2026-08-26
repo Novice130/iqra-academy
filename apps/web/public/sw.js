@@ -9,7 +9,7 @@
  */
 
 const CALL_TAG = 'novice-tutor-call';
-const STATIC_CACHE = 'novice-tutor-static-v1';
+const STATIC_CACHE = 'novice-tutor-static-v3';
 
 self.addEventListener('install', () => self.skipWaiting());
 
@@ -43,10 +43,7 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
-  const isImmutable =
-    url.pathname.startsWith('/_next/static/') ||
-    url.pathname === '/logo.png' ||
-    url.pathname === '/favicon.ico';
+  const isImmutable = url.pathname.startsWith('/_next/static/');
   if (!isImmutable) return;
 
   event.respondWith(

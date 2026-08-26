@@ -50,11 +50,17 @@ function isJoinable(session: SessionRow): boolean {
 }
 
 function normalizeJoinCode(code: string) {
-  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (!code) return code;
+  const trimmed = code.trim();
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  if (digitsOnly.length === 12) {
+    return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+  }
+  const clean = trimmed.replace(/[^a-zA-Z]/g, '').toLowerCase();
   if (clean.length === 12) {
     return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
   }
-  return code;
+  return trimmed;
 }
 
 export async function POST(request: NextRequest) {
@@ -69,13 +75,22 @@ export async function POST(request: NextRequest) {
       }
 
       const sessionId = normalizeJoinCode(sessionIdRaw);
+      const rawTrimmed = sessionIdRaw.trim();
+      const rawClean = rawTrimmed.replace(/[\s-]/g, "");
       const name = rawName.trim().slice(0, 60);
       if (name.length < 2) {
         throw new BusinessRuleError("Please enter your name.");
       }
 
       const rawSession = await db.query.sessions.findFirst({
-        where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
+        where: or(
+          eq(sessions.id, sessionId),
+          eq(sessions.joinCode, sessionId),
+          eq(sessions.joinCode, rawTrimmed),
+          eq(sessions.joinCode, rawClean),
+          eq(sessions.id, rawTrimmed),
+          eq(sessions.id, rawClean)
+        ),
       });
       if (!rawSession) throw new NotFoundError("Session");
 

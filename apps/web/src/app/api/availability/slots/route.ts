@@ -22,6 +22,8 @@ import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { generateSlots } from "@/lib/slots";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(request: NextRequest) {
   return withHttpDb(async () => {
     try {
@@ -39,15 +41,22 @@ export async function GET(request: NextRequest) {
         to: new Date(Date.now() + days * 24 * 60 * 60 * 1000),
       });
 
-      return NextResponse.json({
-        slots: slots.map((s) => ({
-          teacherId: s.teacherId,
-          teacherName: s.teacherName,
-          teacherTimeZone: s.teacherTimeZone,
-          startsAt: s.startsAt.toISOString(),
-          endsAt: s.endsAt.toISOString(),
-        })),
-      });
+      return NextResponse.json(
+        {
+          slots: slots.map((s) => ({
+            teacherId: s.teacherId,
+            teacherName: s.teacherName,
+            teacherTimeZone: s.teacherTimeZone,
+            startsAt: s.startsAt.toISOString(),
+            endsAt: s.endsAt.toISOString(),
+          })),
+        },
+        {
+          headers: {
+            "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+          },
+        }
+      );
     } catch (error) {
       return handleApiError(error);
     }

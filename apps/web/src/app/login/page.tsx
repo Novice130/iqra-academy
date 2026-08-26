@@ -118,7 +118,7 @@ export default function LoginPage() {
         <div className="text-center mb-8">
           <Link href="/" className="inline-flex items-center gap-2.5 mb-8">
             <img
-              src="/logo.png"
+              src="/logo.png?v=3"
               alt="Novice Tutor"
               className="w-12 h-12 object-contain"
             />

@@ -219,7 +219,7 @@ export default function GuestJoinPage() {
         className="w-full max-w-sm rounded-2xl p-7 text-center"
         style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.12)' }}
       >
-        <img src="/logo.png" alt="Novice Tutor" className="w-12 h-12 object-contain mx-auto mb-4" />
+        <img src="/logo.png?v=3" alt="Novice Tutor" className="w-12 h-12 object-contain mx-auto mb-4" />
 
         {stage === 'waiting' ? (
           <>

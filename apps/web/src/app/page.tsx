@@ -55,7 +55,7 @@ function Navbar() {
         <Link href="/" className="flex items-center gap-2.5">
           <div className="w-9 h-9 flex items-center justify-center">
             <img
-              src="/logo.png"
+              src="/logo.png?v=3"
               className="w-full h-full object-contain"
               alt="Logo"
             />
@@ -741,7 +741,7 @@ function Footer() {
         <div className="flex items-center gap-2 text-white font-bold">
           <div className="w-8 h-8 flex items-center justify-center text-sm">
             <img
-              src="/logo.png"
+              src="/logo.png?v=3"
               className="w-full h-full object-contain"
               alt="Logo"
             />
