@@ -90,12 +90,12 @@ function Navbar() {
           >
             Login
           </Link>
-          <a
-            href="#cta"
+          <Link
+            href="/register"
             className="bg-[var(--color-sage)] hover:bg-[var(--color-sage-dark)] text-white text-sm font-semibold px-5 py-2.5 rounded-lg transition-all hover:-translate-y-0.5"
           >
             Start Free Trial
-          </a>
+          </Link>
         </div>
 
         {/* Mobile Nav Actions */}
@@ -106,12 +106,12 @@ function Navbar() {
           >
             Login
           </Link>
-          <a
-            href="#cta"
+          <Link
+            href="/register"
             className="bg-[var(--color-sage)] text-white text-xs font-semibold px-3.5 py-1.5 rounded-lg transition-all"
           >
             Free Trial
-          </a>
+          </Link>
         </div>
       </div>
     </nav>
@@ -145,12 +145,12 @@ function Hero() {
             </p>
 
             <div className="mt-8 flex flex-wrap gap-4">
-              <a
-                href="#cta"
+              <Link
+                href="/register"
                 className="bg-[var(--color-sage)] hover:bg-[var(--color-sage-dark)] text-white font-semibold px-8 py-3.5 rounded-lg transition-all hover:-translate-y-0.5 hover:shadow-lg"
               >
                 Start Free Trial
-              </a>
+              </Link>
               <a
                 href="#courses"
                 className="border-2 border-[var(--color-cream)] hover:border-[var(--color-sage-light)] text-[var(--color-charcoal)] font-semibold px-8 py-3.5 rounded-lg transition-colors"
@@ -359,12 +359,12 @@ function Courses() {
                   </li>
                 ))}
               </ul>
-              <a
-                href="#cta"
+              <Link
+                href="/register"
                 className="text-[var(--color-sage)] hover:text-[var(--color-sage-dark)] font-semibold text-sm hover:underline transition-colors"
               >
                 Start Free Trial →
-              </a>
+              </Link>
             </div>
           ))}
         </div>
@@ -542,8 +542,8 @@ function Pricing() {
                   </li>
                 ))}
               </ul>
-              <a
-                href="#cta"
+              <Link
+                href="/register"
                 className={`block text-center py-3 rounded-lg font-semibold transition-all hover:-translate-y-0.5 ${
                   p.popular
                     ? "bg-[var(--color-sage)] hover:bg-[var(--color-sage-dark)] text-white shadow"
@@ -551,7 +551,7 @@ function Pricing() {
                 }`}
               >
                 Start Free Trial
-              </a>
+              </Link>
             </div>
           ))}
         </div>
@@ -709,17 +709,19 @@ function CTA() {
           platform works — no credit card, no obligation.
         </p>
         <div className="flex flex-col sm:flex-row gap-4 justify-center">
-          <a
-            href="mailto:hello@iqra-academy.com"
+          <Link
+            href="/register"
             className="inline-block bg-white text-[var(--color-sage-dark)] font-bold px-10 py-4 rounded-lg text-lg hover:bg-[var(--color-cream)] transition-all hover:-translate-y-0.5 shadow-lg"
           >
             Book Free Assessment
-          </a>
+          </Link>
           <a
-            href="mailto:hello@iqra-academy.com"
-            className="inline-block border-2 border-white/30 text-white font-semibold px-10 py-4 rounded-lg text-lg hover:bg-white/10 transition-all"
+            href="https://wa.me/19176726916"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center justify-center gap-2 border-2 border-white/30 text-white font-semibold px-10 py-4 rounded-lg text-lg hover:bg-white/10 transition-all"
           >
-            Contact Us
+            <span>💬 Chat on WhatsApp</span>
           </a>
         </div>
         <p className="mt-6 text-sm text-white/60">

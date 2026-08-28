@@ -629,6 +629,27 @@ export const teacherAvailability = pgTable(
  * of zone arithmetic entirely — the editor already knows the teacher's zone
  * and converts before POSTing.
  */
+export const schedulingEvents = pgTable(
+  "scheduling_events",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    teacherId: text("teacher_id").references(() => users.id),
+    actorId: text("actor_id").references(() => users.id),
+    type: text("type").notNull(),
+    aggregateType: text("aggregate_type").notNull(),
+    aggregateId: text("aggregate_id"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    publishedAt: timestamp("published_at"),
+    attempts: smallint("attempts").notNull().default(0),
+  },
+  (t) => [
+    index("scheduling_events_unpublished_idx").on(t.publishedAt, t.createdAt),
+    index("scheduling_events_org_idx").on(t.orgId, t.createdAt),
+    index("scheduling_events_teacher_idx").on(t.orgId, t.teacherId, t.createdAt),
+  ]
+);
+
 export const teacherTimeOff = pgTable(
   "teacher_time_off",
   {

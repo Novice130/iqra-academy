@@ -1,17 +1,40 @@
-# novice_tutor
+# Novice Tutor — Unified Mobile App (Flutter)
 
-A new Flutter project.
+Cross-platform mobile application for Novice Tutor on **iOS** and **Android**, built with Flutter.
 
-## Getting Started
+## Architecture
 
-This project is a starting point for a Flutter application.
+The mobile app provides a unified, consistent theme (Emerald `#059669` + Obsidian `#0A0A0A`) across both iOS and Android platforms with complete feature parity with the web platform:
 
-A few resources to get you started if this is your first Flutter project:
+- **Unified Theme & UI**: Shared Material 3 dark styling, custom app chrome with native title bar, bottom tab bar, profile drawer, and fullscreen video classrooms.
+- **Native Video Classroom Integration**: Full LiveKit WebRTC video meetings, media permission handling, and WebGL virtual background shaders.
+- **Push Notifications & Ringing**: Background incoming call handling via CallKit / full-screen ringing overlay and Firebase Cloud Messaging (FCM).
+- **Native Screen Sharing Bridge**: Screen capture and publishing via `flutter_webrtc` / `livekit_client`.
+- **Google Sign-In Bridge**: Native account selection and cookie synchronization.
+- **Picture-in-Picture (PiP)**: Android and iOS background meeting support.
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+## Running the App
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+### Android
+```bash
+flutter run -d android
+```
+
+### iOS
+```bash
+flutter run -d ios
+```
+
+## Building Releases
+
+### Android APK / App Bundle
+```bash
+flutter build apk --release
+flutter build appbundle --release
+```
+
+### iOS IPA
+```bash
+./scripts/ios-release.sh --no-upload   # Build .ipa
+./scripts/ios-release.sh               # Build and upload to TestFlight / App Store Connect
+```

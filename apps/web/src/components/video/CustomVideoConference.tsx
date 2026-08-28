@@ -487,25 +487,43 @@ export default function CustomVideoConference({
     }
   }, []);
 
+  const room = useRoomContext();
   const [pendingSpotlight, setPendingSpotlight] = useState<string | null | undefined>(undefined);
   useEffect(() => {
     setPendingSpotlight(undefined);
   }, [metadata]);
   const roomSpotlight = pendingSpotlight !== undefined ? pendingSpotlight : parseSpotlightIdentity(metadata);
 
-  const volumes = useMemo(() => parseVolumes(metadata), [metadata]);
+  const [localVolumes, setLocalVolumes] = useState<Record<string, number>>({});
+  const volumes = useMemo(() => {
+    const remote = parseVolumes(metadata);
+    return { ...remote, ...localVolumes };
+  }, [metadata, localVolumes]);
+
   useAppliedVolumes(volumes);
   useAudioPlaybackUnlock();
 
   const setVolume = useCallback(
     (base: string, volume: number) => {
+      setLocalVolumes((prev) => ({ ...prev, [base]: volume }));
+      try {
+        if (room && room.remoteParticipants) {
+          room.remoteParticipants.forEach((participant) => {
+            if (baseIdentity(participant.identity) === base) {
+              const gain = gainForSlider(volume);
+              participant.setVolume(gain);
+              participant.setVolume(gain, Track.Source.ScreenShareAudio);
+            }
+          });
+        }
+      } catch {}
       fetch(`/api/sessions/${sessionId}/volume`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ identity: base, volume }),
       }).catch(() => {});
     },
-    [sessionId]
+    [room, sessionId]
   );
 
   const focusIdentity = baseIdentity(roomSpotlight) ?? baseIdentity(teacherIdentity);
@@ -711,7 +729,8 @@ export default function CustomVideoConference({
   }
 
   const [customPositions, setCustomPositions] = useState<Record<string, Slot>>({});
-  const bottomClearance = chromeHidden ? 24 : 96;
+  // Constant clearance so the video stage never shifts or resizes when controls appear/hide
+  const bottomClearance = 84;
 
   const floatingKeys = floating.map((p) => p.key);
   const orderedKeys = [
@@ -743,6 +762,11 @@ export default function CustomVideoConference({
 
   const handleStagePointerUp = (e: React.PointerEvent) => {
     if (Date.now() - tapStartTimeRef.current < 300) {
+      if (viewMenuOpen) setViewMenuOpen(false);
+      if (effectsOpen) setEffectsOpen(false);
+      if (tileMenuOpen) setTileMenuOpen(false);
+      if (peopleOpen) setPeopleOpen(false);
+
       const target = e.target as HTMLElement;
       if (
         target.closest('button') ||
@@ -775,13 +799,7 @@ export default function CustomVideoConference({
             style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}
           >
             {focused ? (
-              <div
-                className="w-full h-full p-2 sm:p-3"
-                style={{
-                  paddingBottom: `${bottomClearance + 8}px`,
-                  transition: 'padding-bottom 220ms cubic-bezier(0.16, 1, 0.3, 1)',
-                }}
-              >
+              <div className="w-full h-full p-2 sm:p-3">
                 {renderTile(focused)}
               </div>
             ) : (
@@ -790,8 +808,6 @@ export default function CustomVideoConference({
                 style={{
                   gridTemplateColumns: `repeat(${columnsFor(gridTiles.length)}, minmax(0, 1fr))`,
                   gridAutoRows: 'minmax(0, 1fr)',
-                  paddingBottom: `${bottomClearance + 12}px`,
-                  transition: 'padding-bottom 220ms cubic-bezier(0.16, 1, 0.3, 1)',
                 }}
               >
                 {gridTiles.map((p) => (
@@ -1055,6 +1071,10 @@ export default function CustomVideoConference({
                 <>
                   <div
                     className="fixed inset-0 z-[80]"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setViewMenuOpen(false);
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       setViewMenuOpen(false);
@@ -1182,13 +1202,17 @@ export default function CustomVideoConference({
                 <>
                   <div
                     className="fixed inset-0 z-[80]"
+                    onPointerDown={(e) => {
+                      e.stopPropagation();
+                      setTileMenuOpen(false);
+                    }}
                     onClick={(e) => {
                       e.stopPropagation();
                       setTileMenuOpen(false);
                     }}
                   />
                   <div
-                    className="absolute left-1/2 -translate-x-1/2 top-14 z-[81] w-64 rounded-3xl p-2 shadow-2xl animate-fadeIn overflow-hidden"
+                    className="absolute left-1/2 -translate-x-1/2 top-14 z-[81] w-56 rounded-3xl p-2 shadow-2xl animate-fadeIn overflow-hidden"
                     style={{
                       background: 'rgba(24, 26, 34, 0.85)',
                       backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
@@ -1198,28 +1222,6 @@ export default function CustomVideoConference({
                         '0 24px 64px rgba(0, 0, 0, 0.60), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
                     }}
                   >
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTileFit((prev) => (prev === 'cover' ? 'contain' : 'cover'));
-                        setTileMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
-                    >
-                      <FramePersonIcon className="w-4 h-4 text-white/70" />
-                      <span>{tileFit === 'cover' ? 'Fit video to screen' : 'Fill video to screen'}</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEffectsOpen(true);
-                        setTileMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
-                    >
-                      <VisualEffectsSparkleIcon className="w-4 h-4 text-blue-400" />
-                      <span>Change background effects</span>
-                    </button>
                     {isModerator && (
                       <button
                         type="button"
@@ -1230,9 +1232,24 @@ export default function CustomVideoConference({
                         className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
                       >
                         <span className="text-sm">📌</span>
-                        <span>Pin / Spotlight self-view</span>
+                        <span>{localCamera?.base === focusIdentity ? 'Unpin self-view' : 'Spotlight / Pin self-view'}</span>
                       </button>
                     )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!document.fullscreenElement) {
+                          document.documentElement.requestFullscreen().catch(() => {});
+                        } else {
+                          document.exitFullscreen().catch(() => {});
+                        }
+                        setTileMenuOpen(false);
+                      }}
+                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
+                    >
+                      <span className="text-sm">⛶</span>
+                      <span>Toggle Fullscreen</span>
+                    </button>
                   </div>
                 </>
               )}
@@ -1242,6 +1259,10 @@ export default function CustomVideoConference({
               <>
                 <div
                   className="fixed inset-0 z-[80]"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    setEffectsOpen(false);
+                  }}
                   onClick={(e) => {
                     e.stopPropagation();
                     setEffectsOpen(false);

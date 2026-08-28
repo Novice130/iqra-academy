@@ -19,7 +19,7 @@
  * No prices anywhere on this page — see lib/pricing-visibility.ts.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LocalTime, { formatInZone, useViewerTimeZone } from "@/components/LocalTime";
 
 interface Teacher {
@@ -51,6 +51,10 @@ export default function BookingPage() {
   const [booking, setBooking] = useState(false);
   const [done, setDone] = useState<Slot | null>(null);
   const [error, setError] = useState("");
+  const slotRequestRef = useRef<{ generation: number; controller: AbortController | null }>({
+    generation: 0,
+    controller: null,
+  });
 
   useEffect(() => {
     (async () => {
@@ -70,18 +74,29 @@ export default function BookingPage() {
 
   const fetchSlots = useCallback(
     async (quiet = false) => {
-      if (!teacherId) {
+      const requestedTeacherId = teacherId;
+      slotRequestRef.current.controller?.abort();
+      const controller = new AbortController();
+      const generation = slotRequestRef.current.generation + 1;
+      slotRequestRef.current = { generation, controller };
+
+      if (!requestedTeacherId) {
         setSlots([]);
         return;
       }
       if (!quiet) setLoadingSlots(true);
       try {
-        const res = await fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`, {
-          cache: "no-store",
-          headers: { Pragma: "no-cache" },
-        });
+        const res = await fetch(
+          `/api/availability/slots?teacherId=${encodeURIComponent(requestedTeacherId)}&days=14`,
+          {
+            cache: "no-store",
+            headers: { Pragma: "no-cache" },
+            signal: controller.signal,
+          }
+        );
         if (!res.ok) throw new Error("Couldn't load available times.");
         const data = (await res.json()) as { slots: Slot[] };
+        if (slotRequestRef.current.generation !== generation || requestedTeacherId !== teacherId) return;
         setSlots(data.slots);
         setChosen((prevChosen) => {
           if (!prevChosen) return null;
@@ -91,9 +106,12 @@ export default function BookingPage() {
           return stillValid ? prevChosen : null;
         });
       } catch (err) {
-        if (!quiet) setError(err instanceof Error ? err.message : "Something went wrong.");
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (!quiet && slotRequestRef.current.generation === generation) {
+          setError(err instanceof Error ? err.message : "Something went wrong.");
+        }
       } finally {
-        if (!quiet) setLoadingSlots(false);
+        if (!quiet && slotRequestRef.current.generation === generation) setLoadingSlots(false);
       }
     },
     [teacherId]
@@ -202,12 +220,7 @@ export default function BookingPage() {
       // The slot may have gone while they were deciding. Refresh so the grid
       // stops offering something that is no longer there.
       setChosen(null);
-      if (teacherId) {
-        fetch(`/api/availability/slots?teacherId=${encodeURIComponent(teacherId)}&days=14`)
-          .then((r) => (r.ok ? r.json() : null))
-          .then((d) => d && setSlots(d.slots))
-          .catch(() => {});
-      }
+      if (teacherId) void fetchSlots(true);
     } finally {
       setBooking(false);
     }

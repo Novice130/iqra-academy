@@ -199,7 +199,7 @@ function Popover({
 }) {
   return (
     <>
-      <div className="fixed inset-0 z-[70]" onClick={onClose} />
+      <div className="fixed inset-0 z-[70]" onPointerDown={onClose} onClick={onClose} />
       <div
         className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[71] rounded-3xl overflow-y-auto"
         style={{

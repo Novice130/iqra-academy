@@ -57,3 +57,41 @@ export async function GET(request: NextRequest) {
     }
   });
 }
+
+export async function PATCH(request: NextRequest) {
+  return withHttpDb(async () => {
+    try {
+      const authResult = await requireAuth(request);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
+
+      const body = await request.json();
+      const updateData: Record<string, any> = { updatedAt: new Date() };
+
+      if (typeof body.name === "string" && body.name.trim().length > 0) {
+        updateData.name = body.name.trim();
+      }
+      if (typeof body.phone === "string") {
+        updateData.phone = body.phone.trim();
+      }
+
+      const [updated] = await db
+        .update(users)
+        .set(updateData)
+        .where(eq(users.id, ctx.userId))
+        .returning({
+          id: users.id,
+          name: users.name,
+          email: users.email,
+          role: users.role,
+          orgId: users.orgId,
+          timezone: users.timezone,
+        });
+
+      return NextResponse.json({ user: updated });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
+}
+

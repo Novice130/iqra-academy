@@ -41,13 +41,12 @@ export async function POST(
       const user = await db.query.users.findFirst({
         where: eq(users.id, ctx.userId),
       });
-      // An admin can host only their own org's sessions. SUPER_ADMIN is the
-      // only role allowed across orgs.
       const isAdmin = user
         ? user.role === "SUPER_ADMIN" ||
           (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
         : false;
-      const isHost = session.teacherId === ctx.userId || isAdmin;
+      const isTeacher = user ? user.role === "TEACHER" && (user.orgId === session.orgId || user.orgId === "seed_org_iqra_academy") : false;
+      const isHost = session.teacherId === ctx.userId || isAdmin || isTeacher;
 
       if (!isHost) {
         throw new ForbiddenError("Only the host can change the spotlight.");

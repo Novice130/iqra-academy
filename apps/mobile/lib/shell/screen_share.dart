@@ -18,6 +18,7 @@
 library;
 
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' as webrtc;
@@ -28,10 +29,10 @@ import 'package:livekit_client/livekit_client.dart';
 /// and "you declined the prompt" and "your phone wouldn't allow capture" call
 /// for completely different responses.
 enum ScreenShareFailure {
-  /// The teacher said no to Android's capture prompt. Not an error.
+  /// The teacher said no to the capture prompt. Not an error.
   declined,
 
-  /// Android refused the foreground service the projection depends on.
+  /// Operating system refused the foreground service or capture request.
   serviceBlocked,
 
   /// Token, network, or LiveKit refused the connection.
@@ -98,18 +99,16 @@ class ScreenShareService {
     //
     // `fullScreenOnly` removes Android 14's "Share one app" option from that
     // dialog. It is the default choice there, and a teacher who takes it
-    // shares only the Novice Tutor window — so the class watches the call
-    // screen they are already in, and nothing the teacher opens afterwards.
-    // Presenting means the whole screen; the point is showing the students
-    // something that isn't this app.
+    // shares only the Novice Tutor window.
     final granted = await webrtc.Helper.requestCapturePermission(fullScreenOnly: true);
     if (!granted) return const ScreenShareStartResult.failed(ScreenShareFailure.declined);
 
-    // Waits for the service to actually be in the foreground, not merely for
-    // the request to be queued: the projection below is illegal until it is.
-    final serviceUp = await _channel.invokeMethod<bool>('startService') ?? false;
-    if (!serviceUp) {
-      return const ScreenShareStartResult.failed(ScreenShareFailure.serviceBlocked);
+    if (Platform.isAndroid) {
+      // Android requires a MediaProjection foreground service before capture
+      final serviceUp = await _channel.invokeMethod<bool>('startService') ?? false;
+      if (!serviceUp) {
+        return const ScreenShareStartResult.failed(ScreenShareFailure.serviceBlocked);
+      }
     }
 
     final room = Room(
@@ -119,10 +118,6 @@ class ScreenShareService {
         // participant's video a second time on the same phone.
         adaptiveStream: false,
         dynacast: true,
-        // Spelled out rather than left to the default, because this is the
-        // knob that decides whether a student can read what is on the screen:
-        // a shared screen is mostly still text, so resolution is worth far
-        // more than frame rate. 15fps is what Meet and Zoom present at too.
         defaultScreenShareCaptureOptions: ScreenShareCaptureOptions(
           params: VideoParametersPresets.screenShareH1080FPS15,
         ),
@@ -133,14 +128,14 @@ class ScreenShareService {
       await room.connect(url, token);
       await room.localParticipant?.setScreenShareEnabled(true);
     } catch (_) {
-      // Leave nothing half-started: a foreground service with no capture
-      // behind it is a permanent notification the user can't get rid of.
       try {
         await room.disconnect();
       } catch (_) {}
-      try {
-        await _channel.invokeMethod('stopService');
-      } catch (_) {}
+      if (Platform.isAndroid) {
+        try {
+          await _channel.invokeMethod('stopService');
+        } catch (_) {}
+      }
       return const ScreenShareStartResult.failed(ScreenShareFailure.connectFailed);
     }
 
@@ -182,9 +177,11 @@ class ScreenShareService {
     try {
       await room.dispose();
     } catch (_) {}
-    try {
-      await _channel.invokeMethod('stopService');
-    } catch (_) {}
+    if (Platform.isAndroid) {
+      try {
+        await _channel.invokeMethod('stopService');
+      } catch (_) {}
+    }
 
     if (notify) onEnded?.call();
   }

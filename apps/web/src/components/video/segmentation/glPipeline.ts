@@ -57,14 +57,27 @@ precision highp float;
 in vec2 uv;
 uniform sampler2D u_current;
 uniform sampler2D u_previous;
-uniform float u_blend;      // base blend rate (e.g. 0.15)
+uniform float u_blend;      // time-adjusted blend rate
+uniform vec2 u_texel;
 uniform bool u_reset;       // first frame, or the mask changed size
 uniform bool u_invert;      // invert if channel is background
 out vec4 fragColor;
 
+float currentAt(vec2 point) {
+  float value = texture(u_current, point).r;
+  return u_invert ? 1.0 - value : value;
+}
+
 void main() {
-  float current = texture(u_current, uv).r;
-  if (u_invert) current = 1.0 - current;
+  float current = currentAt(uv);
+  float nearby = (
+    currentAt(uv + vec2(u_texel.x, 0.0)) +
+    currentAt(uv - vec2(u_texel.x, 0.0)) +
+    currentAt(uv + vec2(0.0, u_texel.y)) +
+    currentAt(uv - vec2(0.0, u_texel.y))
+  ) * 0.25;
+  float uncertainty = 1.0 - abs(current * 2.0 - 1.0);
+  current = mix(current, nearby, uncertainty * 0.18);
   float previous = texture(u_previous, uv).r;
 
   // Multi-level motion-adaptive noise gate:
@@ -258,6 +271,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
     temporal: link(gl, temporalShader),
     blur: link(gl, blurShader),
     copy: link(gl, copyShader),
+    copyOutput: link(gl, copyShader, true),
     composite: link(gl, compositeShader, true),
   };
 
@@ -283,6 +297,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
   let maskSize = { width: 0, height: 0 };
   let historyIndex = 0;
   let needsReset = true;
+  let lastMaskUpdate = 0;
 
   let bgTargets: [RenderTarget, RenderTarget] | null = null;
   let bgSize = { width: 0, height: 0 };
@@ -329,6 +344,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
     maskBlur = [createTarget(gl!, width, height), createTarget(gl!, width, height)];
     maskSize = { width, height };
     historyIndex = 0;
+    lastMaskUpdate = 0;
     // Nothing in the new history buffers to average against — the first frame
     // after a resize has to be taken at face value or it fades in from black.
     needsReset = true;
@@ -407,24 +423,29 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
         maskTex = mask;
       }
 
+      const now = performance.now();
+      const elapsedMs = lastMaskUpdate > 0 ? Math.min(250, now - lastMaskUpdate) : 66;
+      const timeAdjustedBlend = 1 - Math.pow(1 - settings.temporalBlend, elapsedMs / 66);
+
       bindQuad(programs.temporal);
       bindTextureUniform(programs.temporal, 'u_current', 0, maskTex);
       bindTextureUniform(programs.temporal, 'u_previous', 1, previous.texture);
-      gl.uniform1f(gl.getUniformLocation(programs.temporal, 'u_blend'), settings.temporalBlend);
+      gl.uniform1f(gl.getUniformLocation(programs.temporal, 'u_blend'), timeAdjustedBlend);
+      gl.uniform2f(gl.getUniformLocation(programs.temporal, 'u_texel'), 1 / width, 1 / height);
       gl.uniform1i(gl.getUniformLocation(programs.temporal, 'u_reset'), needsReset ? 1 : 0);
       gl.uniform1i(gl.getUniformLocation(programs.temporal, 'u_invert'), invert ? 1 : 0);
       drawTo(next);
 
       historyIndex = 1 - historyIndex;
+      lastMaskUpdate = now;
       needsReset = false;
 
       blurPass(next.texture, maskBlur[0], settings.maskFeather, [1, 0]);
       blurPass(maskBlur[0].texture, maskBlur[1], settings.maskFeather, [0, 1]);
     },
 
-    /** Composites the frame over the chosen background using the latest mask. */
-    render(frame: VideoFrame) {
-      if (!maskBlur || !mode) return false;
+    render(frame: VideoFrame, privacyFallback = false) {
+      if (!mode) return false;
 
       gl.activeTexture(gl.TEXTURE0);
       gl.bindTexture(gl.TEXTURE_2D, frameTexture);
@@ -436,9 +457,6 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
 
       if (mode.kind === 'blur') {
         const [a, b] = ensureBackgroundTargets();
-        // Downsample first: blurring at a quarter of the width costs a
-        // sixteenth as much, and nothing about a blurred image survives the
-        // round trip anyway.
         bindQuad(programs.copy);
         bindTextureUniform(programs.copy, 'u_texture', 0, frameTexture);
         drawTo(a);
@@ -448,8 +466,6 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
         blurPass(b.texture, a, sigma, [0, 1]);
         background = a.texture;
       } else {
-        // Cover-fit: crop the long axis rather than squashing a wallpaper that
-        // was drawn 16:9 onto a phone's 9:16 frame.
         const frameAspect = canvas.width / canvas.height;
         if (backgroundAspect > frameAspect) {
           const visible = frameAspect / backgroundAspect;
@@ -461,6 +477,14 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
           offset = [0, (1 - visible) / 2];
         }
       }
+
+      if (privacyFallback) {
+        bindQuad(programs.copyOutput);
+        bindTextureUniform(programs.copyOutput, 'u_texture', 0, background);
+        drawTo(null);
+        return true;
+      }
+      if (!maskBlur) return false;
 
       bindQuad(programs.composite);
       bindTextureUniform(programs.composite, 'u_frame', 0, frameTexture);

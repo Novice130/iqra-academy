@@ -10,6 +10,8 @@ import { subscriptions, plans, invoices, users } from "@/db/schema";
 import { format } from "date-fns";
 import { shouldHidePricing, subscriptionLabel } from "@/lib/pricing-visibility";
 
+import PlanSwitchGrid from "./PlanSwitchGrid";
+
 export default async function BillingPage() {
   return withDb(async () => {
   const headersList = await headers();
@@ -49,17 +51,6 @@ export default async function BillingPage() {
     orderBy: [desc(invoices.createdAt)],
     limit: 10,
   });
-
-  const getPlanFeatures = (plan: typeof plans.$inferSelect) => {
-    const features = [
-      `${plan.classesPerWeek} classes/week`,
-      plan.sessionType === "INDIVIDUAL" ? "1:1 Private lessons" : `${plan.sessionType.toLowerCase()} sessions`,
-      "Dedicated teacher",
-      "Progress reports",
-    ];
-    if (plan.tier === "SIBLINGS") features.push(`Up to ${plan.maxStudents} siblings`);
-    return features;
-  };
 
   return (
     <div className="p-6 lg:p-10 max-w-4xl">
@@ -108,60 +99,17 @@ export default async function BillingPage() {
         )}
       </section>
 
-      {/* Plan options. Hidden entirely when the org has none configured —
-          otherwise the heading sits above nothing, which reads as a page that
-          failed to load rather than one with nothing to show. */}
+      {/* Plan options */}
       {availablePlans.length > 0 && (
       <section className="mb-8">
         <h2 className="text-sm font-semibold uppercase tracking-widest mb-4" style={{ color: "var(--text-tertiary)" }}>
           Available Plans
         </h2>
-        <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {availablePlans.map((plan) => {
-            const isCurrent = activeSub?.planId === plan.id;
-            const features = getPlanFeatures(plan);
-            return (
-              <div
-                key={plan.id}
-                className="card p-5 relative"
-                style={{
-                  border: isCurrent ? "2px solid var(--accent)" : undefined,
-                }}
-              >
-                {isCurrent && (
-                  <div className="absolute -top-2.5 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-bold text-white" style={{ background: "var(--accent)" }}>
-                    CURRENT
-                  </div>
-                )}
-                <div className="text-sm font-semibold mb-1" style={{ color: "var(--text-primary)" }}>{plan.name}</div>
-                {!hidePricing && (
-                  <div className="mb-3">
-                    <span className="text-2xl font-bold" style={{ color: "var(--accent)" }}>${plan.priceInCents / 100}</span>
-                    <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>/mo</span>
-                  </div>
-                )}
-                <ul className="space-y-1.5 mb-4">
-                  {features.map((f) => (
-                    <li key={f} className="text-xs flex items-start gap-1.5" style={{ color: "var(--text-secondary)" }}>
-                      <span style={{ color: "var(--accent)" }}>✓</span> {f}
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  className="w-full py-2 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
-                  style={{
-                    background: isCurrent ? "var(--bg-secondary)" : "var(--accent)",
-                    color: isCurrent ? "var(--text-tertiary)" : "#fff",
-                    border: isCurrent ? "1px solid var(--border)" : undefined,
-                  }}
-                  disabled={isCurrent}
-                >
-                  {isCurrent ? "Current Plan" : "Switch Plan"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
+        <PlanSwitchGrid
+          plans={availablePlans}
+          currentPlanId={activeSub?.planId}
+          hidePricing={hidePricing}
+        />
       </section>
       )}
 

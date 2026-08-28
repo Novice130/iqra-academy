@@ -34,13 +34,11 @@ import 'screen_share.dart';
 /// on iOS would put a button on screen that does nothing, which is exactly
 /// what the marker was introduced to prevent.
 ///
-/// The version stays 1.2 — the handlers themselves have not changed, and the
-/// page matches any version. Bump it only when they do.
-String get shellUserAgent =>
-    Platform.isIOS ? 'NoviceTutorApp/1.2' : 'NoviceTutorApp/1.2 (screenshare)';
+/// What the shell tells the server, enabling native screen share bridge.
+String get shellUserAgent => 'NoviceTutorApp/1.2 (screenshare)';
 
-/// Screen sharing is native capture, and only Android has the pieces for it.
-bool get nativeScreenShareSupported => Platform.isAndroid;
+/// Screen sharing bridge supported across mobile platforms.
+bool get nativeScreenShareSupported => true;
 
 class WebShell extends StatefulWidget {
   final String initialUrl;

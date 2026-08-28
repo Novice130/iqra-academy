@@ -61,15 +61,21 @@ export default function VideoTile({
 
   useEffect(() => {
     if (!menuOpen) return;
-    const close = (e: MouseEvent) => {
+    const close = (e: Event) => {
       const target = e.target as Node;
       if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
       setMenuOpen(false);
       setRenaming(false);
       setConfirmRemove(false);
     };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
+    window.addEventListener('pointerdown', close, true);
+    window.addEventListener('touchstart', close, true);
+    window.addEventListener('mousedown', close, true);
+    return () => {
+      window.removeEventListener('pointerdown', close, true);
+      window.removeEventListener('touchstart', close, true);
+      window.removeEventListener('mousedown', close, true);
+    };
   }, [menuOpen]);
 
   useLayoutEffect(() => {
@@ -245,22 +251,38 @@ export default function VideoTile({
           </button>
 
           {menuOpen && typeof document !== 'undefined' && createPortal(
-            <div
-              ref={menuRef}
-              className="fixed z-[80] rounded-3xl overflow-hidden"
-              style={{
-                top: menuPos?.top ?? -9999,
-                left: menuPos?.left ?? -9999,
-                width: `min(${MENU_WIDTH}px, calc(100vw - 16px))`,
-                visibility: menuPos ? 'visible' : 'hidden',
-                background: 'rgba(24, 26, 32, 0.90)',
-                backdropFilter: 'blur(28px) saturate(180%)',
-                WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-                border: '1px solid rgba(255, 255, 255, 0.16)',
-                boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
-              }}
-              onPointerDown={(e) => e.stopPropagation()}
-            >
+            <>
+              <div
+                className="fixed inset-0 z-[79]"
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  setRenaming(false);
+                  setConfirmRemove(false);
+                }}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  setRenaming(false);
+                  setConfirmRemove(false);
+                }}
+              />
+              <div
+                ref={menuRef}
+                className="fixed z-[80] rounded-3xl overflow-hidden"
+                style={{
+                  top: menuPos?.top ?? -9999,
+                  left: menuPos?.left ?? -9999,
+                  width: `min(${MENU_WIDTH}px, calc(100vw - 16px))`,
+                  visibility: menuPos ? 'visible' : 'hidden',
+                  background: 'rgba(24, 26, 32, 0.90)',
+                  backdropFilter: 'blur(28px) saturate(180%)',
+                  WebkitBackdropFilter: 'blur(28px) saturate(180%)',
+                  border: '1px solid rgba(255, 255, 255, 0.16)',
+                  boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.12)',
+                }}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
               {renaming ? (
                 <div className="p-3">
                   <input
@@ -393,7 +415,8 @@ export default function VideoTile({
                   )}
                 </div>
               )}
-            </div>,
+            </div>
+            </>,
             document.body
           )}
         </>

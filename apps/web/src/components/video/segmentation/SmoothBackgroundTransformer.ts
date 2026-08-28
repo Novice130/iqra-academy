@@ -16,6 +16,7 @@ import * as vision from '@mediapipe/tasks-vision';
 import { VideoTransformer } from '@livekit/track-processors';
 import type { VideoTransformerInitOptions } from '@livekit/track-processors';
 import { createPipeline, DEFAULT_SETTINGS, type Pipeline, type PipelineSettings } from './glPipeline';
+import { SegmentationWorkerClient, type WorkerMask } from './SegmentationWorkerClient';
 
 /**
  * Both the WASM and the model are served from our own origin.
@@ -116,6 +117,12 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   private isInferring = false;
   private inferenceCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private inferenceCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
+  private worker: SegmentationWorkerClient | null = null;
+  private generation = 0;
+  private inferenceSequence = 0;
+  private acceptedSequence = 0;
+  private lastMaskTime = 0;
+  private workerFailureReported = false;
 
   constructor(options: SmoothBackgroundOptions) {
     super();
@@ -128,18 +135,92 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   }
 
   private setupInferenceCanvas() {
-    const INFER_W = 256;
-    const INFER_H = 144;
+    const size = this.quality === 'detailed' ? 256 : 144;
     if (typeof OffscreenCanvas !== 'undefined') {
-      this.inferenceCanvas = new OffscreenCanvas(INFER_W, INFER_H);
+      this.inferenceCanvas = new OffscreenCanvas(256, size);
     } else if (typeof document !== 'undefined') {
       this.inferenceCanvas = document.createElement('canvas');
-      this.inferenceCanvas.width = INFER_W;
-      this.inferenceCanvas.height = INFER_H;
+      this.inferenceCanvas.width = 256;
+      this.inferenceCanvas.height = size;
     }
     this.inferenceCtx = this.inferenceCanvas
-      ? (this.inferenceCanvas.getContext('2d') as any)
+      ? (this.inferenceCanvas.getContext('2d', { alpha: false }) as typeof this.inferenceCtx)
       : null;
+  }
+
+  private async initializeInference() {
+    if (typeof Worker !== 'undefined' && typeof VideoFrame !== 'undefined') {
+      try {
+        const worker = new SegmentationWorkerClient(
+          this.quality,
+          (mask) => this.acceptWorkerMask(mask),
+          (message) => this.fallbackFromWorker(message)
+        );
+        await worker.init();
+        this.worker = worker;
+        return;
+      } catch (error) {
+        console.warn('Background worker unavailable, using reduced main-thread inference', error);
+      }
+    }
+
+    await this.initializeMainThreadSegmenter();
+  }
+
+  private async initializeMainThreadSegmenter() {
+    if (this.segmenter) return;
+    const canvas = this.inferenceCanvas;
+    if (!canvas) throw new Error('Background inference canvas is unavailable');
+    const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
+    try {
+      this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
+        baseOptions: { modelAssetPath: MODELS[this.quality], delegate: 'GPU' },
+        canvas,
+        runningMode: 'VIDEO',
+        outputCategoryMask: false,
+        outputConfidenceMasks: true,
+      });
+    } catch {
+      this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
+        baseOptions: { modelAssetPath: MODELS[this.quality] },
+        canvas,
+        runningMode: 'VIDEO',
+        outputCategoryMask: false,
+        outputConfidenceMasks: true,
+      });
+    }
+  }
+
+  private fallbackFromWorker(message: string) {
+    if (!this.worker) return;
+    this.worker.close();
+    this.worker = null;
+    this.isInferring = false;
+    if (!this.workerFailureReported) {
+      this.workerFailureReported = true;
+      console.warn('Background worker failed, using reduced main-thread inference:', message);
+    }
+    void this.initializeMainThreadSegmenter().catch((error) => {
+      console.error('Background fallback inference failed', error);
+      this.options.onError?.('Background segmentation slowed down — keeping your room hidden.');
+    });
+  }
+
+  private acceptWorkerMask(mask: WorkerMask) {
+    this.isInferring = false;
+    if (mask.generation !== this.generation || mask.sequence <= this.acceptedSequence || !this.pipeline) return;
+    this.acceptedSequence = mask.sequence;
+    this.lastMaskTime = performance.now();
+    this.adaptInferenceGap(mask.durationMs);
+    this.pipeline.updateMask(mask.data, mask.width, mask.height, mask.invert);
+  }
+
+  private adaptInferenceGap(durationMs: number) {
+    if (durationMs > 22) {
+      this.inferenceGapMs = Math.min(120, this.inferenceGapMs + 6);
+    } else if (durationMs < 12 && this.inferenceGapMs > 66) {
+      this.inferenceGapMs = Math.max(66, this.inferenceGapMs - 3);
+    }
   }
 
   async init({ outputCanvas, inputElement: inputVideo }: VideoTransformerInitOptions) {
@@ -161,41 +242,31 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     if (!this.pipeline) throw new Error('WebGL2 is unavailable');
 
     this.setupInferenceCanvas();
-
-    const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
-    this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
-      baseOptions: { modelAssetPath: MODELS[this.quality], delegate: 'GPU' },
-      canvas: outputCanvas, // Share WebGL2 context
-      runningMode: 'VIDEO',
-      // Confidence, not category. This is the whole point: a category mask is
-      // a per-pixel yes/no and there is no such thing as a soft edge in one.
-      outputCategoryMask: false,
-      outputConfidenceMasks: true,
-    });
+    await this.initializeInference();
 
     await this.applyMode();
     if (this.options.settings) this.pipeline.setSettings(this.options.settings);
   }
 
   async restart(opts: VideoTransformerInitOptions) {
-    // A new track means a new canvas, and the pipeline holds textures and
-    // framebuffers belonging to the old one.
+    this.generation += 1;
+    this.acceptedSequence = 0;
+    this.lastMaskTime = 0;
+    this.isInferring = false;
     this.pipeline?.destroy();
     this.pipeline = createPipeline(opts.outputCanvas);
     this.canvas = opts.outputCanvas;
     this.inputVideo = opts.inputElement;
     this.isDisabled = false;
-    this.setupInferenceCanvas();
     await this.applyMode();
     if (this.options.settings) this.pipeline?.setSettings(this.options.settings);
-    if (this.segmenter) {
-      await this.segmenter.setOptions({ canvas: opts.outputCanvas });
-    }
   }
-
 
   async destroy() {
     this.isDisabled = true;
+    this.generation += 1;
+    this.worker?.close();
+    this.worker = null;
     await this.segmenter?.close();
     this.segmenter = undefined;
     this.pipeline?.destroy();
@@ -248,16 +319,69 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.pipeline.setMode(null);
   }
 
+  private requestInference(frame: VideoFrame, now: number) {
+    const timestamp = Math.max(this.lastTimestamp + 1, now);
+    const sequence = ++this.inferenceSequence;
+    this.lastTimestamp = timestamp;
+
+    if (this.worker) {
+      const accepted = this.worker.segment(
+        new VideoFrame(frame),
+        this.generation,
+        sequence,
+        timestamp
+      );
+      if (accepted) {
+        this.lastInferenceTime = now;
+        this.isInferring = true;
+      }
+      return;
+    }
+
+    if (!this.segmenter || !this.inferenceCanvas || !this.inferenceCtx || this.isInferring) return;
+    this.lastInferenceTime = now;
+    this.isInferring = true;
+    this.inferenceCtx.drawImage(
+      frame,
+      0,
+      0,
+      this.inferenceCanvas.width,
+      this.inferenceCanvas.height
+    );
+    const generation = this.generation;
+    const startedAt = performance.now();
+
+    try {
+      this.segmenter.segmentForVideo(this.inferenceCanvas, timestamp, (result) => {
+        try {
+          if (generation !== this.generation || !this.pipeline) return;
+          const masks = result.confidenceMasks;
+          const mask = masks?.[0];
+          if (!mask || sequence <= this.acceptedSequence) return;
+          const data = new Uint8Array(mask.getAsUint8Array());
+          this.acceptedSequence = sequence;
+          this.lastMaskTime = performance.now();
+          this.adaptInferenceGap(performance.now() - startedAt);
+          this.pipeline.updateMask(data, mask.width, mask.height, masks.length > 1);
+        } finally {
+          result.close();
+          this.isInferring = false;
+        }
+      });
+    } catch (error) {
+      this.isInferring = false;
+      console.error('Reduced background inference failed', error);
+    }
+  }
+
   transform(frame: VideoFrame, controller: TransformStreamDefaultController<VideoFrame>) {
     // Two separate questions, and conflating them leaks frames: `handled` is
     // whether anything at all was enqueued, `passedThrough` is whether the
     // *incoming* frame was the thing enqueued — in which case the stream owns
     // it now and closing it here would pull it out from under the encoder.
-    let handled = false;
     let passedThrough = false;
     const passThrough = () => {
       controller.enqueue(frame);
-      handled = true;
       passedThrough = true;
     };
 
@@ -266,14 +390,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         return;
       }
 
-      // Add a resolution floor — if the incoming frame is below 320p wide,
-      // pass through unprocessed to break the WebRTC degradation spiral.
-      if (frame.displayWidth < 320) {
-        passThrough();
-        return;
-      }
-
-      if (this.isDisabled || !this.effectActive || !this.pipeline || !this.segmenter) {
+      if (this.isDisabled || !this.effectActive || !this.pipeline) {
         passThrough();
         return;
       }
@@ -286,65 +403,21 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
       }
 
       const now = performance.now();
-      const shouldRunInference =
-        (now - this.lastInferenceTime >= this.inferenceGapMs && !this.isInferring) ||
-        !this.pipeline.ready;
-
-      if (shouldRunInference && this.segmenter) {
-        this.lastInferenceTime = now;
-        this.isInferring = true;
-        const timestamp = Math.max(this.lastTimestamp + 1, now);
-        this.lastTimestamp = timestamp;
-
-        // Downscale frame to 256x144 for ultra-fast GPU/CPU neural network inference
-        const startTime = performance.now();
-        this.segmenter.segmentForVideo(frame, timestamp, (result) => {
-          const inferDuration = performance.now() - startTime;
-          // Dynamically adapt inference frequency: if device is slow (>22ms per inference),
-          // reduce inference rate slightly (up to 120ms gap ~8fps) to keep main thread & audio lag-free!
-          if (inferDuration > 22) {
-            this.inferenceGapMs = Math.min(120, this.inferenceGapMs + 6);
-          } else if (inferDuration < 12 && this.inferenceGapMs > 66) {
-            this.inferenceGapMs = Math.max(66, this.inferenceGapMs - 3);
-          }
-
-          const masks = result.confidenceMasks;
-          const mask = masks?.[0];
-          if (mask) {
-            const invert = masks.length > 1;
-            if (mask.hasWebGLTexture()) {
-              try {
-                const glTex = mask.getAsWebGLTexture();
-                this.pipeline!.updateMask(glTex, mask.width, mask.height, invert);
-              } catch (e) {
-                console.warn('Failed to get WebGLTexture from MediaPipe, falling back to CPU', e);
-                const u8 = mask.getAsUint8Array();
-                this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
-              }
-            } else {
-              const u8 = mask.getAsUint8Array();
-              this.pipeline!.updateMask(u8, mask.width, mask.height, invert);
-            }
-          }
-          result.close();
-          this.isInferring = false;
-        });
+      if (now - this.lastInferenceTime >= this.inferenceGapMs && !this.isInferring) {
+        this.requestInference(frame, now);
       }
 
-      if (canvas.width !== frame.displayWidth || canvas.height !== frame.displayHeight) {
-        canvas.width = frame.displayWidth;
-        canvas.height = frame.displayHeight;
-      }
-
-      if (this.pipeline.ready && this.pipeline.render(frame)) {
-        controller.enqueue(new VideoFrame(canvas, { timestamp: frame.timestamp ?? 0 }));
-        handled = true;
-      } else {
-        passThrough();
+      const maskIsFresh = this.pipeline.ready && now - this.lastMaskTime <= 750;
+      if (this.pipeline.render(frame, !maskIsFresh)) {
+        controller.enqueue(
+          new VideoFrame(canvas, {
+            timestamp: frame.timestamp ?? 0,
+            duration: frame.duration ?? undefined,
+          })
+        );
       }
     } catch (err) {
       console.error('Background effect frame failed', err);
-      if (!handled) passThrough();
     } finally {
       if (!passedThrough) frame.close();
     }

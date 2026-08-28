@@ -324,7 +324,7 @@ export default function PeoplePanel({
 
   return (
     <>
-      <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm" onPointerDown={onClose} onClick={onClose} />
       <div
         className="fixed left-1/2 -translate-x-1/2 bottom-[84px] sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[71] flex flex-col rounded-3xl overflow-hidden shadow-2xl animate-fadeIn"
         style={{
