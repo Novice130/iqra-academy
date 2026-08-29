@@ -7,6 +7,7 @@
  */
 
 import { useState } from 'react';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 export default function CopyLinkButton({
   path,
@@ -19,19 +20,12 @@ export default function CopyLinkButton({
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
-    const url = `${window.location.origin}${path}`;
-    try {
-      await navigator.clipboard.writeText(url);
-    } catch {
-      const el = document.createElement('textarea');
-      el.value = url;
-      document.body.appendChild(el);
-      el.select();
-      document.execCommand('copy');
-      document.body.removeChild(el);
+    const url = typeof window !== 'undefined' ? `${window.location.origin}${path}` : path;
+    const ok = await copyTextToClipboard(url);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   return (

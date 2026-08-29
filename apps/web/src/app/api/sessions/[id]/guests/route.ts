@@ -21,11 +21,17 @@ import { resolveClassRoom } from "@/lib/class-room";
 const KNOCK_WINDOW_MS = 10 * 60 * 1000;
 
 function normalizeJoinCode(code: string) {
-  const clean = code.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  if (!code) return code;
+  const trimmed = code.trim();
+  const digitsOnly = trimmed.replace(/\D/g, '');
+  if (digitsOnly.length === 12) {
+    return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+  }
+  const clean = trimmed.replace(/[^a-zA-Z]/g, '').toLowerCase();
   if (clean.length === 12) {
     return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;
   }
-  return code;
+  return trimmed;
 }
 
 async function assertHost(request: NextRequest, sessionIdRaw: string) {
@@ -34,9 +40,18 @@ async function assertHost(request: NextRequest, sessionIdRaw: string) {
   const ctx = authResult;
 
   const sessionId = normalizeJoinCode(sessionIdRaw);
+  const rawTrimmed = (sessionIdRaw || "").trim();
+  const rawClean = rawTrimmed.replace(/[\s-]/g, "");
 
   const session = await db.query.sessions.findFirst({
-    where: or(eq(sessions.id, sessionId), eq(sessions.joinCode, sessionId)),
+    where: or(
+      eq(sessions.id, sessionId),
+      eq(sessions.joinCode, sessionId),
+      eq(sessions.joinCode, rawTrimmed),
+      eq(sessions.joinCode, rawClean),
+      eq(sessions.id, rawTrimmed),
+      eq(sessions.id, rawClean)
+    ),
     with: { bookings: true },
   });
   if (!session) throw new NotFoundError("Session");

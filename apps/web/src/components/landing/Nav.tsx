@@ -63,6 +63,13 @@ export default function Nav() {
 
             <div className="hidden md:flex items-center gap-3">
               <Link
+                href="/join"
+                className="rounded-full px-3.5 py-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 transition-colors flex items-center gap-1.5"
+              >
+                <span>📹</span>
+                <span>Join Class</span>
+              </Link>
+              <Link
                 href="/login"
                 className="rounded-full px-4 py-2 text-sm font-medium transition-colors hover:bg-slate-100"
                 style={{ color: "var(--text-secondary)" }}
@@ -75,6 +82,12 @@ export default function Nav() {
             </div>
 
             <div className="flex md:hidden items-center gap-2">
+              <Link
+                href="/join"
+                className="rounded-full px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200"
+              >
+                Join
+              </Link>
               <Link
                 href="/login"
                 className="rounded-full px-3 py-1.5 text-xs font-semibold border border-slate-200 bg-white text-slate-700 transition-colors hover:bg-slate-50"
@@ -141,6 +154,13 @@ export default function Nav() {
                   </a>
                 ))}
                 <div className="pt-2 flex flex-col gap-2">
+                  <Link
+                    href="/join"
+                    onClick={() => setMenuOpen(false)}
+                    className="block text-center rounded-2xl px-4 py-2.5 text-sm font-semibold border border-emerald-300 bg-emerald-50 text-emerald-800"
+                  >
+                    📹 Join Class / Meeting
+                  </Link>
                   <Link
                     href="/login"
                     onClick={() => setMenuOpen(false)}

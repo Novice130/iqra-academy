@@ -34,6 +34,7 @@ import { useBackgroundEffects, BackgroundEffectsContent, type EffectSelection } 
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import { gainForSlider } from '@/lib/audio-gain';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 function useLiveRoomMetadata(): string | undefined {
   const room = useRoomContext();
@@ -478,12 +479,10 @@ export default function CustomVideoConference({
   }, [joinCode, sessionId, sessionTitle, teacherName, teacherIdentity]);
 
   const copyToClipboard = useCallback(async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2500);
-    } catch {
-      // Fallback
     }
   }, []);
 
@@ -1348,6 +1347,9 @@ export default function CustomVideoConference({
         {peopleOpen && (
           <PeoplePanel
             sessionId={sessionId}
+            joinCode={joinCode}
+            sessionTitle={sessionTitle}
+            teacherName={teacherName}
             isModerator={isModerator}
             spotlightIdentity={focusIdentity}
             onSpotlight={handleSpotlight}

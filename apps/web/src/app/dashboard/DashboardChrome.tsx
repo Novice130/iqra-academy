@@ -104,6 +104,7 @@ export default function DashboardChrome({
             <SidebarItem href="/dashboard/chat" label="Messages" />
           )}
           <SidebarItem href="/dashboard/schedule" label="Schedule" />
+          <SidebarItem href="/join" label="📹 Join with Code" />
 
           <div className="pt-5 pb-1.5 px-3">
             <div
@@ -290,6 +291,7 @@ export default function DashboardChrome({
                     <SidebarItem href="/dashboard/chat" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
                   )}
                   <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
+                  <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
                   <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
                   <SidebarItem href="/dashboard/billing" label="Billing" onNavigate={() => setMobileMenuOpen(false)} />
 

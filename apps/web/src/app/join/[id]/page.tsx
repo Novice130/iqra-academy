@@ -8,9 +8,10 @@
  * does the server hand out a LiveKit token (see /api/guest/join).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Spinner from '@/components/Spinner';
 import { useParams, useRouter } from 'next/navigation';
+import Link from 'next/link';
 import type { JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 import { authClient } from '@/lib/auth-client';
@@ -25,9 +26,24 @@ export default function GuestJoinPage() {
   const params = useParams();
   const router = useRouter();
   const rawId = params.id as string;
-  const sessionId = rawId?.trim();
+  const sessionId = typeof rawId === 'string' ? decodeURIComponent(rawId).trim() : '';
+
+  const displayMeetingId = useMemo(() => {
+    if (!sessionId) return '';
+    const digitsOnly = sessionId.replace(/\D/g, '');
+    if (digitsOnly.length === 12) {
+      return `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
+    }
+    const alphaOnly = sessionId.replace(/[^a-zA-Z]/g, '').toLowerCase();
+    if (alphaOnly.length === 12) {
+      return `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
+    }
+    return sessionId;
+  }, [sessionId]);
 
   const [canonicalSessionId, setCanonicalSessionId] = useState(sessionId);
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
+  const [teacherName, setTeacherName] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>('form');
   const [name, setName] = useState('');
   const [knocking, setKnocking] = useState(false);
@@ -177,6 +193,8 @@ export default function GuestJoinPage() {
       }
 
       requestIdRef.current = data.requestId;
+      if (data.sessionTitle) setSessionTitle(data.sessionTitle);
+      if (data.teacherName) setTeacherName(data.teacherName);
       setMessage(
         data.teacherName ? `${data.teacherName} will let you in shortly.` : 'The host will let you in shortly.'
       );
@@ -195,6 +213,9 @@ export default function GuestJoinPage() {
         token={token}
         url={serverUrl}
         sessionId={canonicalSessionId || sessionId}
+        joinCode={canonicalSessionId || sessionId}
+        sessionTitle={sessionTitle}
+        teacherName={teacherName}
         isModerator={false}
         // A guest is never the host: leaving must not end the class.
         isHost={false}
@@ -216,10 +237,16 @@ export default function GuestJoinPage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-6" style={{ background: '#131417' }}>
       <div
-        className="w-full max-w-sm rounded-2xl p-7 text-center"
-        style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.12)' }}
+        className="w-full max-w-sm rounded-3xl p-7 text-center shadow-2xl"
+        style={{
+          background: 'rgba(28, 30, 36, 0.94)',
+          backdropFilter: 'blur(32px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+          border: '1px solid rgba(255,255,255,0.18)',
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+        }}
       >
-        <img src="/logo.png?v=3" alt="Novice Tutor" className="w-12 h-12 object-contain mx-auto mb-4" />
+        <img src="/logo.png?v=3" alt="Novice Tutor" className="w-12 h-12 object-contain mx-auto mb-3" />
 
         {stage === 'waiting' ? (
           <>
@@ -227,15 +254,20 @@ export default function GuestJoinPage() {
               className="mx-auto mb-4 w-12 h-12 rounded-full"
               style={{ border: '3px solid rgba(138,180,248,0.25)', borderTopColor: '#8ab4f8', animation: 'lk-spin 900ms linear infinite' }}
             />
-            <h1 className="text-lg font-semibold text-white">Asking to be let in…</h1>
-            <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            <h1 className="text-lg font-bold text-white tracking-tight">Asking to be let in…</h1>
+            {displayMeetingId && (
+              <p className="text-xs font-mono text-emerald-400 mt-1">
+                Meeting ID: {displayMeetingId}
+              </p>
+            )}
+            <p className="text-sm mt-2 text-white/60">
               {message}
             </p>
           </>
         ) : stage === 'denied' ? (
           <>
-            <h1 className="text-lg font-semibold text-white">You weren&apos;t let in</h1>
-            <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            <h1 className="text-lg font-bold text-white tracking-tight">You weren&apos;t let in</h1>
+            <p className="text-sm mt-1 text-white/60">
               {deniedReason ?? 'The host didn’t admit you to this class.'}
             </p>
             <button
@@ -245,16 +277,26 @@ export default function GuestJoinPage() {
                 setDeniedReason(null);
                 setStage('form');
               }}
-              className="mt-6 w-full py-3 rounded-full text-sm font-semibold cursor-pointer"
-              style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
+              className="mt-6 w-full py-3 rounded-2xl text-sm font-semibold cursor-pointer transition active:scale-95 bg-white/10 text-white hover:bg-white/15"
             >
               Ask again
             </button>
+            <div className="mt-4">
+              <Link href="/join" className="text-xs text-white/50 hover:text-white/80 transition-colors">
+                Enter a different meeting ID →
+              </Link>
+            </div>
           </>
         ) : (
           <>
-            <h1 className="text-lg font-semibold text-white">Join the class</h1>
-            <p className="text-sm mt-1 mb-5" style={{ color: 'rgba(255,255,255,0.55)' }}>
+            <h1 className="text-lg font-bold text-white tracking-tight">Join the class</h1>
+            {displayMeetingId && (
+              <div className="my-2.5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-400/20 text-emerald-400 text-xs font-mono font-semibold">
+                <span className="text-white/50 font-sans">Meeting ID:</span>
+                <span>{displayMeetingId}</span>
+              </div>
+            )}
+            <p className="text-xs mt-1 mb-5 text-white/60">
               Enter your name. The host will let you in.
             </p>
             <input
@@ -263,20 +305,23 @@ export default function GuestJoinPage() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && name.trim().length >= 2) knock();
               }}
-              placeholder="Your name"
-              className="w-full px-3.5 py-3 rounded-xl text-sm"
-              style={{ background: '#2a2d33', color: '#e8eaed', border: '1px solid rgba(255,255,255,0.14)' }}
+              placeholder="Your full name"
+              autoFocus
+              className="w-full px-4 py-3 rounded-2xl text-sm bg-black/40 text-white border border-white/15 focus:outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-400/20 transition-all placeholder:text-white/30"
             />
             {message && stage === 'error' && (
-              <p className="text-xs mt-3" style={{ color: '#f6a6a0' }}>
+              <p className="text-xs mt-3 text-red-300">
                 {message}
               </p>
             )}
             <button
               onClick={() => knock()}
               disabled={name.trim().length < 2 || knocking}
-              className="mt-4 w-full py-3 rounded-full text-sm font-semibold cursor-pointer disabled:opacity-40 flex items-center justify-center gap-2"
-              style={{ background: '#8ab4f8', color: '#202124' }}
+              className="mt-4 w-full py-3 rounded-2xl text-sm font-bold text-white cursor-pointer transition-all active:scale-95 disabled:opacity-40 flex items-center justify-center gap-2"
+              style={{
+                background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+                boxShadow: '0 4px 14px rgba(0, 122, 255, 0.4)',
+              }}
             >
               {knocking ? (
                 <>
@@ -286,6 +331,11 @@ export default function GuestJoinPage() {
                 'Ask to join'
               )}
             </button>
+            <div className="mt-5 pt-4 border-t border-white/10">
+              <Link href="/join" className="text-xs text-white/50 hover:text-white/80 transition-colors">
+                Have a different meeting code? Join another class →
+              </Link>
+            </div>
           </>
         )}
       </div>

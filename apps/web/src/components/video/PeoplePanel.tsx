@@ -6,12 +6,13 @@
  * spotlight, mute, student volume sliders, student ringing, and invite links.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const POLL_INTERVAL_MS = 5000;
 const RING_TIMEOUT_MS = 45000;
@@ -242,39 +243,126 @@ function RingStudents({ sessionId }: { sessionId: string }) {
   );
 }
 
-function InviteGuest({ sessionId }: { sessionId: string }) {
-  const [copied, setCopied] = useState(false);
-  const link = typeof window === 'undefined' ? '' : `${window.location.origin}/join/${sessionId}`;
+function InviteGuest({
+  sessionId,
+  joinCode,
+  sessionTitle,
+  teacherName,
+}: {
+  sessionId: string;
+  joinCode?: string | null;
+  sessionTitle?: string | null;
+  teacherName?: string | null;
+}) {
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
 
-  const copy = () => {
-    navigator.clipboard
-      .writeText(link)
-      .then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
-      })
-      .catch(() => {});
+  const meetingInfo = useMemo(() => {
+    const rawCode = (joinCode || sessionId || '').trim();
+    const digitsOnly = rawCode.replace(/\D/g, '');
+    let displayMeetingId = rawCode;
+    let urlCode = rawCode;
+
+    if (digitsOnly.length === 12) {
+      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
+      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+    } else {
+      const alphaOnly = rawCode.replace(/[^a-zA-Z]/g, '').toLowerCase();
+      if (alphaOnly.length === 12) {
+        displayMeetingId = `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
+        urlCode = `${alphaOnly.slice(0, 4)}-${alphaOnly.slice(4, 8)}-${alphaOnly.slice(8, 12)}`;
+      }
+    }
+
+    const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://novicetutor.com';
+    const inviteUrl = `${baseUrl}/join/${urlCode}`;
+    const fullInvitation = `Join Novice Tutor Live Class\nTopic: ${sessionTitle || 'Quran & Islamic Studies'}\n${teacherName ? `Teacher: ${teacherName}\n` : ''}Meeting ID: ${displayMeetingId}\nInvite Link: ${inviteUrl}\n\n* Note: Anyone with this link or code can request to join. Guests wait in the waiting room until the host admits them.`;
+
+    return {
+      displayMeetingId,
+      inviteUrl,
+      fullInvitation,
+    };
+  }, [joinCode, sessionId, sessionTitle, teacherName]);
+
+  const copy = async (text: string, key: string) => {
+    const ok = await copyTextToClipboard(text);
+    if (ok) {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2500);
+    }
   };
 
   return (
-    <div className="pb-4 mb-2 border-b border-white/10">
-      <div className="px-1 pb-2 text-[11px] font-semibold uppercase tracking-wider text-white/45">
-        Invite guest to class
+    <div className="pb-4 mb-3 border-b border-white/10 space-y-3">
+      <div className="px-1 text-[11px] font-bold uppercase tracking-wider text-emerald-400 flex items-center justify-between">
+        <span>Invite Guest / Share Class</span>
+        <span className="text-[10px] text-white/40 normal-case font-normal">Zoom-style access</span>
       </div>
+
+      {/* 1. Meeting ID / Join Code */}
+      <div className="p-3 rounded-2xl bg-white/[0.05] border border-white/[0.08] space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">Meeting ID / Code</span>
+          <button
+            type="button"
+            onClick={() => copy(meetingInfo.displayMeetingId, 'id')}
+            className="px-2.5 py-1 rounded-xl text-[11px] font-semibold cursor-pointer transition active:scale-95"
+            style={{
+              background: copiedKey === 'id' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
+              color: copiedKey === 'id' ? '#6ee7b7' : '#ffffff',
+            }}
+          >
+            {copiedKey === 'id' ? '✓ Copied ID' : 'Copy ID'}
+          </button>
+        </div>
+        <div className="text-base font-bold font-mono tracking-wider text-emerald-400 select-all">
+          {meetingInfo.displayMeetingId}
+        </div>
+      </div>
+
+      {/* 2. Guest Join Link (Visible URL & Copy Button) */}
+      <div className="p-3 rounded-2xl bg-white/[0.05] border border-white/[0.08] space-y-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-white/50">Guest Join Link</span>
+          <button
+            type="button"
+            onClick={() => copy(meetingInfo.inviteUrl, 'link')}
+            className="px-2.5 py-1 rounded-xl text-[11px] font-semibold cursor-pointer transition active:scale-95"
+            style={{
+              background: copiedKey === 'link' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(59, 130, 246, 0.35)',
+              color: copiedKey === 'link' ? '#6ee7b7' : '#93c5fd',
+            }}
+          >
+            {copiedKey === 'link' ? '✓ Copied Link' : 'Copy Link'}
+          </button>
+        </div>
+        <input
+          type="text"
+          readOnly
+          value={meetingInfo.inviteUrl}
+          onClick={(e) => (e.target as HTMLInputElement).select()}
+          className="w-full px-2.5 py-1.5 rounded-xl text-xs font-mono bg-black/40 text-white/80 border border-white/10 focus:outline-none focus:border-blue-400 select-all cursor-pointer"
+        />
+      </div>
+
+      {/* 3. Copy Full Invitation Button */}
       <button
-        onClick={copy}
-        className="w-full py-2.5 rounded-2xl text-xs font-bold cursor-pointer transition active:scale-95"
+        type="button"
+        onClick={() => copy(meetingInfo.fullInvitation, 'all')}
+        className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 shadow-md"
         style={{
-          background: copied ? 'rgba(52, 201, 138, 0.2)' : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
-          color: copied ? '#34c98a' : '#fff',
-          border: copied ? '1px solid rgba(52, 201, 138, 0.4)' : '1px solid rgba(255, 255, 255, 0.2)',
-          boxShadow: copied ? 'none' : '0 4px 14px rgba(0, 122, 255, 0.35)',
+          background:
+            copiedKey === 'all'
+              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.85), rgba(5, 150, 105, 0.85))'
+              : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+          boxShadow: copiedKey === 'all' ? '0 4px 14px rgba(16, 185, 129, 0.35)' : '0 4px 14px rgba(0, 122, 255, 0.35)',
         }}
       >
-        {copied ? '✓ Guest link copied' : 'Copy guest invite link'}
+        <span>{copiedKey === 'all' ? '✓ Full Invitation Copied!' : '📋 Copy Full Invitation'}</span>
       </button>
-      <p className="mt-2 px-1 text-[11px] leading-4 text-white/40">
-        Anyone with this link can request to join. Host admits from live room.
+
+      <p className="px-1 text-[11px] leading-relaxed text-white/40">
+        🛡️ Anyone can enter this code or link. Guests wait in the waiting room until you admit them.
       </p>
     </div>
   );
@@ -282,6 +370,9 @@ function InviteGuest({ sessionId }: { sessionId: string }) {
 
 export default function PeoplePanel({
   sessionId,
+  joinCode,
+  sessionTitle,
+  teacherName,
   isModerator,
   spotlightIdentity,
   onSpotlight,
@@ -290,6 +381,9 @@ export default function PeoplePanel({
   onClose,
 }: {
   sessionId: string;
+  joinCode?: string | null;
+  sessionTitle?: string | null;
+  teacherName?: string | null;
   isModerator: boolean;
   spotlightIdentity: string | null;
   onSpotlight: (identity: string | null) => void;
@@ -357,7 +451,14 @@ export default function PeoplePanel({
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
-          {isModerator && <InviteGuest sessionId={sessionId} />}
+          {isModerator && (
+            <InviteGuest
+              sessionId={sessionId}
+              joinCode={joinCode}
+              sessionTitle={sessionTitle}
+              teacherName={teacherName}
+            />
+          )}
 
         {people.map((p) => {
           const spotlighted = p.base === baseIdentity(spotlightIdentity);
