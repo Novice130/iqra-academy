@@ -59,11 +59,11 @@ function DeviceSelect({
         value={value ?? devices[0]?.deviceId ?? ''}
         onChange={(e) => onChange(e.target.value)}
         disabled={disabled}
-        className="w-full px-3 py-2.5 rounded-xl text-xs font-medium cursor-pointer disabled:opacity-50 transition"
+        className="w-full px-3.5 py-3 rounded-xl text-xs font-medium cursor-pointer disabled:opacity-50 transition min-h-[44px]"
         style={{
           background: 'rgba(255, 255, 255, 0.08)',
           color: '#f3f4f6',
-          border: '1px solid rgba(255, 255, 255, 0.15)',
+          border: '1px solid rgba(255, 255, 255, 0.18)',
         }}
       >
         {devices.map((d, i) => (
@@ -73,6 +73,101 @@ function DeviceSelect({
         ))}
       </select>
     </label>
+  );
+}
+
+function SpeakerDeviceSelect({
+  devices,
+  value,
+  onChange,
+  onRefresh,
+}: {
+  devices: MediaDeviceInfo[];
+  value: string | undefined;
+  onChange: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  const hasOutputSelect =
+    typeof navigator !== 'undefined' &&
+    'selectAudioOutput' in (navigator.mediaDevices || {});
+
+  const handleSelectOutput = async () => {
+    try {
+      if (hasOutputSelect) {
+        const dev = await (navigator.mediaDevices as any).selectAudioOutput();
+        if (dev?.deviceId) {
+          onChange(dev.deviceId);
+          onRefresh();
+        }
+      }
+    } catch {}
+  };
+
+  return (
+    <div className="block">
+      <span className="block text-[11px] font-semibold uppercase tracking-wider text-white/45 mb-1.5">
+        Speaker / Audio Output
+      </span>
+      {devices.length > 0 ? (
+        <div className="space-y-2">
+          <select
+            value={value ?? devices[0]?.deviceId ?? ''}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full px-3.5 py-3 rounded-xl text-xs font-medium cursor-pointer transition min-h-[44px]"
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              color: '#f3f4f6',
+              border: '1px solid rgba(255, 255, 255, 0.18)',
+            }}
+          >
+            {devices.map((d, i) => (
+              <option key={d.deviceId || i} value={d.deviceId} className="bg-neutral-900 text-white">
+                {d.label || `Speaker ${i + 1}`}
+              </option>
+            ))}
+          </select>
+          {hasOutputSelect && (
+            <button
+              type="button"
+              onClick={handleSelectOutput}
+              className="w-full py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white/80 transition"
+            >
+              🔊 Choose Output Device…
+            </button>
+          )}
+        </div>
+      ) : (
+        <div
+          className="p-3 rounded-xl space-y-2"
+          style={{
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+          }}
+        >
+          <div className="flex items-center justify-between text-xs text-white">
+            <span className="font-semibold flex items-center gap-1.5">
+              <span>🔊</span>
+              <span>Default Speaker / Bluetooth</span>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
+              Ready
+            </span>
+          </div>
+          <p className="text-[11px] text-white/50 leading-relaxed">
+            Android automatically routes audio to your phone speaker, Bluetooth, or connected headphones.
+          </p>
+          {hasOutputSelect && (
+            <button
+              type="button"
+              onClick={handleSelectOutput}
+              className="w-full py-2 rounded-xl text-xs font-bold bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 cursor-pointer transition-colors"
+            >
+              🔊 Choose Speaker / Bluetooth…
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -289,11 +384,11 @@ export default function PreJoinScreen({ userName, onJoin }: PreJoinScreenProps) 
                   onChange={setAudioDeviceId}
                   disabled={!audioEnabled}
                 />
-                <DeviceSelect
-                  label="Speaker Output"
+                <SpeakerDeviceSelect
                   devices={speakers}
                   value={audioOutputDeviceId}
                   onChange={setAudioOutputDeviceId}
+                  onRefresh={refreshDevices}
                 />
               </div>
             </div>

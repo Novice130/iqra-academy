@@ -12,7 +12,7 @@ import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/compone
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
-import { copyTextToClipboard } from '@/lib/clipboard';
+import { copyTextToClipboard, shareOrCopy } from '@/lib/clipboard';
 
 const POLL_INTERVAL_MS = 5000;
 const RING_TIMEOUT_MS = 45000;
@@ -345,21 +345,49 @@ function InviteGuest({
         />
       </div>
 
-      {/* 3. Copy Full Invitation Button */}
-      <button
-        type="button"
-        onClick={() => copy(meetingInfo.fullInvitation, 'all')}
-        className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition active:scale-95 shadow-md"
-        style={{
-          background:
-            copiedKey === 'all'
-              ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.85), rgba(5, 150, 105, 0.85))'
-              : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
-          boxShadow: copiedKey === 'all' ? '0 4px 14px rgba(16, 185, 129, 0.35)' : '0 4px 14px rgba(0, 122, 255, 0.35)',
-        }}
-      >
-        <span>{copiedKey === 'all' ? '✓ Full Invitation Copied!' : '📋 Copy Full Invitation'}</span>
-      </button>
+      {/* 3. Action Buttons: Share (Android/iOS) & Copy Full Invitation */}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={async () => {
+            const res = await shareOrCopy(
+              {
+                title: 'Novice Tutor Live Class',
+                text: meetingInfo.fullInvitation,
+                url: meetingInfo.inviteUrl,
+              },
+              meetingInfo.fullInvitation
+            );
+            if (res.method === 'shared' || res.method === 'copied') {
+              setCopiedKey('share');
+              setTimeout(() => setCopiedKey(null), 2500);
+            }
+          }}
+          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shadow-md"
+          style={{
+            background:
+              copiedKey === 'share'
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.9), rgba(5, 150, 105, 0.9))'
+                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          }}
+        >
+          <span>{copiedKey === 'share' ? '✓ Sent!' : '📲 Share'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => copy(meetingInfo.fullInvitation, 'all')}
+          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shadow-md"
+          style={{
+            background:
+              copiedKey === 'all'
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.85), rgba(5, 150, 105, 0.85))'
+                : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+            boxShadow: copiedKey === 'all' ? '0 4px 14px rgba(16, 185, 129, 0.35)' : '0 4px 14px rgba(0, 122, 255, 0.35)',
+          }}
+        >
+          <span>{copiedKey === 'all' ? '✓ Copied!' : '📋 Copy All'}</span>
+        </button>
+      </div>
 
       <p className="px-1 text-[11px] leading-relaxed text-white/40">
         🛡️ Anyone can enter this code or link. Guests wait in the waiting room until you admit them.

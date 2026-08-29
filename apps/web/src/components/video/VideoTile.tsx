@@ -88,7 +88,7 @@ export default function VideoTile({
       const width = Math.min(MENU_WIDTH, window.innerWidth - margin * 2);
       const height = menuRef.current?.offsetHeight ?? 260;
 
-      let left = btn.right - width;
+      let left = btn.left;
       left = Math.min(Math.max(left, margin), window.innerWidth - width - margin);
 
       let top = btn.bottom + 6;
@@ -215,7 +215,7 @@ export default function VideoTile({
 
       {isSpotlighted && (
         <div
-          className="absolute top-2.5 left-2.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1"
+          className={`absolute top-2.5 ${hasActions ? 'left-12' : 'left-2.5'} px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1 z-10`}
           style={{
             background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
             color: '#fff',
@@ -238,7 +238,7 @@ export default function VideoTile({
             }}
             onPointerDown={(e) => e.stopPropagation()}
             aria-label={`Options for ${name}`}
-            className="absolute top-2.5 right-2.5 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-90"
+            className="absolute top-2.5 left-2.5 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-90 z-10"
             style={{
               background: 'rgba(18, 20, 26, 0.72)',
               backdropFilter: 'blur(16px)',
