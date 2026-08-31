@@ -23,10 +23,7 @@
  */
 
 import { auth } from "@/lib/auth";
-import { toNextJsHandler } from "better-auth/next-js";
-import { withDb, withHttpDb } from "@/lib/db";
+import { withHttpDb } from "@/lib/db";
 
-const handlers = toNextJsHandler(auth);
-
-export const GET = (request: Request) => withHttpDb(() => handlers.GET(request));
-export const POST = (request: Request) => withHttpDb(() => handlers.POST(request));
+export const GET = (request: Request) => withHttpDb(() => auth.handler(request));
+export const POST = (request: Request) => withHttpDb(() => auth.handler(request));
