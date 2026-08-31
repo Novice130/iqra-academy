@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * Notification Banner — polls for "meeting started" and "new message"
- * notifications.
+ * Notification Banner — in-app notifications banner for chat messages,
+ * trial classes, and system updates.
  *
- * No real-time transport (websocket/SSE/push) exists in this app yet, so
- * this polls a lightweight endpoint on an interval. Only mounted while the
- * dashboard chrome is visible (not on the fullscreen call route).
+ * NOTE: Live classes are handled exclusively by LiveClassRibbon (which is
+ * persistent, linked to the live session, and avoids duplicate banners).
+ * Desktop OS notifications for MEETING_STARTED are still announced via
+ * desktopNotify for Electron users when the app is minimized.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -43,27 +44,34 @@ export default function MeetingNotificationBanner() {
         const data = await res.json();
         if (cancelled) return;
 
-        const next = (data.notifications as NotificationItem[] | undefined)?.find(
-          (n) =>
-            (n.type === "MEETING_STARTED" || n.type === "NEW_MESSAGE") &&
-            !dismissedIds.current.has(n.id)
+        const notifs = (data.notifications as NotificationItem[] | undefined) || [];
+
+        // Desktop toast announcements for any new unread notification (including MEETING_STARTED)
+        for (const n of notifs) {
+          if (!announcedIds.current.has(n.id)) {
+            announcedIds.current.add(n.id);
+            const title =
+              n.type === "MEETING_STARTED"
+                ? "Your class has started"
+                : n.type === "NEW_MESSAGE"
+                ? "New message"
+                : "Notification";
+            const path =
+              n.type === "MEETING_STARTED" && n.sessionId
+                ? `/dashboard/session/${n.sessionId}`
+                : n.type === "NEW_MESSAGE"
+                ? "/dashboard/chat"
+                : undefined;
+            desktopNotify(title, n.message, path);
+          }
+        }
+
+        // Live classes are surfaced by LiveClassRibbon. Exclude MEETING_STARTED here
+        // so two duplicate "join class" banners are never shown stacked on top of each other.
+        const next = notifs.find(
+          (n) => n.type !== "MEETING_STARTED" && !dismissedIds.current.has(n.id)
         );
         setNotification(next || null);
-
-        // In the desktop app the banner is often behind another window, or in
-        // the tray with no window at all. A native toast is the only version
-        // of this the user will actually see, and it survives the app being
-        // minimised — which "your class has started" has to.
-        if (next && !announcedIds.current.has(next.id)) {
-          announcedIds.current.add(next.id);
-          desktopNotify(
-            next.type === "MEETING_STARTED" ? "Your class has started" : "New message",
-            next.message,
-            next.type === "MEETING_STARTED" && next.sessionId
-              ? `/dashboard/session/${next.sessionId}`
-              : "/dashboard/chat"
-          );
-        }
       } catch {
         // Silent — this is a best-effort background poll, not critical path.
       }
@@ -89,14 +97,26 @@ export default function MeetingNotificationBanner() {
     dismissedIds.current.add(id);
     setNotification(null);
     fetch(`/api/notifications/${id}/read`, { method: "POST" }).catch(() => {});
-    if (type === "MEETING_STARTED" && sessionId) {
-      router.push(`/dashboard/session/${sessionId}`);
-    } else if (type === "NEW_MESSAGE") {
+    if (type === "NEW_MESSAGE") {
       router.push("/dashboard/chat");
+    } else if (type === "TRIAL_REQUESTED" || type === "TRIAL_CONFIRMED") {
+      if (sessionId) router.push(`/dashboard/session/${sessionId}`);
+      else router.push("/dashboard");
+    } else if (type === "INVOICE_ISSUED") {
+      router.push("/dashboard/invoices");
+    } else if (sessionId) {
+      router.push(`/dashboard/session/${sessionId}`);
     }
   };
 
   if (!notification) return null;
+
+  const actionLabel =
+    notification.type === "NEW_MESSAGE"
+      ? "View Message"
+      : notification.type === "INVOICE_ISSUED"
+      ? "View Invoice"
+      : "View";
 
   return (
     <div
@@ -110,7 +130,7 @@ export default function MeetingNotificationBanner() {
           className="px-3 py-1.5 rounded-lg text-xs font-semibold cursor-pointer"
           style={{ background: "rgba(255,255,255,0.2)" }}
         >
-          {notification.type === "NEW_MESSAGE" ? "View Message" : "Join Now"}
+          {actionLabel}
         </button>
         <button
           onClick={() => dismiss(notification.id)}

@@ -31,12 +31,12 @@ export default function GuestJoinPage() {
   const displayMeetingId = useMemo(() => {
     if (!sessionId) return '';
     const digitsOnly = sessionId.replace(/\D/g, '');
-    if (digitsOnly.length === 12) {
-      return `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
+    if (digitsOnly.length >= 10) {
+      return `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 7)} ${digitsOnly.slice(7, 10)}`;
     }
-    const alphaOnly = sessionId.replace(/[^a-zA-Z]/g, '').toLowerCase();
-    if (alphaOnly.length === 12) {
-      return `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
+    const alphaOnly = sessionId.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+    if (alphaOnly.length >= 10) {
+      return `${alphaOnly.slice(0, 3)} ${alphaOnly.slice(3, 7)} ${alphaOnly.slice(7, 10)}`;
     }
     return sessionId;
   }, [sessionId]);

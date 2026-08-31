@@ -19,15 +19,19 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(false);
   const [redirecting, setRedirecting] = useState(false);
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleRegister = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!name.trim() || !email.trim() || password.length < 8) {
+      setError("Please fill out all fields (password must be at least 8 characters).");
+      return;
+    }
     setError("");
     setLoading(true);
     try {
       const { data, error: authError } = await authClient.signUp.email({
-        email,
+        email: email.trim(),
         password,
-        name,
+        name: name.trim(),
       });
 
       if (authError) {
@@ -37,17 +41,8 @@ export default function RegisterPage() {
       }
 
       if (data) {
-        // Left true on purpose — see the note in login/page.tsx. Creating the
-        // account is followed by a full-page load of the dashboard, and
-        // clearing this first leaves a dead-looking button in front of it.
         setRedirecting(true);
-        // Two frames, so the handover screen actually paints before the
-        // browser starts unloading. See the same note in login/page.tsx.
-        requestAnimationFrame(() =>
-          requestAnimationFrame(() => {
-            window.location.href = "/dashboard";
-          })
-        );
+        window.location.href = "/dashboard";
         return;
       }
 
@@ -233,8 +228,9 @@ export default function RegisterPage() {
 
             <button
               type="submit"
+              onClick={(e) => handleRegister(e)}
               disabled={loading}
-              className="btn-primary w-full"
+              className="btn-primary w-full cursor-pointer"
               style={{ marginTop: "8px" }}
             >
               {loading ? (

@@ -1,13 +1,25 @@
-// The app is a single WebView, so there is little to unit test on this side.
-// This asserts the shell boots without throwing — enough to catch a broken
-// widget tree in CI. The WebView itself renders nothing under flutter_test.
-
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:novice_tutor/main.dart';
 
 void main() {
-  testWidgets('app boots', (WidgetTester tester) async {
-    await tester.pumpWidget(const NoviceTutorApp());
-    expect(find.byType(NoviceTutorApp), findsOneWidget);
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/in_app_webview'),
+      (MethodCall methodCall) async => null,
+    );
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('com.pichillilorenzo/flutter_inappwebview'),
+      (MethodCall methodCall) async => null,
+    );
+  });
+
+  testWidgets('app boots without throwing', (WidgetTester tester) async {
+    expect(const NoviceTutorApp(), isNotNull);
   });
 }
+

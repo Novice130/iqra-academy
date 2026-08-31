@@ -30,7 +30,29 @@ import { Pool, neon, neonConfig } from "@neondatabase/serverless";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { sql } from "drizzle-orm";
 import ws from "ws";
+import dns from "node:dns";
 import * as schema from "@/db/schema";
+
+// Force IPv4 first in Node to avoid IPv6 AAAA timeouts on serverless neon hosts
+if (dns.setDefaultResultOrder) {
+  try {
+    dns.setDefaultResultOrder("ipv4first");
+  } catch {}
+}
+
+import { fetch as undiciFetch, Agent } from "undici";
+
+const ipv4Agent = new Agent({
+  connect: {
+    lookup: (hostname: string, options: any, callback: any) => {
+      dns.lookup(hostname, { ...(typeof options === "object" ? options : {}), family: 4 }, callback);
+    },
+  },
+});
+
+neonConfig.fetchFunction = (url: any, init: any) => {
+  return undiciFetch(url, { ...init, dispatcher: ipv4Agent } as any) as any;
+};
 
 // Enable WebSocket for local Node.js environments (npx tsx, seed scripts)
 // Cloudflare Workers has native global WebSocket, so we skip polyfilling there.

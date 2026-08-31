@@ -8,7 +8,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
 
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import DashboardChrome from "./DashboardChrome";
@@ -22,7 +22,7 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     const headersList = await headers();
     const session = await auth.api.getSession({ headers: headersList });
 

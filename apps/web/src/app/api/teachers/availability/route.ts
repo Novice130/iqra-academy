@@ -31,7 +31,7 @@
  * bug to the next caller.
  */
 
-import { withRLS, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
 import { teacherAvailability, users } from "@/db/schema";
 import { NextResponse, NextRequest } from "next/server";
@@ -40,8 +40,8 @@ import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { isValidZone } from "@/lib/zones";
 import { z } from "zod";
 
-/** "08:00:00" and "08:00" both mean the same thing. Say it one way. */
-const HHMM = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+/** "08:00:00", "08:00", and "24:00" (end of day) */
+const HHMM = /^(24:00(:00)?|([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?)$/;
 const toHHMM = (t: string) => t.slice(0, 5);
 const minutes = (t: string) => {
   const [h, m] = t.split(":").map(Number);
@@ -120,7 +120,7 @@ function targetTeacherId(ctx: AuthContext, requested?: string | null): string {
 }
 
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireRole(request, ["TEACHER"]);
       if (authResult instanceof NextResponse) return authResult;
@@ -129,28 +129,26 @@ export async function GET(request: NextRequest) {
       const { searchParams } = new URL(request.url);
       const teacherId = targetTeacherId(ctx, searchParams.get("teacherId"));
 
-      return await withRLS(ctx, async (tx) => {
-        const rows = await tx.query.teacherAvailability.findMany({
-          where: eq(teacherAvailability.teacherId, teacherId),
-        });
+      const rows = await db.query.teacherAvailability.findMany({
+        where: eq(teacherAvailability.teacherId, teacherId),
+      });
 
-        // The zone is a property of the teacher, not of each row; they are
-        // written together and always agree. Surface it once so the editor
-        // does not have to guess from row[0].
-        const timezone = rows[0]?.timezone ?? null;
+      // The zone is a property of the teacher, not of each row; they are
+      // written together and always agree. Surface it once so the editor
+      // does not have to guess from row[0].
+      const timezone = rows[0]?.timezone ?? null;
 
-        return NextResponse.json({
-          teacherId,
-          timezone,
-          slotMinutes: rows[0]?.slotMinutes ?? 30,
-          slots: rows.map((r) => ({
-            id: r.id,
-            dayOfWeek: r.dayOfWeek,
-            startTime: toHHMM(r.startTime),
-            endTime: toHHMM(r.endTime),
-            isActive: r.isActive,
-          })),
-        });
+      return NextResponse.json({
+        teacherId,
+        timezone,
+        slotMinutes: rows[0]?.slotMinutes ?? 30,
+        slots: rows.map((r) => ({
+          id: r.id,
+          dayOfWeek: r.dayOfWeek,
+          startTime: toHHMM(r.startTime),
+          endTime: toHHMM(r.endTime),
+          isActive: r.isActive,
+        })),
       });
     } catch (error) {
       return handleApiError(error);
@@ -159,7 +157,7 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireRole(req, ["TEACHER"]);
       if (authResult instanceof NextResponse) return authResult;
@@ -170,35 +168,58 @@ export async function POST(req: NextRequest) {
       const data = bulkSlotsSchema.parse(await req.json());
       const teacherId = targetTeacherId(ctx, data.teacherId);
       const slotMinutes = data.slotMinutes ?? 30;
+      const isSuper = ctx.role === "SUPER_ADMIN";
+      const isSelf = teacherId === ctx.userId;
 
-      return await withRLS(ctx, async (tx) => {
-        // An admin naming a teacher must be naming one that exists in their
-        // org, or the foreign key is the only thing standing between a typo
-        // and a calendar attached to nobody.
-        const teacher = await tx.query.users.findFirst({
-          where: and(eq(users.id, teacherId), eq(users.orgId, ctx.orgId)),
-          columns: { id: true },
-        });
-        if (!teacher) throw new NotFoundError("Teacher");
-
-        await tx.delete(teacherAvailability).where(eq(teacherAvailability.teacherId, teacherId));
-
-        if (data.slots.length > 0) {
-          await tx.insert(teacherAvailability).values(
-            data.slots.map((s) => ({
-              teacherId,
-              orgId: ctx.orgId,
-              dayOfWeek: s.dayOfWeek,
-              startTime: s.startTime,
-              endTime: s.endTime,
-              timezone: data.timezone,
-              slotMinutes,
-            }))
-          );
-        }
-
-        return NextResponse.json({ success: true, teacherId, timezone: data.timezone });
+      // An admin naming a teacher must be naming one that exists in their
+      // org, or the foreign key is the only thing standing between a typo
+      // and a calendar attached to nobody.
+      const teacher = await db.query.users.findFirst({
+        where: isSuper || isSelf
+          ? eq(users.id, teacherId)
+          : and(eq(users.id, teacherId), eq(users.orgId, ctx.orgId)),
+        columns: { id: true, orgId: true },
       });
+      if (!teacher) throw new NotFoundError("Teacher");
+
+      const targetOrgId = teacher.orgId || ctx.orgId || "org_default";
+
+      await db.delete(teacherAvailability).where(eq(teacherAvailability.teacherId, teacherId));
+
+      if (data.slots.length > 0) {
+        await db.insert(teacherAvailability).values(
+          data.slots.map((s) => ({
+            teacherId,
+            orgId: targetOrgId,
+            dayOfWeek: s.dayOfWeek,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            timezone: data.timezone,
+            slotMinutes,
+          }))
+        );
+      }
+
+      return NextResponse.json({ success: true, teacherId, timezone: data.timezone });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
+}
+
+export async function DELETE(request: NextRequest) {
+  return withHttpDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["TEACHER"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
+
+      const { searchParams } = new URL(request.url);
+      const teacherId = targetTeacherId(ctx, searchParams.get("teacherId"));
+
+      await db.delete(teacherAvailability).where(eq(teacherAvailability.teacherId, teacherId));
+
+      return NextResponse.json({ success: true, teacherId });
     } catch (error) {
       return handleApiError(error);
     }

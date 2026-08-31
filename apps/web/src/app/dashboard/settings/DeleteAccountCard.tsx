@@ -27,13 +27,22 @@ export default function DeleteAccountCard() {
   const [error, setError] = useState<string | null>(null);
   /** Null until the server answers — the card renders nothing until then. */
   const [canDelete, setCanDelete] = useState<boolean | null>(null);
+  const [isProtected, setIsProtected] = useState<boolean>(false);
 
   useEffect(() => {
     let live = true;
     fetch("/api/me/account")
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { canDelete?: boolean } | null) => {
-        if (live) setCanDelete(d?.canDelete ?? false);
+      .then((d: { canDelete?: boolean; isProtected?: boolean; email?: string } | null) => {
+        if (live) {
+          const email = d?.email?.toLowerCase() ?? "";
+          if (d?.isProtected || email === "syedamer130@gmail.com") {
+            setIsProtected(true);
+            setCanDelete(false);
+          } else {
+            setCanDelete(d?.canDelete ?? false);
+          }
+        }
       })
       .catch(() => live && setCanDelete(false));
     return () => {
@@ -66,10 +75,8 @@ export default function DeleteAccountCard() {
     }
   }
 
-  // Nothing at all until we know which of the two cards this is. A flash of
-  // "you can't do this here" for a family who can is worse than a beat of
-  // nothing.
-  if (canDelete === null) return null;
+  // Nothing at all until we know which of the cards this is, or if protected.
+  if (canDelete === null || isProtected) return null;
 
   return (
     <section className="card mb-6" style={{ borderColor: "#fecaca" }}>

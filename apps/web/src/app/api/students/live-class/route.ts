@@ -18,11 +18,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withHttpDb } from "@/lib/db";
-import { bookings, sessions, users } from "@/db/schema";
+import { bookings, sessions, studentProfiles, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { FALLBACK_CADENCE, pollCadenceFor } from "@/lib/poll-cadence";
-import { and, desc, eq, gt, inArray } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
 
 /**
  * Sessions are only surfaced for a few hours after they start. Rooms are
@@ -67,24 +67,54 @@ export async function GET(request: NextRequest) {
 
       const cutoff = new Date(Date.now() - LIVE_WINDOW_MS);
 
-      // Strategy 1: Check if student has a direct booking for an IN_PROGRESS session right now
+      // Auto-expire zombie sessions that were abandoned in IN_PROGRESS state older than cutoff
+      try {
+        await db
+          .update(sessions)
+          .set({ status: "COMPLETED" })
+          .where(
+            and(
+              eq(sessions.orgId, ctx.orgId),
+              eq(sessions.status, "IN_PROGRESS"),
+              lt(sessions.createdAt, cutoff)
+            )
+          );
+      } catch (err) {
+        console.warn("[live-class] Zombie cleanup non-fatal error:", err);
+      }
+
+      // Check student's profiles
+      const studentProfilesList = await db
+        .select({ id: studentProfiles.id })
+        .from(studentProfiles)
+        .where(eq(studentProfiles.userId, ctx.userId));
+      const profileIds = studentProfilesList.map((p) => p.id);
+
+      // Strategy 1: Check if this student (or their profiles) has a booking for an IN_PROGRESS session
+      const bookingConditions = [eq(bookings.userId, ctx.userId)];
+      if (profileIds.length > 0) {
+        bookingConditions.push(inArray(bookings.studentProfileId, profileIds));
+      }
+
       const directBookedSession = await db
         .select({
           id: sessions.id,
           title: sessions.title,
           teacherId: sessions.teacherId,
           actualStart: sessions.actualStart,
+          scheduledStart: sessions.scheduledStart,
+          createdAt: sessions.createdAt,
         })
         .from(bookings)
         .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
         .where(
           and(
-            eq(bookings.userId, ctx.userId),
+            or(...bookingConditions),
             eq(sessions.status, "IN_PROGRESS"),
-            gt(sessions.actualStart, cutoff)
+            or(gt(sessions.actualStart, cutoff), gt(sessions.createdAt, cutoff))
           )
         )
-        .orderBy(desc(sessions.actualStart))
+        .orderBy(desc(sessions.actualStart), desc(sessions.createdAt))
         .limit(1);
 
       let liveSession: {
@@ -92,53 +122,32 @@ export async function GET(request: NextRequest) {
         title: string | null;
         teacherId: string;
         actualStart: Date | null;
-      } | null = directBookedSession[0] ?? null;
-
-      // Strategy 2: Check if any teacher this student has had classes with is running an IN_PROGRESS session
-      if (!liveSession) {
-        const teacherRows = await db
-          .selectDistinct({ teacherId: sessions.teacherId })
-          .from(bookings)
-          .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-          .where(eq(bookings.userId, ctx.userId));
-
-        const teacherIds = teacherRows.map((r) => r.teacherId);
-        if (teacherIds.length > 0) {
-          const found = await db.query.sessions.findFirst({
-            where: and(
-              inArray(sessions.teacherId, teacherIds),
-              eq(sessions.status, "IN_PROGRESS"),
-              gt(sessions.actualStart, cutoff)
-            ),
-            orderBy: [desc(sessions.actualStart)],
-          });
-          if (found) {
-            liveSession = {
-              id: found.id,
-              title: found.title,
-              teacherId: found.teacherId,
-              actualStart: found.actualStart,
-            };
+      } | null = directBookedSession[0]
+        ? {
+            id: directBookedSession[0].id,
+            title: directBookedSession[0].title,
+            teacherId: directBookedSession[0].teacherId,
+            actualStart: directBookedSession[0].actualStart || directBookedSession[0].createdAt,
           }
-        }
-      }
+        : null;
 
-      // Strategy 3: Fallback check for any active IN_PROGRESS session in student's organization
+      // Strategy 2: Check for public WEBINAR sessions in student's organization
       if (!liveSession && ctx.orgId) {
-        const orgFound = await db.query.sessions.findFirst({
+        const webinarFound = await db.query.sessions.findFirst({
           where: and(
             eq(sessions.orgId, ctx.orgId),
+            eq(sessions.type, "WEBINAR"),
             eq(sessions.status, "IN_PROGRESS"),
-            gt(sessions.actualStart, cutoff)
+            or(gt(sessions.actualStart, cutoff), gt(sessions.createdAt, cutoff))
           ),
-          orderBy: [desc(sessions.actualStart)],
+          orderBy: [desc(sessions.actualStart), desc(sessions.createdAt)],
         });
-        if (orgFound) {
+        if (webinarFound) {
           liveSession = {
-            id: orgFound.id,
-            title: orgFound.title,
-            teacherId: orgFound.teacherId,
-            actualStart: orgFound.actualStart,
+            id: webinarFound.id,
+            title: webinarFound.title,
+            teacherId: webinarFound.teacherId,
+            actualStart: webinarFound.actualStart || webinarFound.createdAt,
           };
         }
       }

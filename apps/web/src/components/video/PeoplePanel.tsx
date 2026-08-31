@@ -12,7 +12,7 @@ import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/compone
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
-import { copyTextToClipboard, shareOrCopy } from '@/lib/clipboard';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 const POLL_INTERVAL_MS = 5000;
 const RING_TIMEOUT_MS = 45000;
@@ -262,14 +262,14 @@ function InviteGuest({
     let displayMeetingId = rawCode;
     let urlCode = rawCode;
 
-    if (digitsOnly.length === 12) {
-      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
-      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+    if (digitsOnly.length >= 10) {
+      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 7)} ${digitsOnly.slice(7, 10)}`;
+      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7, 10)}`;
     } else {
-      const alphaOnly = rawCode.replace(/[^a-zA-Z]/g, '').toLowerCase();
-      if (alphaOnly.length === 12) {
-        displayMeetingId = `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
-        urlCode = `${alphaOnly.slice(0, 4)}-${alphaOnly.slice(4, 8)}-${alphaOnly.slice(8, 12)}`;
+      const alphaOnly = rawCode.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (alphaOnly.length >= 10) {
+        displayMeetingId = `${alphaOnly.slice(0, 3)} ${alphaOnly.slice(3, 7)} ${alphaOnly.slice(7, 10)}`;
+        urlCode = `${alphaOnly.slice(0, 3)}-${alphaOnly.slice(3, 7)}-${alphaOnly.slice(7, 10)}`;
       }
     }
 
@@ -312,7 +312,7 @@ function InviteGuest({
               color: copiedKey === 'id' ? '#6ee7b7' : '#ffffff',
             }}
           >
-            {copiedKey === 'id' ? '✓ Copied ID' : 'Copy ID'}
+            {copiedKey === 'id' ? '✓ Copied' : 'Copy ID'}
           </button>
         </div>
         <div className="text-base font-bold font-mono tracking-wider text-emerald-400 select-all">
@@ -333,7 +333,7 @@ function InviteGuest({
               color: copiedKey === 'link' ? '#6ee7b7' : '#93c5fd',
             }}
           >
-            {copiedKey === 'link' ? '✓ Copied Link' : 'Copy Link'}
+            {copiedKey === 'link' ? '✓ Copied' : 'Copy Link'}
           </button>
         </div>
         <input
@@ -345,47 +345,24 @@ function InviteGuest({
         />
       </div>
 
-      {/* 3. Action Buttons: Share (Android/iOS) & Copy Full Invitation */}
-      <div className="grid grid-cols-2 gap-2">
+      {/* 3. Single High-Impact Action Button: Copy Joining Info */}
+      <div>
         <button
           type="button"
-          onClick={async () => {
-            const res = await shareOrCopy(
-              {
-                title: 'Novice Tutor Live Class',
-                text: meetingInfo.fullInvitation,
-                url: meetingInfo.inviteUrl,
-              },
-              meetingInfo.fullInvitation
-            );
-            if (res.method === 'shared' || res.method === 'copied') {
-              setCopiedKey('share');
-              setTimeout(() => setCopiedKey(null), 2500);
-            }
-          }}
-          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shadow-md"
+          onClick={() => copy(meetingInfo.fullInvitation, 'invite')}
+          className="w-full py-3 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 shadow-md hover:brightness-105"
           style={{
             background:
-              copiedKey === 'share'
-                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.9), rgba(5, 150, 105, 0.9))'
-                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
-          }}
-        >
-          <span>{copiedKey === 'share' ? '✓ Sent!' : '📲 Share'}</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => copy(meetingInfo.fullInvitation, 'all')}
-          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shadow-md"
-          style={{
-            background:
-              copiedKey === 'all'
-                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.85), rgba(5, 150, 105, 0.85))'
+              copiedKey === 'invite'
+                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
                 : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
-            boxShadow: copiedKey === 'all' ? '0 4px 14px rgba(16, 185, 129, 0.35)' : '0 4px 14px rgba(0, 122, 255, 0.35)',
+            boxShadow:
+              copiedKey === 'invite'
+                ? '0 6px 20px rgba(16, 185, 129, 0.45)'
+                : '0 6px 20px rgba(0, 122, 255, 0.4)',
           }}
         >
-          <span>{copiedKey === 'all' ? '✓ Copied!' : '📋 Copy All'}</span>
+          <span>{copiedKey === 'invite' ? '✓ Copied Joining Info!' : '📋 Copy Joining Info'}</span>
         </button>
       </div>
 
@@ -419,10 +396,36 @@ export default function PeoplePanel({
   onVolume: (base: string, volume: number) => void;
   onClose: () => void;
 }) {
-  const { muteTrack, askToUnmute, removeParticipant } = useHostControls(sessionId);
+  const { muteTrack, askToUnmute, removeParticipant, rename } = useHostControls(sessionId);
+  const { localParticipant } = useLocalParticipant();
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
   const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
   const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+
+  const handleSaveRename = (p: { identity: string; isLocal: boolean }) => {
+    const trimmed = renameDraft.trim();
+    if (trimmed) {
+      if (p.isLocal) {
+        try {
+          localParticipant.setName(trimmed);
+        } catch {}
+        fetch('/api/me', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: trimmed }),
+        }).catch(() => {});
+        if (typeof window !== 'undefined') {
+          try {
+            localStorage.setItem('user_display_name', trimmed);
+          } catch {}
+        }
+      }
+      rename(p.identity, trimmed);
+    }
+    setRenamingId(null);
+  };
 
   const seen = new Set<string>();
   const people = cameraTracks
@@ -490,37 +493,82 @@ export default function PeoplePanel({
 
         {people.map((p) => {
           const spotlighted = p.base === baseIdentity(spotlightIdentity);
+          const isRenaming = renamingId === p.identity;
+
           return (
             <div
               key={p.identity}
               className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06] space-y-2"
             >
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="text-xs font-semibold text-white truncate">
-                    {p.name}
-                    {p.isLocal && <span className="text-white/40"> (you)</span>}
-                  </div>
-                  <div className="text-[11px] font-medium" style={{ color: p.micMuted ? '#fca5a5' : '#6ee7b7' }}>
-                    {p.micMuted ? 'Muted' : 'Speaking'}
-                  </div>
+              {isRenaming ? (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={renameDraft}
+                    autoFocus
+                    onChange={(e) => setRenameDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSaveRename(p);
+                      if (e.key === 'Escape') setRenamingId(null);
+                    }}
+                    placeholder="Enter display name"
+                    className="flex-1 px-2.5 py-1 text-xs rounded-xl bg-black/50 text-white border border-blue-400 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handleSaveRename(p)}
+                    className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-600 text-white cursor-pointer"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRenamingId(null)}
+                    className="px-2 py-1 rounded-xl text-[11px] bg-white/10 text-white/70 cursor-pointer"
+                  >
+                    ✕
+                  </button>
                 </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5">
+                      <span>{p.name}</span>
+                      {p.isLocal && <span className="text-white/40"> (you)</span>}
+                      {(p.isLocal || isModerator) && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setRenamingId(p.identity);
+                            setRenameDraft(p.name);
+                          }}
+                          className="text-[10px] text-blue-400 hover:text-blue-300 underline cursor-pointer ml-1"
+                        >
+                          Rename
+                        </button>
+                      )}
+                    </div>
+                    <div className="text-[11px] font-medium" style={{ color: p.micMuted ? '#fca5a5' : '#6ee7b7' }}>
+                      {p.micMuted ? 'Muted' : 'Speaking'}
+                    </div>
+                  </div>
 
-                {isModerator && (
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <button
-                      onClick={() => onSpotlight(spotlighted ? null : p.base)}
-                      className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition"
-                      style={{
-                        background: spotlighted ? '#007aff' : 'rgba(255, 255, 255, 0.1)',
-                        color: '#fff',
-                        boxShadow: spotlighted ? '0 2px 8px rgba(0, 122, 255, 0.35)' : 'none',
-                      }}
-                    >
-                      {spotlighted ? '★ Spotlit' : 'Spotlight'}
-                    </button>
+                    {isModerator && (
+                      <button
+                        onClick={() => onSpotlight(spotlighted ? null : p.base)}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition"
+                        style={{
+                          background: spotlighted ? '#007aff' : 'rgba(255, 255, 255, 0.1)',
+                          color: '#fff',
+                          boxShadow: spotlighted ? '0 2px 8px rgba(0, 122, 255, 0.35)' : 'none',
+                        }}
+                      >
+                        {spotlighted ? '★ Spotlit' : 'Spotlight'}
+                      </button>
+                    )}
 
-                    {!p.isLocal &&
+                    {!p.isLocal && isModerator &&
                       (p.micMuted ? (
                         <button
                           onClick={() => askToUnmute(p.identity)}
@@ -537,7 +585,7 @@ export default function PeoplePanel({
                         </button>
                       ))}
 
-                    {!p.isLocal &&
+                    {!p.isLocal && isModerator &&
                       (confirmRemove === p.identity ? (
                         <button
                           onClick={() => {
@@ -557,8 +605,8 @@ export default function PeoplePanel({
                         </button>
                       ))}
                   </div>
-                )}
-              </div>
+                </div>
+              )}
 
               {isModerator && !p.isLocal && (
                 <div className="pt-1">

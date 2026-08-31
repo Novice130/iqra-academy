@@ -382,3 +382,33 @@ export async function sendInvoiceEmail(
     `,
   });
 }
+
+/**
+ * Sends a Two-Factor Authentication (2FA) one-time verification code via email.
+ */
+export async function sendTwoFactorEmail(to: string, code: string): Promise<boolean> {
+  return sendRawEmail({
+    to,
+    subject: `Your Novice Tutor verification code: ${code}`,
+    html: `
+      <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;padding:24px;border:1px solid #e5e7eb;border-radius:12px;">
+        <h2 style="color:#1a5f3a;margin-top:0;font-size:22px;">Security Verification Code 🔐</h2>
+        <p style="font-size:15px;line-height:1.6;color:#374151;">
+          Use the following 6-digit one-time code to verify your sign-in or activate two-factor authentication:
+        </p>
+        <div style="margin:28px 0;text-align:center;">
+          <span style="display:inline-block;font-size:32px;font-weight:700;letter-spacing:6px;padding:12px 28px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:12px;color:#166534;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;">
+            ${code}
+          </span>
+        </div>
+        <p style="font-size:13px;color:#6b7280;line-height:1.5;">
+          This code expires in 10 minutes. If you did not request this security code, someone may be attempting to access your account.
+        </p>
+        <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;" />
+        <p style="font-size:12px;color:#9ca3af;margin-bottom:0;">
+          Novice Tutor Security &middot; Iqra Academy
+        </p>
+      </div>
+    `,
+  });
+}

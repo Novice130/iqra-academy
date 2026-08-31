@@ -1,15 +1,21 @@
 'use client';
 
 /**
- * Call control bar — Apple iOS 17/18 FaceTime design language:
- * Centered floating frosted glassmorphic pill with sleek circular buttons,
- * tactile mic/camera split toggles with carets, and vibrant Apple Red End/Leave pill.
+ * Call control bar — Google Meet Material You design language:
+ * - Circular control buttons: Mic, Camera, Hand Raise (✋), More Options (⋮), and End Call (Red pill).
+ * - Google Meet More Options Bottom Sheet:
+ *   - In-call messages (Chat with badge)
+ *   - Share screen (Present screen)
+ *   - People / Participants (Roster & Student Ringing)
+ *   - Visual effects (Background blur & virtual backgrounds)
+ *   - Audio & Video Settings (Speaker routing, microphone & camera selector)
+ *   - Host controls (for teacher)
+ *   - Meeting details & copy link
  */
 
 import { useEffect, useState } from 'react';
 import { Track } from 'livekit-client';
 import {
-  useMediaDeviceSelect,
   useRoomContext,
   useTrackToggle,
 } from '@livekit/components-react';
@@ -18,7 +24,6 @@ import {
   getNativeSharing,
   isNativeShell,
   sessionIdFromRoom,
-  setNativeSharing,
   startNativeScreenShare,
   stopNativeScreenShare,
   subscribeNativeSharing,
@@ -27,258 +32,163 @@ import {
   CameraIcon,
   CameraOffIcon,
   ChatIcon,
-  ChevronUpIcon,
   FlipCameraIcon,
+  HandRaiseIcon,
+  InfoIcon,
+  LayoutIcon,
   LeaveIcon,
   MicIcon,
   MicOffIcon,
+  MoreIcon,
   PeopleIcon,
   ScreenShareIcon,
+  SettingsIcon,
+  SparklesIcon,
+  SpeakerIcon,
 } from './CallIcons';
 
-type MenuId = 'mic' | 'camera' | null;
-
 export type ViewMode = 'speaker' | 'gallery' | 'active';
-
-const DANGER_GRADIENT = 'linear-gradient(180deg, rgba(255, 69, 58, 0.88) 0%, rgba(215, 0, 21, 0.88) 100%)';
-const ACTIVE_GRADIENT = 'linear-gradient(135deg, rgba(0, 122, 255, 0.42) 0%, rgba(0, 90, 220, 0.30) 100%)';
-const ON_BG = 'rgba(255, 255, 255, 0.12)';
-
-function RoundButton({
-  onClick,
-  active,
-  danger,
-  label,
-  badge,
-  children,
-}: {
-  onClick: () => void;
-  active?: boolean;
-  danger?: boolean;
-  label: string;
-  badge?: number;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="relative rounded-full flex items-center justify-center cursor-pointer transition-all duration-200 active:scale-95 shrink-0 hover:brightness-110"
-      style={{
-        width: 'var(--call-btn)',
-        height: 'var(--call-btn)',
-        background: danger ? DANGER_GRADIENT : active ? ACTIVE_GRADIENT : ON_BG,
-        backdropFilter: 'blur(20px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-        color: '#fff',
-        border: danger
-          ? '1px solid rgba(255, 255, 255, 0.32)'
-          : active
-            ? '1px solid rgba(120, 190, 255, 0.50)'
-            : '1px solid rgba(255, 255, 255, 0.18)',
-        boxShadow: danger
-          ? '0 6px 18px rgba(255, 59, 48, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 0 rgba(0, 0, 0, 0.20)'
-          : active
-            ? '0 6px 20px rgba(0, 122, 255, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.65), inset 0 -1px 0 0 rgba(0, 122, 255, 0.25)'
-            : '0 4px 12px rgba(0, 0, 0, 0.20), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.06)',
-      }}
-    >
-      {children}
-      {!!badge && badge > 0 && (
-        <span
-          className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center border border-white/20"
-          style={{ background: '#ff3b30', color: '#fff', boxShadow: '0 2px 6px rgba(255, 59, 48, 0.5)' }}
-        >
-          {badge > 9 ? '9+' : badge}
-        </span>
-      )}
-    </button>
-  );
-}
-
-function ToggleWithCaret({
-  source,
-  menuOpen,
-  onToggleMenu,
-  label,
-}: {
-  source: Track.Source.Microphone | Track.Source.Camera;
-  menuOpen: boolean;
-  onToggleMenu: () => void;
-  label: string;
-}) {
-  const { toggle, enabled, pending } = useTrackToggle({ source });
-  const isMic = source === Track.Source.Microphone;
-  const Icon = isMic ? (enabled ? MicIcon : MicOffIcon) : enabled ? CameraIcon : CameraOffIcon;
-
-  return (
-    <div
-      className="flex items-center rounded-full shrink-0 transition-all duration-200"
-      style={{
-        background: enabled ? ON_BG : DANGER_GRADIENT,
-        backdropFilter: 'blur(20px) saturate(180%)',
-        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-        border: enabled ? '1px solid rgba(255, 255, 255, 0.18)' : '1px solid rgba(255, 255, 255, 0.32)',
-        boxShadow: enabled
-          ? '0 4px 12px rgba(0, 0, 0, 0.20), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.06)'
-          : '0 6px 18px rgba(255, 59, 48, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.55), inset 0 -1px 0 0 rgba(0, 0, 0, 0.20)',
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => toggle()}
-        disabled={pending}
-        title={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
-        aria-label={`${enabled ? 'Turn off' : 'Turn on'} ${label}`}
-        className="rounded-full flex items-center justify-center cursor-pointer disabled:opacity-60 transition-transform active:scale-95 hover:brightness-110"
-        style={{ width: 'var(--call-btn)', height: 'var(--call-btn)', color: '#fff' }}
-      >
-        <Icon />
-      </button>
-      <button
-        type="button"
-        onClick={onToggleMenu}
-        title={`${label} options`}
-        aria-label={`${label} options`}
-        className="rounded-r-full flex items-center justify-center cursor-pointer shrink-0 border-l transition-all hover:brightness-125"
-        style={{
-          width: 'calc(var(--call-btn) * 0.48)',
-          height: 'var(--call-btn)',
-          color: '#fff',
-          borderColor: 'rgba(255, 255, 255, 0.18)',
-          opacity: menuOpen ? 1 : 0.8,
-        }}
-      >
-        <ChevronUpIcon className="call-caret" />
-      </button>
-    </div>
-  );
-}
-
-function DeviceList({ kind, label }: { kind: MediaDeviceKind; label: string }) {
-  const { devices, activeDeviceId, setActiveMediaDevice } = useMediaDeviceSelect({ kind });
-
-  if (devices.length === 0) {
-    if (kind === 'audiooutput') {
-      return (
-        <div className="px-2 py-2 border-t border-white/10">
-          <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">{label}</div>
-          <div className="p-3 rounded-2xl bg-white/[0.05] border border-white/[0.08] space-y-2">
-            <div className="flex items-center justify-between text-xs text-white">
-              <span className="font-semibold flex items-center gap-1.5">
-                <span>🔊</span>
-                <span>Default Speaker / Headset</span>
-              </span>
-              <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
-                Active
-              </span>
-            </div>
-            <p className="text-[11px] text-white/50 leading-relaxed">
-              Audio routes to phone speaker, Bluetooth, or connected headphones.
-            </p>
-            {typeof navigator !== 'undefined' && 'selectAudioOutput' in (navigator.mediaDevices || {}) && (
-              <button
-                type="button"
-                onClick={async () => {
-                  try {
-                    const dev = await (navigator.mediaDevices as any).selectAudioOutput();
-                    if (dev?.deviceId) setActiveMediaDevice(dev.deviceId);
-                  } catch {}
-                }}
-                className="w-full py-2 rounded-xl text-xs font-bold bg-blue-600/30 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 cursor-pointer transition-colors"
-              >
-                🔊 Choose Output (Bluetooth / Speaker)…
-              </button>
-            )}
-          </div>
-        </div>
-      );
-    }
-    return null;
-  }
-
-  return (
-    <div className={`px-2 py-2 ${kind === 'audiooutput' ? 'border-t border-white/10' : ''}`}>
-      <div className="px-2 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-white/45">{label}</div>
-      <div className="space-y-1">
-        {devices.map((d, i) => {
-          const active = d.deviceId === activeDeviceId;
-          return (
-            <button
-              key={d.deviceId || i}
-              type="button"
-              onClick={() => setActiveMediaDevice(d.deviceId)}
-              className="w-full flex items-center justify-between text-left px-3.5 py-3 rounded-xl text-xs font-medium cursor-pointer transition-colors min-h-[44px]"
-              style={{
-                background: active ? 'rgba(0, 122, 255, 0.28)' : 'rgba(255, 255, 255, 0.04)',
-                color: active ? '#60a5fa' : '#f3f4f6',
-                border: active ? '1px solid rgba(96, 165, 250, 0.35)' : '1px solid transparent',
-              }}
-            >
-              <span className="truncate mr-2 font-medium">{d.label || `${label} ${i + 1}`}</span>
-              {active && <span className="text-blue-400 font-bold shrink-0">✓</span>}
-            </button>
-          );
-        })}
-      </div>
-      {kind === 'audiooutput' && typeof navigator !== 'undefined' && 'selectAudioOutput' in (navigator.mediaDevices || {}) && (
-        <div className="pt-2">
-          <button
-            type="button"
-            onClick={async () => {
-              try {
-                const dev = await (navigator.mediaDevices as any).selectAudioOutput();
-                if (dev?.deviceId) setActiveMediaDevice(dev.deviceId);
-              } catch {}
-            }}
-            className="w-full py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white/80 cursor-pointer transition-colors"
-          >
-            🔊 Choose Audio Output (Bluetooth / Phone)…
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function Popover({
-  onClose,
-  wide,
-  children,
-}: {
-  onClose: () => void;
-  wide?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <>
-      <div className="fixed inset-0 z-[70]" onPointerDown={onClose} onClick={onClose} />
-      <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[71] rounded-3xl overflow-y-auto"
-        style={{
-          background: 'rgba(24, 26, 34, 0.78)',
-          backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
-          WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
-          border: '1px solid rgba(255, 255, 255, 0.20)',
-          boxShadow:
-            '0 24px 64px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
-          width: wide ? 'min(94vw, 560px)' : 'min(94vw, 380px)',
-          maxHeight: '62vh',
-        }}
-      >
-        {children}
-      </div>
-    </>
-  );
-}
 
 export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'speaker', label: 'Speaker View', hint: 'Spotlighted participant fills the stage' },
   { id: 'gallery', label: 'Gallery Grid', hint: 'All participants in an equal balanced grid' },
   { id: 'active', label: 'Active Speaker', hint: 'Dynamically tracks whoever is speaking' },
 ];
+
+function SpeakerDeviceSelect({
+  devices,
+  value,
+  onChange,
+  onRefresh,
+}: {
+  devices: MediaDeviceInfo[];
+  value: string | undefined;
+  onChange: (id: string) => void;
+  onRefresh: () => void;
+}) {
+  const hasOutputSelect =
+    typeof navigator !== 'undefined' &&
+    'selectAudioOutput' in (navigator.mediaDevices || {});
+
+  const handleSelectOutput = async () => {
+    try {
+      if (hasOutputSelect) {
+        const dev = await (navigator.mediaDevices as any).selectAudioOutput();
+        if (dev?.deviceId) {
+          onChange(dev.deviceId);
+          onRefresh();
+        }
+      }
+    } catch {}
+  };
+
+  return (
+    <div className="block">
+      <span className="block text-[11px] font-semibold uppercase tracking-wider text-white/50 mb-1.5">
+        Speaker / Audio Output
+      </span>
+      {devices.length > 0 ? (
+        <div className="space-y-2">
+          <select
+            value={value ?? devices[0]?.deviceId ?? ''}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full px-3.5 py-3 rounded-2xl text-xs font-medium cursor-pointer transition min-h-[44px]"
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              color: '#f3f4f6',
+              border: '1px solid rgba(255, 255, 255, 0.16)',
+            }}
+          >
+            {devices.map((d, i) => (
+              <option key={d.deviceId || i} value={d.deviceId} className="bg-neutral-900 text-white">
+                {d.label || `Speaker ${i + 1}`}
+              </option>
+            ))}
+          </select>
+          {hasOutputSelect && (
+            <button
+              type="button"
+              onClick={handleSelectOutput}
+              className="w-full py-2.5 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white/90 transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <SpeakerIcon className="w-4 h-4 text-emerald-400" />
+              <span>Choose Output Device…</span>
+            </button>
+          )}
+        </div>
+      ) : (
+        <div
+          className="p-3.5 rounded-2xl space-y-2"
+          style={{
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+          }}
+        >
+          <div className="flex items-center justify-between text-xs text-white">
+            <span className="font-semibold flex items-center gap-1.5">
+              <SpeakerIcon className="w-4 h-4 text-emerald-400" />
+              <span>Default Speaker / Bluetooth</span>
+            </span>
+            <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 font-bold text-[10px]">
+              Active
+            </span>
+          </div>
+          <p className="text-[11px] text-white/50 leading-relaxed">
+            Audio automatically routes to your phone speaker, Bluetooth, or connected headphones.
+          </p>
+          {hasOutputSelect && (
+            <button
+              type="button"
+              onClick={handleSelectOutput}
+              className="w-full py-2 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white transition flex items-center justify-center gap-2 cursor-pointer"
+            >
+              <SpeakerIcon className="w-4 h-4 text-emerald-400" />
+              <span>Choose Speaker / Bluetooth…</span>
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function DeviceSelect({
+  label,
+  devices,
+  value,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  devices: MediaDeviceInfo[];
+  value: string | undefined;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}) {
+  if (devices.length === 0) return null;
+  return (
+    <label className="block">
+      <span className="block text-[11px] font-semibold uppercase tracking-wider text-white/50 mb-1.5">{label}</span>
+      <select
+        value={value ?? devices[0]?.deviceId ?? ''}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        className="w-full px-3.5 py-3 rounded-2xl text-xs font-medium cursor-pointer disabled:opacity-50 transition min-h-[44px]"
+        style={{
+          background: 'rgba(255, 255, 255, 0.08)',
+          color: '#f3f4f6',
+          border: '1px solid rgba(255, 255, 255, 0.16)',
+        }}
+      >
+        {devices.map((d, i) => (
+          <option key={d.deviceId || i} value={d.deviceId} className="bg-neutral-900 text-white">
+            {d.label || `${label} ${i + 1}`}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 export default function CallControlBar({
   isHost,
@@ -288,6 +198,10 @@ export default function CallControlBar({
   peopleOpen,
   onToggleChat,
   onTogglePeople,
+  viewMode,
+  onViewModeChange,
+  onToggleEffects,
+  onToggleMeetingInfo,
 }: {
   isHost: boolean;
   onEndClassIntent: () => void;
@@ -298,12 +212,26 @@ export default function CallControlBar({
   onTogglePeople: () => void;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  onToggleEffects?: () => void;
+  onToggleMeetingInfo?: () => void;
 }) {
   const room = useRoomContext();
-  const [menu, setMenu] = useState<MenuId>(null);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
+
+  const mic = useTrackToggle({ source: Track.Source.Microphone });
+  const camera = useTrackToggle({ source: Track.Source.Camera });
+  const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
+
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
+  const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
+  const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string>();
+
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
-  const screenShare = useTrackToggle({ source: Track.Source.ScreenShare });
+
   const [nativePending, setNativePending] = useState(false);
   const [nativeSharing, setNativeSharingState] = useState(false);
 
@@ -315,6 +243,19 @@ export default function CallControlBar({
     setNativeSharingState(getNativeSharing());
     return subscribeNativeSharing((active) => setNativeSharingState(active));
   }, [nativeShell]);
+
+  const refreshDevices = async () => {
+    try {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      setCameras(all.filter((d) => d.kind === 'videoinput'));
+      setMics(all.filter((d) => d.kind === 'audioinput'));
+      setSpeakers(all.filter((d) => d.kind === 'audiooutput'));
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshDevices();
+  }, []);
 
   const toggleNativeShare = async () => {
     if (!sessionId || nativePending) return;
@@ -337,125 +278,447 @@ export default function CallControlBar({
   const isModerator = room.localParticipant.permissions?.canPublishData ?? false;
   const canScreenShare = isModerator;
 
-  const toggleMenu = (target: MenuId) => {
-    setMenu((curr) => (curr === target ? null : target));
+  const toggleHandRaise = () => {
+    const next = !handRaised;
+    setHandRaised(next);
+    // Publish data message for hand raise if available
+    try {
+      const payload = new TextEncoder().encode(JSON.stringify({ type: 'hand_raise', raised: next }));
+      room.localParticipant.publishData(payload, { reliable: true, topic: 'hand_raise' }).catch(() => {});
+    } catch {}
   };
 
   return (
     <>
-      {/* Floating frosted glassmorphic pill bar */}
+      {/* Google Meet Bottom Control Bar */}
       <div
-        className="fixed inset-x-0 bottom-3 sm:bottom-5 z-40 flex justify-center px-2 pointer-events-none"
+        className="fixed inset-x-0 bottom-2 sm:bottom-4 z-40 flex justify-center px-3 pointer-events-none"
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div
-          className="call-control-bar pointer-events-auto flex items-center gap-1.5 sm:gap-3 px-2 sm:px-4 py-1.5 rounded-full shrink-0 overflow-x-auto max-w-[96vw]"
+          className="call-control-bar pointer-events-auto flex items-center justify-center gap-3 sm:gap-4 px-4 py-2.5 rounded-full shrink-0 shadow-2xl transition-all"
           style={{
-            background: 'rgba(24, 26, 34, 0.50)',
-            backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-            WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-            border: '1px solid rgba(255, 255, 255, 0.20)',
-            boxShadow:
-              '0 20px 48px rgba(0, 0, 0, 0.40), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
-            scrollbarWidth: 'none',
+            background: 'rgba(32, 28, 25, 0.92)',
+            backdropFilter: 'blur(32px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            boxShadow: '0 16px 40px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
           }}
         >
-          <ToggleWithCaret
-            source={Track.Source.Microphone}
-            label="microphone"
-            menuOpen={menu === 'mic'}
-            onToggleMenu={() => toggleMenu('mic')}
-          />
-          <ToggleWithCaret
-            source={Track.Source.Camera}
-            label="camera"
-            menuOpen={menu === 'camera'}
-            onToggleMenu={() => toggleMenu('camera')}
-          />
-
-          {canScreenShare && (
-            <RoundButton
-              label={nativeShell && nativePending ? 'Starting screen share…' : 'Present screen'}
-              active={nativeShell ? nativeSharing : screenShare.enabled}
-              onClick={nativeShell ? toggleNativeShare : () => screenShare.toggle()}
-            >
-              <ScreenShareIcon />
-            </RoundButton>
-          )}
-
-          <RoundButton
-            label="Chat"
-            active={chatOpen}
-            badge={chatOpen ? 0 : unreadMessages}
-            onClick={onToggleChat}
-          >
-            <ChatIcon />
-          </RoundButton>
-
-          <RoundButton label="Add people / Participants" active={peopleOpen} onClick={onTogglePeople}>
-            <PeopleIcon />
-          </RoundButton>
-
-          {/* Apple FaceTime red pill End/Leave button */}
+          {/* Button 1: Microphone (Red when muted, Dark Gray when on) */}
           <button
             type="button"
-            onClick={() => {
+            onClick={() => mic.toggle()}
+            disabled={mic.pending}
+            title={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
+            aria-label={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
+            className="w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0 shadow-md hover:brightness-110"
+            style={{
+              background: mic.enabled ? '#3c4043' : '#ea4335',
+              color: '#ffffff',
+              border: mic.enabled ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(255, 255, 255, 0.25)',
+              boxShadow: mic.enabled ? 'none' : '0 4px 14px rgba(234, 67, 53, 0.4)',
+            }}
+          >
+            {mic.enabled ? <MicIcon className="w-5 h-5" /> : <MicOffIcon className="w-5 h-5" />}
+          </button>
+
+          {/* Button 2: Camera (Red when off, Dark Gray when on) */}
+          <button
+            type="button"
+            onClick={() => camera.toggle()}
+            disabled={camera.pending}
+            title={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
+            aria-label={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
+            className="w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0 shadow-md hover:brightness-110"
+            style={{
+              background: camera.enabled ? '#3c4043' : '#ea4335',
+              color: '#ffffff',
+              border: camera.enabled ? '1px solid rgba(255, 255, 255, 0.12)' : '1px solid rgba(255, 255, 255, 0.25)',
+              boxShadow: camera.enabled ? 'none' : '0 4px 14px rgba(234, 67, 53, 0.4)',
+            }}
+          >
+            {camera.enabled ? <CameraIcon className="w-5 h-5" /> : <CameraOffIcon className="w-5 h-5" />}
+          </button>
+
+          {/* Button 3: Hand Raise (✋ Google Meet style) */}
+          <button
+            type="button"
+            onClick={toggleHandRaise}
+            title={handRaised ? 'Lower hand' : 'Raise hand'}
+            aria-label={handRaised ? 'Lower hand' : 'Raise hand'}
+            className="w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
+            style={{
+              background: handRaised ? '#8ab4f8' : '#3c4043',
+              color: handRaised ? '#1e293b' : '#ffffff',
+              border: handRaised ? '1px solid rgba(138, 180, 248, 0.5)' : '1px solid rgba(255, 255, 255, 0.12)',
+              boxShadow: handRaised ? '0 4px 14px rgba(138, 180, 248, 0.45)' : 'none',
+            }}
+          >
+            <HandRaiseIcon className="w-5 h-5" />
+          </button>
+
+          {/* Button 4: More Options (⋮ 3-dots) */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMoreMenuOpen((v) => !v)}
+              title="More options"
+              aria-label="More options"
+              className="relative w-12 h-12 sm:w-13 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
+              style={{
+                background: moreMenuOpen ? '#4f5358' : '#3c4043',
+                color: '#ffffff',
+                border: '1px solid rgba(255, 255, 255, 0.12)',
+              }}
+            >
+              <MoreIcon className="w-5 h-5" />
+              {unreadMessages > 0 && !chatOpen && (
+                <span
+                  className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-blue-500 text-white shadow-md"
+                >
+                  {unreadMessages > 9 ? '9+' : unreadMessages}
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Button 5: End Call (Red Pill button matching Google Meet) */}
+          <button
+            type="button"
+            onClick={async () => {
               try {
-                if (isHost) onEndClassIntent();
+                if (isHost) {
+                  onEndClassIntent();
+                  try {
+                    const payload = new TextEncoder().encode(
+                      JSON.stringify({ type: 'CLASS_ENDED', sessionId })
+                    );
+                    room.localParticipant.publishData(payload, { reliable: true }).catch(() => {});
+                  } catch {}
+                  fetch(`/api/sessions/${sessionId}/end`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    keepalive: true,
+                  }).catch(() => {});
+                }
                 room.disconnect();
               } catch (err) {
-                console.warn("Disconnect error caught:", err);
-                if (typeof window !== "undefined") {
-                  window.location.href = "/dashboard";
+                console.warn('Disconnect error caught:', err);
+                if (typeof window !== 'undefined') {
+                  window.location.href = '/dashboard';
                 }
               }
             }}
             title={isHost ? 'End class for everyone' : 'Leave call'}
             aria-label={isHost ? 'End class for everyone' : 'Leave call'}
-            className="flex items-center justify-center gap-1.5 px-3.5 sm:px-5 rounded-full text-white font-bold cursor-pointer transition-all duration-200 active:scale-95 shrink-0 hover:brightness-110"
+            className="w-14 sm:w-16 h-12 sm:h-13 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-lg hover:brightness-110"
             style={{
-              height: 'var(--call-btn)',
-              background: DANGER_GRADIENT,
-              border: '1px solid rgba(255, 255, 255, 0.35)',
-              boxShadow:
-                '0 8px 24px rgba(255, 59, 48, 0.50), inset 0 1px 0 0 rgba(255, 255, 255, 0.60), inset 0 -1px 0 0 rgba(0, 0, 0, 0.25)',
+              background: '#ea4335',
+              color: '#ffffff',
+              border: '1px solid rgba(255, 255, 255, 0.25)',
+              boxShadow: '0 6px 18px rgba(234, 67, 53, 0.5)',
             }}
           >
-            <LeaveIcon className="shrink-0" />
-            <span className="text-xs sm:text-sm font-semibold tracking-tight whitespace-nowrap">
-              {isHost ? 'End' : 'Leave'}
-            </span>
+            <LeaveIcon className="w-6 h-6" />
           </button>
         </div>
       </div>
 
-      {menu === 'mic' && (
-        <Popover onClose={() => setMenu(null)}>
-          <DeviceList kind="audioinput" label="Microphone" />
-          <DeviceList kind="audiooutput" label="Speaker" />
-        </Popover>
-      )}
+      {/* GOOGLE MEET MORE OPTIONS BOTTOM SHEET */}
+      {moreMenuOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[70] bg-black/50 backdrop-blur-sm animate-fadeIn"
+            onClick={() => setMoreMenuOpen(false)}
+          />
+          <div
+            className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-6 z-[71] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-5 shadow-2xl animate-fadeIn overflow-y-auto max-h-[78vh]"
+            style={{
+              background: 'rgba(32, 28, 25, 0.95)',
+              backdropFilter: 'blur(36px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(36px) saturate(180%)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)',
+            }}
+          >
+            {/* Top Drag Handle */}
+            <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-4" />
 
-      {menu === 'camera' && (
-        <Popover onClose={() => setMenu(null)}>
-          <DeviceList kind="videoinput" label="Camera" />
-          {hasMultipleCameras && (
-            <div className="px-2 pb-2">
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-2">
+              <h3 className="text-sm font-bold text-white tracking-tight">More Options</h3>
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen(false)}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center text-xs transition cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-1 py-1">
+              {/* Item 1: In-call messages (Chat) */}
               <button
                 type="button"
                 onClick={() => {
-                  cycleCamera();
-                  setMenu(null);
+                  setMoreMenuOpen(false);
+                  onToggleChat();
                 }}
-                className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
-                style={{ background: 'rgba(255,255,255,0.1)', color: '#fff' }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
               >
-                <FlipCameraIcon /> Flip camera
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                    <ChatIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-white">In-call messages</div>
+                    <div className="text-[11px] text-white/50">Send messages to participants</div>
+                  </div>
+                </div>
+                {unreadMessages > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500 text-white">
+                    {unreadMessages}
+                  </span>
+                )}
+              </button>
+
+              {/* Item 2: Share screen (Present screen) */}
+              {canScreenShare && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    if (nativeShell) {
+                      toggleNativeShare();
+                    } else {
+                      screenShare.toggle();
+                    }
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                      <ScreenShareIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white">Share screen</div>
+                      <div className="text-[11px] text-white/50">Present your screen to everyone</div>
+                    </div>
+                  </div>
+                  {(nativeShell ? nativeSharing : screenShare.enabled) && (
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
+                      Sharing
+                    </span>
+                  )}
+                </button>
+              )}
+
+              {/* Item 3: People / Participants */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  onTogglePeople();
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                    <PeopleIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-white">People & Participants</div>
+                    <div className="text-[11px] text-white/50">Manage attendees, admission & ring</div>
+                  </div>
+                </div>
+              </button>
+
+              {/* Item 4: Call Layout Switcher */}
+              {onViewModeChange && (
+                <div className="p-3 rounded-2xl bg-white/5 space-y-2">
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0">
+                      <LayoutIcon className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white">Call Layout</div>
+                      <div className="text-[10px] text-white/50">Switch stage layout mode</div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                    {VIEW_MODES.map((m) => {
+                      const selected = viewMode === m.id;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          onClick={() => {
+                            onViewModeChange(m.id);
+                            setMoreMenuOpen(false);
+                          }}
+                          className="py-1.5 px-1 rounded-xl text-center cursor-pointer transition-all duration-150 border text-[11px] font-medium"
+                          style={{
+                            background: selected ? 'rgba(0, 122, 255, 0.35)' : 'rgba(255, 255, 255, 0.05)',
+                            borderColor: selected ? 'rgba(0, 122, 255, 0.6)' : 'rgba(255, 255, 255, 0.1)',
+                            color: selected ? '#93c5fd' : '#e5e7eb',
+                          }}
+                        >
+                          {m.id === 'gallery' ? 'Grid' : m.id === 'speaker' ? 'Speaker' : 'Active'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Item 5: Visual effects (Background blur & virtual backgrounds) */}
+              {onToggleEffects && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    onToggleEffects();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                      <SparklesIcon className="w-5 h-5 text-[#ffb787]" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white">Apply visual effects</div>
+                      <div className="text-[11px] text-white/50">Background blur, masjid & wallpapers</div>
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {/* Item 5: Flip Camera (if mobile / multi-camera) */}
+              {hasMultipleCameras && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    cycleCamera();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                      <FlipCameraIcon className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white">Switch camera</div>
+                      <div className="text-[11px] text-white/50">Toggle front and back cameras</div>
+                    </div>
+                  </div>
+                </button>
+              )}
+
+              {/* Item 6: Audio & Video Device Settings */}
+              <button
+                type="button"
+                onClick={() => {
+                  setMoreMenuOpen(false);
+                  setSettingsOpen(true);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                    <SettingsIcon className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-semibold text-white">Settings & Audio Output</div>
+                    <div className="text-[11px] text-white/50">Speaker, Bluetooth, microphone & camera</div>
+                  </div>
+                </div>
+              </button>
+
+              {/* Item 7: Meeting Info & Invite Link */}
+              {onToggleMeetingInfo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    onToggleMeetingInfo();
+                  }}
+                  className="w-full flex items-center justify-between p-3 rounded-2xl hover:bg-white/10 text-left transition cursor-pointer"
+                >
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0">
+                      <InfoIcon className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <div className="text-xs font-semibold text-white">Meeting details</div>
+                      <div className="text-[11px] text-white/50">Meeting ID, invite link & share sheet</div>
+                    </div>
+                  </div>
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* GOOGLE MEET DEVICE SETTINGS MODAL */}
+      {settingsOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-[75] bg-black/50 backdrop-blur-sm animate-fadeIn"
+            onClick={() => setSettingsOpen(false)}
+          />
+          <div
+            className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-6 z-[76] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-5 shadow-2xl animate-fadeIn overflow-y-auto max-h-[75vh]"
+            style={{
+              background: 'rgba(32, 28, 25, 0.95)',
+              backdropFilter: 'blur(36px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(36px) saturate(180%)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)',
+            }}
+          >
+            <div className="w-10 h-1 rounded-full bg-white/20 mx-auto mb-3" />
+            <div className="flex items-center justify-between pb-3 border-b border-white/10 mb-4">
+              <h3 className="text-sm font-bold text-white tracking-tight">Audio & Video Devices</h3>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center text-xs transition cursor-pointer"
+              >
+                ✕
               </button>
             </div>
-          )}
-        </Popover>
+
+            <div className="space-y-4">
+              <SpeakerDeviceSelect
+                devices={speakers}
+                value={audioOutputDeviceId}
+                onChange={(id) => {
+                  setAudioOutputDeviceId(id);
+                  room.switchActiveDevice('audiooutput', id).catch(() => {});
+                }}
+                onRefresh={refreshDevices}
+              />
+              <DeviceSelect
+                label="Microphone"
+                devices={mics}
+                value={room.getActiveDevice('audioinput')}
+                onChange={(id) => room.switchActiveDevice('audioinput', id).catch(() => {})}
+                disabled={!mic.enabled}
+              />
+              <DeviceSelect
+                label="Camera"
+                devices={cameras}
+                value={room.getActiveDevice('videoinput')}
+                onChange={(id) => room.switchActiveDevice('videoinput', id).catch(() => {})}
+                disabled={!camera.enabled}
+              />
+            </div>
+          </div>
+        </>
       )}
     </>
   );
 }
+

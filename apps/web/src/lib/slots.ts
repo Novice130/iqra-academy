@@ -34,7 +34,7 @@
  */
 
 import { db } from "./db";
-import { and, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, or } from "drizzle-orm";
 import { sessions, teacherAvailability, teacherTimeOff, users } from "@/db/schema";
 
 export type DayOfWeek =
@@ -256,11 +256,14 @@ export async function generateSlots(opts: GenerateSlotsOptions): Promise<Slot[]>
   const to = opts.to ?? new Date(Date.now() + 28 * DAY);
   if (to <= from) return [];
 
-  const where = [
-    eq(teacherAvailability.orgId, opts.orgId),
-    eq(teacherAvailability.isActive, true),
-  ];
-  if (opts.teacherId) where.push(eq(teacherAvailability.teacherId, opts.teacherId));
+  const whereConditions = [eq(teacherAvailability.isActive, true)];
+  if (opts.teacherId) {
+    whereConditions.push(eq(teacherAvailability.teacherId, opts.teacherId));
+  } else if (opts.orgId) {
+    whereConditions.push(
+      or(eq(teacherAvailability.orgId, opts.orgId), eq(teacherAvailability.orgId, "org_default"))!
+    );
+  }
 
   const rows = await db
     .select({
@@ -275,7 +278,7 @@ export async function generateSlots(opts: GenerateSlotsOptions): Promise<Slot[]>
     })
     .from(teacherAvailability)
     .innerJoin(users, eq(users.id, teacherAvailability.teacherId))
-    .where(and(...where));
+    .where(and(...whereConditions));
 
   const live = rows.filter((r) => r.deletedAt === null);
   if (live.length === 0) return [];

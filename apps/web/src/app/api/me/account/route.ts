@@ -77,9 +77,13 @@ export async function GET(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
+      const isRootAdmin = ctx.email?.toLowerCase() === "syedamer130@gmail.com";
+
       return NextResponse.json({
         role: ctx.role,
-        canDelete: ctx.role === "STUDENT" && !ctx.isImpersonating,
+        email: ctx.email,
+        isProtected: isRootAdmin,
+        canDelete: ctx.role === "STUDENT" && !ctx.isImpersonating && !isRootAdmin,
       });
     } catch (error) {
       return handleApiError(error);
@@ -96,6 +100,11 @@ export async function DELETE(request: NextRequest) {
 
       schema.parse(await request.json().catch(() => ({})));
 
+      if (ctx.email?.toLowerCase() === "syedamer130@gmail.com") {
+        throw new ForbiddenError(
+          "The root administrator account (syedamer130@gmail.com) is permanently protected and cannot be deleted."
+        );
+      }
       if (ctx.isImpersonating) {
         throw new ForbiddenError(
           "You're impersonating this user. Stop impersonating before deleting anything."

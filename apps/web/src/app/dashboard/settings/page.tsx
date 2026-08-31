@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from "react";
 import TimeZoneCard from "./TimeZoneCard";
+import TwoFactorAuthCard from "./TwoFactorAuthCard";
 import DeleteAccountCard from "./DeleteAccountCard";
 import { authClient } from "@/lib/auth-client";
 
@@ -470,6 +471,9 @@ export default function SettingsPage() {
           ))}
         </div>
       </section>
+
+      {/* Two-Factor Authentication (2FA) */}
+      <TwoFactorAuthCard />
 
       {/* Account Deletion */}
       <DeleteAccountCard />

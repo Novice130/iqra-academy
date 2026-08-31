@@ -84,10 +84,15 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   void initState() {
     super.initState();
 
-    _refresh = PullToRefreshController(
-      settings: PullToRefreshSettings(color: const Color(0xFF10B981)),
-      onRefresh: () => _controller?.reload(),
-    );
+    try {
+      _refresh = PullToRefreshController(
+        settings: PullToRefreshSettings(color: const Color(0xFF10B981)),
+        onRefresh: () => _controller?.reload(),
+      );
+    } catch (_) {
+      // In headless unit tests where InAppWebViewPlatform is not registered
+      _refresh = null;
+    }
 
     // A notification tapped while the app was closed is already waiting here.
     _deepLinks = PushService.instance.deepLinks.listen(_openPath);

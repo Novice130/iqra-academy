@@ -42,9 +42,10 @@ const toMinutes = (t: string) => {
 const fromMinutes = (m: number) =>
   `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
 
-/** 14:30 → "2:30 PM" */
+/** 14:30 → "2:30 PM", 24:00 → "12:00 AM (Midnight)" */
 function pretty(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number);
+  const [h, m] = hhmm.slice(0, 5).split(":").map(Number);
+  if (h === 24 && m === 0) return "12:00 AM";
   const suffix = h >= 12 ? "PM" : "AM";
   const hour = h % 12 === 0 ? 12 : h % 12;
   return `${hour}:${String(m).padStart(2, "0")} ${suffix}`;
@@ -163,9 +164,7 @@ export default function AvailabilityPage() {
     setSelected((prev) => {
       const next: Record<string, Set<string>> = { ...prev };
       for (const d of targetDays) {
-        const set = new Set(next[d.id] ?? []);
-        for (const s of slotsToAdd) set.add(s);
-        next[d.id] = set;
+        next[d.id] = new Set(slotsToAdd);
       }
       return next;
     });
@@ -302,7 +301,7 @@ export default function AvailabilityPage() {
           <button
             type="button"
             onClick={clearAll}
-            disabled={gridLocked || totalCells === 0}
+            disabled={totalCells === 0}
             className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Clear All
@@ -310,7 +309,7 @@ export default function AvailabilityPage() {
           <button
             type="button"
             onClick={save}
-            disabled={saving || loading || gridLocked}
+            disabled={saving || loading}
             className="px-5 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 shadow-md hover:shadow-emerald-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {saving ? "Saving…" : onboarding ? "Save & Finish" : "Save Hours"}
@@ -521,8 +520,8 @@ export default function AvailabilityPage() {
             <button
               type="button"
               onClick={applyQuickRepeat}
-              disabled={gridLocked}
-              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md hover:shadow-emerald-600/15 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none shrink-0"
+              disabled={saving || loading}
+              className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md hover:shadow-emerald-600/15 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none shrink-0 cursor-pointer"
             >
               + Apply Repeat Hours
             </button>
@@ -664,6 +663,8 @@ function WheelColumn({ items, value, onChange }: WheelColumnProps) {
   const [scrollTop, setScrollTop] = useState(0);
   const itemHeight = 36; // 36px item height matches CSS h-9
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const isProgrammaticRef = useRef(false);
+  const lockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const node = containerRef.current;
@@ -671,8 +672,13 @@ function WheelColumn({ items, value, onChange }: WheelColumnProps) {
       const idx = items.indexOf(value);
       if (idx !== -1) {
         const expected = idx * itemHeight;
-        if (Math.abs(node.scrollTop - expected) > 5) {
+        if (Math.abs(node.scrollTop - expected) > 2) {
+          isProgrammaticRef.current = true;
           node.scrollTop = expected;
+          if (lockTimerRef.current) clearTimeout(lockTimerRef.current);
+          lockTimerRef.current = setTimeout(() => {
+            isProgrammaticRef.current = false;
+          }, 150);
         }
       }
     }
@@ -683,10 +689,12 @@ function WheelColumn({ items, value, onChange }: WheelColumnProps) {
     const currentScrollTop = container.scrollTop;
     setScrollTop(currentScrollTop);
 
+    if (isProgrammaticRef.current) return;
+
     const index = Math.round(currentScrollTop / itemHeight);
     if (index >= 0 && index < items.length) {
       const activeValue = items[index];
-      if (activeValue !== value) {
+      if (activeValue && activeValue !== value) {
         onChange(activeValue);
       }
     }
@@ -721,20 +729,30 @@ function WheelColumn({ items, value, onChange }: WheelColumnProps) {
             const opacity = Math.max(0.15, 1 - Math.min(0.85, Math.abs(offset) * 0.4));
             const scale = Math.max(0.75, 1.2 - Math.min(0.45, Math.abs(offset) * 0.18));
             const translateZ = Math.abs(offset) * -12; // push back
+            const isCurrent = item === value;
 
             return (
-              <div
+              <button
                 key={item}
-                className="h-9 flex items-center justify-center text-xs font-bold snap-center transition-all duration-75 select-none"
+                type="button"
+                onClick={() => {
+                  if (item !== value) {
+                    onChange(item);
+                  }
+                }}
+                className="h-9 w-full flex items-center justify-center text-xs font-bold snap-center transition-all duration-75 select-none cursor-pointer"
                 style={{
                   transform: `rotateX(${angle}deg) scale(${scale}) translateZ(${translateZ}px)`,
-                  opacity: opacity,
+                  opacity: isCurrent ? 1 : opacity,
                   transformStyle: "preserve-3d",
-                  color: Math.abs(offset) < 0.4 ? "var(--text-primary)" : "var(--text-tertiary)"
+                  color: isCurrent || Math.abs(offset) < 0.4 ? "var(--text-primary)" : "var(--text-tertiary)",
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
                 }}
               >
                 {item}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -755,8 +773,8 @@ const PERIODS = ["AM", "PM"];
 function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
   const { hour12, minute, ampm } = useMemo(() => {
     const [hStr, mStr] = value.split(":");
-    const h = parseInt(hStr, 10);
-    const m = parseInt(mStr, 10);
+    const h = parseInt(hStr || "0", 10);
+    const m = parseInt(mStr || "0", 10);
     const p = h >= 12 ? "PM" : "AM";
     let h12 = h % 12;
     if (h12 === 0) h12 = 12;
@@ -776,6 +794,13 @@ function TimeWheelPicker({ value, onChange }: TimeWheelPickerProps) {
 
   return (
     <div className="flex items-center gap-1.5 p-3.5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-xs relative">
+      <input
+        type="time"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="sr-only"
+        aria-label="Select Time"
+      />
       <style dangerouslySetInnerHTML={{ __html: `
         .scrollbar-none::-webkit-scrollbar {
           display: none;

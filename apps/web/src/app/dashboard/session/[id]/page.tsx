@@ -59,7 +59,13 @@ export default function SessionRoomPage() {
       );
       if (!res.ok) {
         const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to join session');
+        const msg = errData.error || 'Failed to join session';
+        if (msg.toLowerCase().includes('ended') || msg.toLowerCase().includes('already ended')) {
+          joinedRef.current = true;
+          router.replace('/dashboard');
+          return false;
+        }
+        throw new Error(msg);
       }
       const data = await res.json();
 
@@ -232,5 +238,15 @@ export default function SessionRoomPage() {
     );
   }
 
-  return <PreJoinScreen userName={userName} onJoin={handleJoin} />;
+  return (
+    <PreJoinScreen
+      userName={userName}
+      recipientName={teacherName}
+      recipientEmail={teacherIdentity}
+      sessionTitle={sessionTitle}
+      joinCode={joinCode}
+      onJoin={handleJoin}
+    />
+  );
 }
+

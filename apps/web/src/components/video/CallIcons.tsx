@@ -163,6 +163,66 @@ export const VolumeOffIcon = (p: P) => (
   </svg>
 );
 
+export const HandRaiseIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M18 11V6a2 2 0 0 0-4 0v4M14 10V4a2 2 0 0 0-4 0v6M10 10.5V6a2 2 0 0 0-4 0v8" />
+    <path d="M6 14v1a6 6 0 0 0 12 0v-4a2 2 0 0 0-4 0v1" />
+  </svg>
+);
+
+export const BackArrowIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <line x1="19" y1="12" x2="5" y2="12" />
+    <polyline points="12 19 5 12 12 5" />
+  </svg>
+);
+
+export const PhoneCallIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+  </svg>
+);
+
+export const SpeakerIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+  </svg>
+);
+
+export const PhoneSpeakerIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+    <line x1="12" y1="18" x2="12.01" y2="18" />
+  </svg>
+);
+
+export const BluetoothIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <polyline points="6.5 6.5 17.5 17.5 12 23 12 1 17.5 6.5 6.5 17.5" />
+  </svg>
+);
+
+export const InfoIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </svg>
+);
+
+export const HostShieldIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+export const SparklesIcon = (p: P) => (
+  <svg {...base} {...p}>
+    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3z" />
+  </svg>
+);
+
 /**
  * Three bars that bob while somebody is talking (animation lives in
  * globals.css so it can be disabled under prefers-reduced-motion).
@@ -188,3 +248,4 @@ export const SpeakingBarsIcon = ({ className = '' }: { className?: string }) => 
     ))}
   </svg>
 );
+

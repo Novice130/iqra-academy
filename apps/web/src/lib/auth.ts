@@ -22,33 +22,21 @@
 
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { db } from "./db";
+import { twoFactor } from "better-auth/plugins";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
+import "./db";
 import * as schema from "@/db/schema";
+import { sendTwoFactorEmail } from "./email";
+
+const authDb = drizzle(neon(process.env.DATABASE_URL!), { schema });
 
 /**
  * Better Auth server instance.
- *
- * CONFIGURATION DECISIONS:
- * 1. `drizzleAdapter` — uses our Drizzle client with full schema
- * 2. `emailAndPassword` — primary auth method (most Quran school parents
- *    aren't tech-savvy, email+password is familiar)
- * 3. Session stored in DB — survives server restarts, supports multi-device
- *
- * FUTURE ADDITIONS:
- * - Google OAuth (many users have Gmail)
- * - Magic link login (passwordless)
- * - 2FA for admins
- *
- * FAILURE MODES:
- * - If DB is down: auth fails (users can't log in) — acceptable tradeoff
- *   vs. Redis which is another service to manage
- * - If BETTER_AUTH_SECRET is missing: auth won't initialize (app crashes on start)
  */
 export const auth = betterAuth({
   /**
    * Secret used to sign session tokens and cookies.
-   * MUST be a long, random string. In production, this comes from env vars.
-   * If compromised, an attacker could forge sessions (very bad).
    */
   secret: process.env.BETTER_AUTH_SECRET!,
 
@@ -60,23 +48,38 @@ export const auth = betterAuth({
     "https://novicetutor.com",
     "https://www.novicetutor.com",
     "https://app.novicetutor.com",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
     ...(process.env.BETTER_AUTH_TRUSTED_ORIGINS ? process.env.BETTER_AUTH_TRUSTED_ORIGINS.split(",") : []),
   ],
 
   /**
-   * Database adapter — explicit table mapping for Better Auth.
-   * Maps Better Auth's internal table names to our Drizzle tables.
-   * Note: `session` maps to `authSessions` (not `sessions` which is for classes!)
+   * Database adapter — explicit table mapping for Better Auth using stateless HTTP client.
    */
-  database: drizzleAdapter(db, {
+  database: drizzleAdapter(authDb, {
     provider: "pg",
     schema: {
       user: schema.users,
       session: schema.authSessions,
       account: schema.accounts,
       verification: schema.verifications,
+      twoFactor: schema.twoFactors,
     },
   }),
+
+  /**
+   * Two-Factor Authentication Plugin (Google Authenticator TOTP & Email OTP)
+   */
+  plugins: [
+    twoFactor({
+      issuer: "Novice Tutor",
+      otpOptions: {
+        sendOTP: async ({ user, otp }) => {
+          await sendTwoFactorEmail(user.email, otp);
+        },
+      },
+    }),
+  ],
 
   /**
    * Email + password authentication.

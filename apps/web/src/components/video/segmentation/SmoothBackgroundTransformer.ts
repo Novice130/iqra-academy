@@ -415,9 +415,14 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
             duration: frame.duration ?? undefined,
           })
         );
+      } else {
+        passThrough();
       }
     } catch (err) {
       console.error('Background effect frame failed', err);
+      if (!passedThrough) {
+        passThrough();
+      }
     } finally {
       if (!passedThrough) frame.close();
     }

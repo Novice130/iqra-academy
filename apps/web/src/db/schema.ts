@@ -318,6 +318,7 @@ export const users = pgTable(
      */
     timezone: text("timezone"),
     role: userRoleEnum("role").notNull().default("STUDENT"),
+    twoFactorEnabled: boolean("two_factor_enabled").default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
     deletedAt: timestamp("deleted_at"),
@@ -714,18 +715,14 @@ export const sessions = pgTable(
   {
     id: text("id").primaryKey().$defaultFn(() => createId()),
     joinCode: text("join_code").unique().$defaultFn(() => {
-      // 12-digit easily readable numeric meeting ID (e.g. 482-910-374-819)
+      // 10-digit easily readable numeric meeting ID (3-4-3 format: e.g. 846-2891-188)
       const digits = '0123456789';
-      let result = '';
-      for (let i = 0; i < 12; i++) {
-        if (i > 0 && i % 3 === 0) result += '-';
-        if (i % 3 === 0) {
-          result += digits.charAt(1 + Math.floor(Math.random() * 9));
-        } else {
-          result += digits.charAt(Math.floor(Math.random() * 10));
-        }
-      }
-      return result;
+      const part1 = digits.charAt(1 + Math.floor(Math.random() * 9)) + digits.charAt(Math.floor(Math.random() * 10)) + digits.charAt(Math.floor(Math.random() * 10));
+      let part2 = '';
+      for (let i = 0; i < 4; i++) part2 += digits.charAt(Math.floor(Math.random() * 10));
+      let part3 = '';
+      for (let i = 0; i < 3; i++) part3 += digits.charAt(Math.floor(Math.random() * 10));
+      return `${part1}-${part2}-${part3}`;
     }),
     orgId: text("org_id").notNull().references(() => organizations.id),
     teacherId: text("teacher_id").notNull().references(() => users.id),
@@ -1298,6 +1295,24 @@ export const verifications = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
   }
+);
+
+/**
+ * TwoFactor — Better Auth's Two-Factor Authentication credentials.
+ * Stores encrypted TOTP secrets and backup codes per user.
+ */
+export const twoFactors = pgTable(
+  "two_factor",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    secret: text("secret").notNull(),
+    backupCodes: text("backup_codes").notNull(),
+  },
+  (t) => [
+    index("two_factor_user_idx").on(t.userId),
+    index("two_factor_secret_idx").on(t.secret),
+  ]
 );
 
 // ============================================================================

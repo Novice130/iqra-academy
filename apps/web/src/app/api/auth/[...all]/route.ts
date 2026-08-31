@@ -29,4 +29,4 @@ import { withDb, withHttpDb } from "@/lib/db";
 const handlers = toNextJsHandler(auth);
 
 export const GET = (request: Request) => withHttpDb(() => handlers.GET(request));
-export const POST = (request: Request) => withDb(() => handlers.POST(request));
+export const POST = (request: Request) => withHttpDb(() => handlers.POST(request));

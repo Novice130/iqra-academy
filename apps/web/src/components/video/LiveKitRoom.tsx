@@ -205,9 +205,30 @@ export default function LiveKitRoom({
   const router = useRouter();
   useWakeLock();
 
-  // See needsWebAudioMix: without this the teacher's volume slider is
-  // decorative on a phone. Empty deps — the browser doesn't change mid-call.
-  const roomOptions = useMemo(() => ({ webAudioMix: needsWebAudioMix() }), []);
+  // Google Meet & Microsoft Teams grade audio processing:
+  // - Acoustic Echo Cancellation (AEC3)
+  // - Deep Noise Suppression (NS)
+  // - Automatic Gain Control (AGC2)
+  // - Highpass filter (eliminates mic rumble, electrical hum, and AC fans)
+  // - Discontinuous Transmission (DTX) to eliminate background noise during speech pauses
+  const roomOptions = useMemo(
+    () => ({
+      webAudioMix: needsWebAudioMix(),
+      audioCaptureDefaults: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        sampleRate: 48000,
+      },
+      publishDefaults: {
+        dtx: true,
+        red: true,
+        audioBitrate: 32000,
+      },
+    }),
+    []
+  );
 
   /**
    * True while the page is frozen in the back/forward cache. The browser
@@ -375,7 +396,16 @@ export default function LiveKitRoom({
             : false
         }
         audio={
-          choices.audioEnabled ? (choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : true) : false
+          choices.audioEnabled
+            ? {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 48000,
+                ...(choices.audioDeviceId ? { deviceId: choices.audioDeviceId } : {}),
+              }
+            : false
         }
         // Computed once per mount rather than inline: a fresh options object on
         // every render would tear down and rebuild the Room.

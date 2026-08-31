@@ -21,7 +21,14 @@ export default async function SchedulePage({ searchParams }: Props) {
 
   if (!session) return null;
 
-  const user = session.user as unknown as { id: string; orgId: string };
+  const user = session.user as unknown as { id: string; orgId: string; role?: string; email?: string };
+  const dbUser = await db.query.users.findFirst({
+    where: eq(usersTable.id, user.id),
+    columns: { role: true, orgId: true },
+  });
+  const role = dbUser?.role || user.role || "STUDENT";
+  const isAdmin = role === "ORG_ADMIN" || role === "SUPER_ADMIN" || user.email === "syedamer130@gmail.com";
+  const isTeacher = role === "TEACHER";
 
   // Week range, padded by two days on each side. The exact week boundary is
   // resolved in the browser (WeekGrid) because the server runs in UTC and a
@@ -32,6 +39,20 @@ export default async function SchedulePage({ searchParams }: Props) {
   const weekStart = addDays(currentWeekStart, weekOffset * 7 - 2);
   const weekEnd = addDays(weekStart, 10);
   weekEnd.setHours(23, 59, 59, 999);
+
+  const scheduleWhere = [
+    eq(bookings.status, "CONFIRMED"),
+    gte(sessions.scheduledStart, weekStart),
+    lte(sessions.scheduledStart, weekEnd),
+  ];
+
+  if (!isAdmin) {
+    if (isTeacher) {
+      scheduleWhere.push(eq(sessions.teacherId, user.id));
+    } else {
+      scheduleWhere.push(eq(bookings.userId, user.id));
+    }
+  }
 
   // 1. Fetch real bookings for this week
   const weekBookings = await db
@@ -48,14 +69,7 @@ export default async function SchedulePage({ searchParams }: Props) {
     .from(bookings)
     .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
     .innerJoin(usersTable, eq(sessions.teacherId, usersTable.id))
-    .where(
-      and(
-        eq(bookings.userId, user.id),
-        eq(bookings.status, "CONFIRMED"),
-        gte(sessions.scheduledStart, weekStart),
-        lte(sessions.scheduledStart, weekEnd)
-      )
-    )
+    .where(and(...scheduleWhere))
     .orderBy(asc(sessions.scheduledStart));
 
   const gridBookings: WeekBooking[] = weekBookings.map((b) => ({

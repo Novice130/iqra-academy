@@ -9,8 +9,9 @@ import Link from "next/link";
 import { canAccessAdmin, adminResources, adminMeta } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
 import { sessions } from "@/db/schema";
-import { sql, inArray } from "drizzle-orm";
+import { sql, inArray, asc } from "drizzle-orm";
 import { getRoomServiceClient } from "@/lib/livekit";
+import ScheduledClassesMatrix, { type ScheduledClassItem } from "../ScheduledClassesMatrix";
 
 const TABLE_PAGES: Record<string, string> = {
   users: "/admin/users",
@@ -22,6 +23,7 @@ export default async function AdminPage() {
   return withDb(async () => {
     const tableCounts = await getTableCounts();
     const liveClasses = await getLiveClasses();
+    const scheduledClasses = await getScheduledClasses();
 
     return (
       <div className="space-y-8 animate-fadeIn">
@@ -75,7 +77,7 @@ export default async function AdminPage() {
           ))}
         </div>
 
-        {/* Live Classes Monitor */}
+        {/* Live Classes Monitor (Strictly active LiveKit rooms) */}
         <section className="rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
             <div className="flex items-center gap-2.5">
@@ -132,6 +134,9 @@ export default async function AdminPage() {
             )}
           </div>
         </section>
+
+        {/* Scheduled Classes Matrix (Dates x Teachers tabular format) */}
+        <ScheduledClassesMatrix classes={scheduledClasses} />
 
         {/* Quick Admin Actions */}
         <section className="space-y-4">
@@ -329,5 +334,36 @@ async function getTableCounts() {
       { label: "Sessions", count: 0 },
       { label: "Bookings", count: 0 },
     ];
+  }
+}
+
+async function getScheduledClasses(): Promise<ScheduledClassItem[]> {
+  try {
+    const upcoming = await db.query.sessions.findMany({
+      where: inArray(sessions.status, ["SCHEDULED"]),
+      with: {
+        teacher: { columns: { name: true, email: true } },
+        bookings: {
+          with: {
+            studentProfile: { columns: { name: true, track: true } },
+          },
+        },
+      },
+      orderBy: [asc(sessions.scheduledStart)],
+      limit: 50,
+    });
+
+    return upcoming.map((s) => ({
+      id: s.id,
+      title: s.title || "Quran Lesson",
+      track: s.track || "QAIDAH",
+      teacherName: s.teacher?.name || s.teacher?.email || "Teacher",
+      teacherEmail: s.teacher?.email || "",
+      scheduledStart: s.scheduledStart.toISOString(),
+      scheduledEnd: s.scheduledEnd.toISOString(),
+      students: s.bookings.map((b) => b.studentProfile?.name || "Student").join(", "),
+    }));
+  } catch {
+    return [];
   }
 }

@@ -36,10 +36,12 @@ import type { NextRequest } from "next/server";
  *   cross-origin from a class; segmentation is same-origin now.
  * - `frame-ancestors 'self'` — the site is never legitimately framed.
  */
+const isDev = process.env.NODE_ENV !== "production";
+
 const SECURITY_HEADERS: Record<string, string> = {
   "Content-Security-Policy": [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
+    `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' ${isDev ? "'unsafe-eval'" : ""}`.trim(),
     "worker-src 'self' blob:",
     "connect-src 'self' wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com",
     "img-src 'self' data: blob: https:",

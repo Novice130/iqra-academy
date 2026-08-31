@@ -58,8 +58,13 @@ export default function DashboardChrome({
   }
 
   const initials = (user.name || "U").charAt(0).toUpperCase();
-  const isTeachingRole = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "");
-  const isAdminRole = user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN";
+  const isAdminRole =
+    user.role === "ORG_ADMIN" ||
+    user.role === "SUPER_ADMIN" ||
+    user.email === "syedamer130@gmail.com";
+  const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
+  const isStudentRole = !isAdminRole && !isTeacherOnly;
+  const isTeachingRole = isTeacherOnly || isAdminRole;
 
   return (
     <div
@@ -97,63 +102,86 @@ export default function DashboardChrome({
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5">
-          <SidebarItem href="/dashboard" label="Home" />
-          <SidebarItem href="/dashboard/booking" label="Book a Class" />
-          <SidebarItem href="/dashboard/progress" label="Progress" />
-          {!["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "") && (
-            <SidebarItem href="/dashboard/chat" label="Messages" />
-          )}
-          <SidebarItem href="/dashboard/schedule" label="Schedule" />
-          <SidebarItem href="/join" label="📹 Join with Code" />
-
-          <div className="pt-5 pb-1.5 px-3">
-            <div
-              className="text-[11px] font-semibold uppercase tracking-widest"
-              style={{ color: "var(--text-tertiary)" }}
-            >
-              Account
-            </div>
-          </div>
-          <SidebarItem href="/dashboard/settings" label="Settings" />
-          <SidebarItem href="/dashboard/billing" label="Billing" />
-
-          {["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "") && (
+          {/* Admin Navigation */}
+          {isAdminRole && (
             <>
+              <div className="pb-1.5 px-3">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
+                >
+                  Admin Management
+                </div>
+              </div>
+              <SidebarItem href="/admin" label="Admin Panel" />
+              <SidebarItem href="/admin/assign-student" label="Assign Students" />
+              <SidebarItem href="/dashboard/attendance" label="Attendance Logs" />
+              <SidebarItem href="/admin/users" label="Users & Roles" />
+              <SidebarItem href="/admin/invoices" label="Invoices & Billing" />
+              <SidebarItem href="/dashboard/schedule" label="Schedule Matrix" />
+              <SidebarItem href="/join" label="📹 Join with Code" />
+
               <div className="pt-5 pb-1.5 px-3">
                 <div
                   className="text-[11px] font-semibold uppercase tracking-widest"
                   style={{ color: "var(--text-tertiary)" }}
+                >
+                  Account
+                </div>
+              </div>
+              <SidebarItem href="/dashboard/settings" label="Settings" />
+            </>
+          )}
+
+          {/* Teacher Navigation */}
+          {isTeacherOnly && (
+            <>
+              <div className="pb-1.5 px-3">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
                 >
                   Teaching
                 </div>
               </div>
               <SidebarItem href="/dashboard/teacher" label="Teacher Home" />
               <SidebarItem href="/dashboard/teacher/messages" label="Messages" />
-              <SidebarItem
-                href="/dashboard/teacher/students"
-                label="My Students"
-              />
-              <SidebarItem
-                href="/dashboard/teacher/availability"
-                label="Availability"
-              />
-              {/* Teaching, not Admin: a teacher sees their own classes here,
-                  an admin sees the whole org through the same page. */}
+              <SidebarItem href="/dashboard/teacher/students" label="My Students" />
+              <SidebarItem href="/dashboard/teacher/availability" label="Availability" />
               <SidebarItem href="/dashboard/attendance" label="Attendance" />
-            </>
-          )}
+              <SidebarItem href="/dashboard/schedule" label="Schedule" />
+              <SidebarItem href="/join" label="📹 Join with Code" />
 
-          {(user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN") && (
-            <>
               <div className="pt-5 pb-1.5 px-3">
                 <div
                   className="text-[11px] font-semibold uppercase tracking-widest"
                   style={{ color: "var(--text-tertiary)" }}
                 >
-                  Admin
+                  Account
                 </div>
               </div>
-              <SidebarItem href="/admin" label="Admin Panel" />
+              <SidebarItem href="/dashboard/settings" label="Settings" />
+            </>
+          )}
+
+          {/* Student Navigation */}
+          {isStudentRole && (
+            <>
+              <SidebarItem href="/dashboard" label="Home" />
+              <SidebarItem href="/dashboard/booking" label="Book a Class" />
+              <SidebarItem href="/dashboard/progress" label="Progress" />
+              <SidebarItem href="/dashboard/chat" label="Messages" />
+              <SidebarItem href="/dashboard/schedule" label="Schedule" />
+              <SidebarItem href="/join" label="📹 Join with Code" />
+
+              <div className="pt-5 pb-1.5 px-3">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-widest"
+                  style={{ color: "var(--text-tertiary)" }}
+                >
+                  Account
+                </div>
+              </div>
+              <SidebarItem href="/dashboard/settings" label="Settings" />
+              <SidebarItem href="/dashboard/billing" label="Billing" />
             </>
           )}
         </nav>
@@ -284,29 +312,43 @@ export default function DashboardChrome({
                 </div>
 
                 <nav className="p-2 space-y-0.5 max-h-[60vh] overflow-auto">
-                  <SidebarItem href="/dashboard" label="Home" onNavigate={() => setMobileMenuOpen(false)} />
-                  <SidebarItem href="/dashboard/booking" label="Book a Class" onNavigate={() => setMobileMenuOpen(false)} />
-                  <SidebarItem href="/dashboard/progress" label="Progress" onNavigate={() => setMobileMenuOpen(false)} />
-                  {!isTeachingRole && (
-                    <SidebarItem href="/dashboard/chat" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
+                  {isAdminRole && (
+                    <>
+                      <SidebarItem href="/admin" label="Admin Panel" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/assign-student" label="Assign Students" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/attendance" label="Attendance Logs" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/users" label="Users & Roles" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/schedule" label="Schedule Matrix" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
+                    </>
                   )}
-                  <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
-                  <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
-                  <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
-                  <SidebarItem href="/dashboard/billing" label="Billing" onNavigate={() => setMobileMenuOpen(false)} />
 
-                  {isTeachingRole && (
+                  {isTeacherOnly && (
                     <>
                       <SidebarItem href="/dashboard/teacher" label="Teacher Home" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/teacher/messages" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/teacher/students" label="My Students" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/attendance" label="Attendance" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
                     </>
                   )}
 
-                  {isAdminRole && (
-                    <SidebarItem href="/admin" label="Admin Panel" onNavigate={() => setMobileMenuOpen(false)} />
+                  {isStudentRole && (
+                    <>
+                      <SidebarItem href="/dashboard" label="Home" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/booking" label="Book a Class" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/progress" label="Progress" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/chat" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/dashboard/billing" label="Billing" onNavigate={() => setMobileMenuOpen(false)} />
+                    </>
                   )}
                 </nav>
 
@@ -355,10 +397,21 @@ function AppChrome({
   children: React.ReactNode;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
-  const isTeachingRole = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(user.role || "");
-  const isAdminRole = user.role === "ORG_ADMIN" || user.role === "SUPER_ADMIN";
+  const isAdminRole =
+    user.role === "ORG_ADMIN" ||
+    user.role === "SUPER_ADMIN" ||
+    user.email === "syedamer130@gmail.com";
+  const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
+  const isTeachingRole = isTeacherOnly || isAdminRole;
 
-  const tabs = isTeachingRole
+  const tabs = isAdminRole
+    ? [
+        { href: "/admin", label: "Admin", icon: HomeIcon },
+        { href: "/admin/assign-student", label: "Assign", icon: CalendarIcon },
+        { href: "/dashboard/attendance", label: "Attendance", icon: ChartIcon },
+        { href: "/admin/users", label: "Users", icon: PeopleIcon },
+      ]
+    : isTeacherOnly
     ? [
         { href: "/dashboard/teacher", label: "Home", icon: HomeIcon },
         { href: "/dashboard/schedule", label: "Schedule", icon: CalendarIcon },
@@ -373,39 +426,26 @@ function AppChrome({
       ];
 
   const title = titleFor(pathname, isTeachingRole);
-  const isHome = pathname === "/dashboard" || pathname === "/dashboard/teacher";
+  const isHome = pathname === "/dashboard" || pathname === "/dashboard/teacher" || pathname === "/admin";
 
   return (
     <div className="app-shell" style={{ background: "var(--bg-secondary)" }}>
       <IncomingCallOverlay />
       <PushRegistrar />
 
-      {/* Title bar. Text-only and centred, the way a phone app labels where
-          you are — no logo, because you already know whose app you opened. */}
-      <header className="app-titlebar">
-        <span className="app-title">{title}</span>
-        <button
-          type="button"
-          onClick={() => setMoreOpen(true)}
-          className="app-avatar"
-          aria-label="Account"
-        >
-          {(user.name || "U").charAt(0).toUpperCase()}
-        </button>
+      <header className="app-header">
+        <h1 className="app-title">{title}</h1>
       </header>
 
       {!isTeachingRole && <LiveClassRibbon />}
       <MeetingNotificationBanner />
 
-      {/* is-home keeps the greeting ("Assalamu Alaikum, …"), which is not a
-          page title and is not repeated in the bar. Every other page's <h1>
-          says exactly what the bar above it already says. */}
       <main className={`app-scroll${isHome ? " is-home" : ""}`}>{children}</main>
 
       <nav className="app-tabbar" aria-label="Main">
         {tabs.map((tab) => {
           const active =
-            tab.href === "/dashboard" || tab.href === "/dashboard/teacher"
+            tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
               ? pathname === tab.href
               : pathname.startsWith(tab.href);
           return (
@@ -437,17 +477,30 @@ function AppChrome({
               </div>
             </div>
             <div className="app-sheet-list">
-              {!isTeachingRole && <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={() => setMoreOpen(false)} />}
-              <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
-              <SheetLink href="/dashboard/billing" label="Billing" onNavigate={() => setMoreOpen(false)} />
-              {isTeachingRole && (
+              {isAdminRole && (
                 <>
-                  <SheetLink href="/dashboard/progress" label="Progress" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/schedule" label="Schedule Matrix" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
                 </>
               )}
-              {isAdminRole && <SheetLink href="/admin" label="Admin Panel" onNavigate={() => setMoreOpen(false)} />}
+              {isTeacherOnly && (
+                <>
+                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
+                </>
+              )}
+              {!isAdminRole && !isTeacherOnly && (
+                <>
+                  <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/billing" label="Billing" onNavigate={() => setMoreOpen(false)} />
+                </>
+              )}
             </div>
             <button onClick={onSignOut} className="app-sheet-signout">
               Sign Out

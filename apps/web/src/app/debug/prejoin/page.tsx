@@ -42,5 +42,16 @@ export default function PreJoinBench() {
     );
   }
 
-  return <PreJoinScreen userName="Test Teacher" onJoin={setPicked} />;
+  return (
+    <PreJoinScreen
+      userName="Syed Abdul Mannan"
+      recipientName="Syed Abdul Mannan"
+      recipientEmail="syedmannan543@gmail.com"
+      recipientPhone="+91 86866 80126"
+      sessionTitle="Quran & Tajweed Live Class"
+      joinCode="846-2891-188"
+      onJoin={setPicked}
+    />
+  );
 }
+

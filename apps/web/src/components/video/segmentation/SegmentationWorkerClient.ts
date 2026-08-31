@@ -28,19 +28,33 @@ export class SegmentationWorkerClient {
     this.worker = worker;
 
     await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        worker.removeEventListener('message', handleMessage);
+        reject(new Error('Worker initialization timed out after 3000ms'));
+      }, 3000);
+
       const handleMessage = (event: MessageEvent<SegmentationWorkerResponse>) => {
         const message = event.data;
         if (message.type === 'ready') {
+          clearTimeout(timer);
           worker.removeEventListener('message', handleMessage);
           resolve();
         } else if (message.type === 'error' && message.fatal) {
+          clearTimeout(timer);
           worker.removeEventListener('message', handleMessage);
           reject(new Error(message.message));
         }
       };
 
       worker.addEventListener('message', handleMessage);
-      worker.addEventListener('error', (event) => reject(new Error(event.message)), { once: true });
+      worker.addEventListener(
+        'error',
+        (event) => {
+          clearTimeout(timer);
+          reject(new Error(event.message || 'Worker syntax/bundle error'));
+        },
+        { once: true }
+      );
       worker.postMessage({ type: 'init', quality: this.quality } satisfies SegmentationWorkerRequest);
     });
 

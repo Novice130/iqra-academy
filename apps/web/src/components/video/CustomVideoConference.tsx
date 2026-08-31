@@ -24,7 +24,12 @@ import {
   useCreateLayoutContext,
 } from '@livekit/components-react';
 import CallControlBar, { type ViewMode, VIEW_MODES } from './CallControlBar';
-import { LayoutIcon, ChevronUpIcon, EffectsIcon, FramePersonIcon, VisualEffectsSparkleIcon, MoreIcon } from './CallIcons';
+import {
+  LayoutIcon,
+  ChevronUpIcon,
+  SpeakerIcon,
+  FlipCameraIcon,
+} from './CallIcons';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
@@ -34,7 +39,7 @@ import { useBackgroundEffects, BackgroundEffectsContent, type EffectSelection } 
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import { gainForSlider } from '@/lib/audio-gain';
-import { copyTextToClipboard, shareOrCopy } from '@/lib/clipboard';
+import { copyTextToClipboard } from '@/lib/clipboard';
 
 function useLiveRoomMetadata(): string | undefined {
   const room = useRoomContext();
@@ -414,11 +419,21 @@ function DraggableTile({
   );
 }
 
-function columnsFor(count: number) {
-  if (count <= 1) return 1;
-  if (count <= 4) return 2;
-  if (count <= 9) return 3;
-  return 4;
+function getGridLayout(count: number, isPortrait: boolean): { cols: number; rows: number } {
+  if (count <= 1) return { cols: 1, rows: 1 };
+  if (isPortrait) {
+    if (count === 2) return { cols: 1, rows: 2 };
+    if (count <= 4) return { cols: 2, rows: 2 };
+    if (count <= 6) return { cols: 2, rows: 3 };
+    if (count <= 8) return { cols: 2, rows: 4 };
+    return { cols: 2, rows: Math.ceil(count / 2) };
+  } else {
+    if (count === 2) return { cols: 2, rows: 1 };
+    if (count <= 4) return { cols: 2, rows: 2 };
+    if (count <= 6) return { cols: 3, rows: 2 };
+    if (count <= 9) return { cols: 3, rows: 3 };
+    return { cols: 4, rows: Math.ceil(count / 4) };
+  }
 }
 
 export default function CustomVideoConference({
@@ -453,14 +468,14 @@ export default function CustomVideoConference({
     let displayMeetingId = rawCode;
     let urlCode = rawCode;
 
-    if (digitsOnly.length === 12) {
-      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}`;
-      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
+    if (digitsOnly.length >= 10) {
+      displayMeetingId = `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 7)} ${digitsOnly.slice(7, 10)}`;
+      urlCode = `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7, 10)}`;
     } else {
-      const alphaOnly = rawCode.replace(/[^a-zA-Z]/g, '').toLowerCase();
-      if (alphaOnly.length === 12) {
-        displayMeetingId = `${alphaOnly.slice(0, 4)} ${alphaOnly.slice(4, 8)} ${alphaOnly.slice(8, 12)}`;
-        urlCode = `${alphaOnly.slice(0, 4)}-${alphaOnly.slice(4, 8)}-${alphaOnly.slice(8, 12)}`;
+      const alphaOnly = rawCode.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      if (alphaOnly.length >= 10) {
+        displayMeetingId = `${alphaOnly.slice(0, 3)} ${alphaOnly.slice(3, 7)} ${alphaOnly.slice(7, 10)}`;
+        urlCode = `${alphaOnly.slice(0, 3)}-${alphaOnly.slice(3, 7)}-${alphaOnly.slice(7, 10)}`;
       }
     }
 
@@ -547,8 +562,7 @@ export default function CustomVideoConference({
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [effectsOpen, setEffectsOpen] = useState(false);
-  const [tileMenuOpen, setTileMenuOpen] = useState(false);
-  const [tileFit, setTileFit] = useState<'cover' | 'contain'>('contain');
+  const [tileFit] = useState<'cover' | 'contain'>('cover');
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
   const tapStartTimeRef = useRef(0);
@@ -557,11 +571,11 @@ export default function CustomVideoConference({
   const resetIdleTimer = useCallback(() => {
     setChromeHidden(false);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen || tileMenuOpen) return;
+    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen) return;
     idleTimerRef.current = setTimeout(() => {
       setChromeHidden(true);
     }, 3500);
-  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen, tileMenuOpen]);
+  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen]);
 
   useEffect(() => {
     resetIdleTimer();
@@ -569,6 +583,26 @@ export default function CustomVideoConference({
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     };
   }, [resetIdleTimer]);
+
+  useEffect(() => {
+    const handleData = (payload: Uint8Array) => {
+      try {
+        const text = new TextDecoder().decode(payload);
+        const data = JSON.parse(text);
+        if (data?.type === 'CLASS_ENDED') {
+          room.disconnect(true).catch(() => {});
+          if (typeof window !== 'undefined') {
+            window.location.href = '/dashboard?notice=class_ended';
+          }
+        }
+      } catch {}
+    };
+
+    room.on(RoomEvent.DataReceived, handleData);
+    return () => {
+      room.off(RoomEvent.DataReceived, handleData);
+    };
+  }, [room]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -634,7 +668,32 @@ export default function CustomVideoConference({
   type Described = ReturnType<typeof describe>;
 
   const actionsFor = (p: Described): TileActions | undefined => {
-    if (!isModerator || p.isLocal) return undefined;
+    if (p.isLocal) {
+      // Local participant (Teacher/Host or Student): can rename themselves and set default name!
+      return {
+        onRename: (newName: string) => {
+          const trimmed = newName.trim();
+          if (!trimmed) return;
+          try {
+            room.localParticipant.setName(trimmed);
+          } catch {}
+          rename(p.identity, trimmed);
+          // Persist as permanent default account name
+          fetch('/api/me', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: trimmed }),
+          }).catch(() => {});
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.setItem('user_display_name', trimmed);
+            } catch {}
+          }
+        },
+      };
+    }
+
+    if (!isModerator) return undefined;
     return {
       onSpotlight: () => handleSpotlight(p.base === focusIdentity ? null : p.base),
       onMute: p.micSid && !p.micMuted ? () => muteTrack(p.identity, p.micSid!) : undefined,
@@ -657,13 +716,18 @@ export default function CustomVideoConference({
       isLocal={p.isLocal}
       isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
       actions={actionsFor(p)}
-      fit={p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit}
+      fit={viewMode === 'gallery' ? 'cover' : (p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit)}
     />
   );
 
   const all = cameraTracks.map(describe);
   const localCamera = all.find((p) => p.isLocal);
   const others = all.filter((p) => !p.isLocal);
+
+  // Grid view drag-and-drop ordering state
+  const [gridOrder, setGridOrder] = useState<string[]>([]);
+  const [draggedGridKey, setDraggedGridKey] = useState<string | null>(null);
+  const [dragOverGridKey, setDragOverGridKey] = useState<string | null>(null);
 
   let focused: Described | undefined;
   let gridTiles: Described[] = all;
@@ -674,11 +738,16 @@ export default function CustomVideoConference({
     floating = all;
     gridTiles = [];
   } else if (viewMode === 'gallery') {
-    if (isModerator && others.length > 0) {
-      gridTiles = others;
-      floating = localCamera ? [localCamera] : [];
-    }
+    // True Gallery Grid: All participants (remote and local) are placed in the grid with drag-and-drop adjustment!
+    const rawGrid = [...others, ...(localCamera ? [localCamera] : [])];
+    gridTiles = [
+      ...gridOrder.map((k) => rawGrid.find((p) => p.key === k)).filter(Boolean) as Described[],
+      ...rawGrid.filter((p) => !gridOrder.includes(p.key)),
+    ];
+    floating = [];
+    focused = undefined;
   } else {
+    // Speaker or Active Speaker view
     const focusTarget =
       viewMode === 'active'
         ? all.find((p) => p.identity === lastSpeaker) ?? all.find((p) => p.base === focusIdentity)
@@ -687,8 +756,31 @@ export default function CustomVideoConference({
       focused = focusTarget;
       gridTiles = [];
       floating = all.filter((p) => p.key !== focusTarget.key);
+    } else if (others.length > 0) {
+      focused = others[0];
+      gridTiles = [];
+      floating = all.filter((p) => p.key !== others[0].key);
     }
   }
+
+  const handleGridDrop = (sourceKey: string, targetKey: string) => {
+    if (sourceKey === targetKey) return;
+    const currentKeys = gridTiles.map((t) => t.key);
+    const srcIdx = currentKeys.indexOf(sourceKey);
+    const tgtIdx = currentKeys.indexOf(targetKey);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+
+    const nextOrder = [...currentKeys];
+    const [moved] = nextOrder.splice(srcIdx, 1);
+    nextOrder.splice(tgtIdx, 0, moved);
+    setGridOrder(nextOrder);
+    setDraggedGridKey(null);
+    setDragOverGridKey(null);
+  };
+
+  const isPortrait =
+    orientation === 'portrait' || (stageSize.width > 0 && stageSize.width < stageSize.height);
+  const gridLayout = getGridLayout(gridTiles.length, isPortrait);
 
   const [customPositions, setCustomPositions] = useState<Record<string, Slot>>({});
   // Constant clearance so the video stage never shifts or resizes when controls appear/hide
@@ -726,7 +818,6 @@ export default function CustomVideoConference({
     if (Date.now() - tapStartTimeRef.current < 300) {
       if (viewMenuOpen) setViewMenuOpen(false);
       if (effectsOpen) setEffectsOpen(false);
-      if (tileMenuOpen) setTileMenuOpen(false);
       if (peopleOpen) setPeopleOpen(false);
 
       const target = e.target as HTMLElement;
@@ -758,25 +849,94 @@ export default function CustomVideoConference({
         <div className="lk-video-conference-inner" style={{ height: '100%', position: 'relative' }}>
           <div
             ref={stageRef}
-            style={{ flex: '1 1 auto', minHeight: 0, position: 'relative', overflow: 'hidden' }}
+            style={{
+              flex: '1 1 auto',
+              minHeight: 0,
+              height: '100%',
+              width: '100%',
+              position: 'relative',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+            }}
           >
             {focused ? (
-              <div className="w-full h-full p-2 sm:p-3">
-                {renderTile(focused)}
+              <div
+                className="w-full h-full p-2 sm:p-3"
+                style={{
+                  paddingBottom: 'calc(var(--call-bar-height, 84px) + 12px)',
+                }}
+              >
+                {renderTile(focused, 'contain')}
               </div>
             ) : (
               <div
                 className="w-full h-full grid gap-2 sm:gap-3 p-2 sm:p-3"
                 style={{
-                  gridTemplateColumns: `repeat(${columnsFor(gridTiles.length)}, minmax(0, 1fr))`,
-                  gridAutoRows: 'minmax(0, 1fr)',
+                  gridTemplateColumns: `repeat(${gridLayout.cols}, minmax(0, 1fr))`,
+                  gridTemplateRows: `repeat(${gridLayout.rows}, minmax(0, 1fr))`,
+                  gridAutoFlow: 'row',
+                  paddingBottom: 'calc(var(--call-bar-height, 84px) + 12px)',
                 }}
               >
-                {gridTiles.map((p) => (
-                  <div key={p.key} className="min-w-0 min-h-0">
-                    {renderTile(p)}
-                  </div>
-                ))}
+                {gridTiles.map((p) => {
+                  const isDragging = draggedGridKey === p.key;
+                  const isDragOver = dragOverGridKey === p.key && draggedGridKey !== p.key;
+                  const canDrag = gridTiles.length > 1;
+
+                  return (
+                    <div
+                      key={p.key}
+                      draggable={canDrag}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', p.key);
+                        e.dataTransfer.effectAllowed = 'move';
+                        setDraggedGridKey(p.key);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                        if (dragOverGridKey !== p.key) {
+                          setDragOverGridKey(p.key);
+                        }
+                      }}
+                      onDragLeave={() => {
+                        if (dragOverGridKey === p.key) {
+                          setDragOverGridKey(null);
+                        }
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        const sourceKey = e.dataTransfer.getData('text/plain') || draggedGridKey;
+                        if (sourceKey) {
+                          handleGridDrop(sourceKey, p.key);
+                        }
+                        setDraggedGridKey(null);
+                        setDragOverGridKey(null);
+                      }}
+                      onDragEnd={() => {
+                        setDraggedGridKey(null);
+                        setDragOverGridKey(null);
+                      }}
+                      className={`min-w-0 min-h-0 w-full h-full flex overflow-hidden rounded-2xl sm:rounded-3xl relative transition-all duration-200 select-none ${
+                        canDrag ? 'cursor-grab active:cursor-grabbing' : ''
+                      } ${
+                        isDragging ? 'opacity-40 scale-95 ring-2 ring-blue-500' : ''
+                      } ${
+                        isDragOver ? 'ring-4 ring-emerald-400 scale-[1.02] shadow-2xl z-20' : ''
+                      }`}
+                    >
+                      {renderTile(p, 'cover')}
+                      {isDragOver && (
+                        <div className="absolute inset-0 bg-blue-500/20 backdrop-blur-[1px] pointer-events-none flex items-center justify-center z-30 rounded-2xl sm:rounded-3xl border-2 border-blue-400">
+                          <span className="px-3 py-1.5 rounded-full bg-blue-600 text-white text-xs font-bold shadow-lg animate-pulse">
+                            Swap Position
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -956,46 +1116,24 @@ export default function CustomVideoConference({
                         </div>
                       </div>
 
-                      {/* Action Buttons: Native Share (Android/iOS) + Full Invitation */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                      {/* Single Action Button: Copy Joining Info */}
+                      <div className="pt-1">
                         <button
                           type="button"
-                          onClick={async () => {
-                            const res = await shareOrCopy(
-                              {
-                                title: meetingInfo.title,
-                                text: meetingInfo.fullInvitation,
-                                url: meetingInfo.inviteUrl,
-                              },
-                              meetingInfo.fullInvitation
-                            );
-                            if (res.method === 'shared' || res.method === 'copied') {
-                              setCopiedKey('share');
-                              setTimeout(() => setCopiedKey(null), 2500);
-                            }
-                          }}
-                          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md"
+                          onClick={() => copyToClipboard(meetingInfo.fullInvitation, 'invite')}
+                          className="w-full py-3 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 shadow-md hover:brightness-105"
                           style={{
                             background:
-                              copiedKey === 'share'
-                                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.9), rgba(5, 150, 105, 0.9))'
-                                : 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                              copiedKey === 'invite'
+                                ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)'
+                                : 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
+                            boxShadow:
+                              copiedKey === 'invite'
+                                ? '0 6px 20px rgba(16, 185, 129, 0.45)'
+                                : '0 6px 20px rgba(0, 122, 255, 0.4)',
                           }}
                         >
-                          <span>{copiedKey === 'share' ? '✓ Done!' : '📲 Share / Send'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => copyToClipboard(meetingInfo.fullInvitation, 'all')}
-                          className="w-full py-2.5 rounded-2xl text-xs font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-95 shadow-md"
-                          style={{
-                            background:
-                              copiedKey === 'all'
-                                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.9), rgba(5, 150, 105, 0.9))'
-                                : 'linear-gradient(135deg, rgba(37, 99, 235, 0.9), rgba(29, 78, 216, 0.9))',
-                          }}
-                        >
-                          <span>{copiedKey === 'all' ? '✓ Copied!' : '📋 Copy All'}</span>
+                          <span>{copiedKey === 'invite' ? '✓ Copied Joining Info!' : '📋 Copy Joining Info'}</span>
                         </button>
                       </div>
 
@@ -1022,9 +1160,9 @@ export default function CustomVideoConference({
               )}
             </div>
 
-            {/* Fixed Right-Aligned Layout Switcher Pill */}
+            {/* Fixed Right-Aligned Top Action Bar (Speaker, Flip Camera, Layout) */}
             <div
-              className={`fixed z-[60] pointer-events-auto transition-opacity duration-300 ${
+              className={`fixed z-[60] pointer-events-auto flex items-center gap-2 transition-opacity duration-300 ${
                 chromeHidden && !viewMenuOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
               style={{
@@ -1032,6 +1170,55 @@ export default function CustomVideoConference({
                 right: 'max(16px, env(safe-area-inset-right))',
               }}
             >
+              {/* Speaker / Audio Route Switcher */}
+              <button
+                type="button"
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  try {
+                    if (typeof navigator !== 'undefined' && 'selectAudioOutput' in (navigator.mediaDevices || {})) {
+                      await (navigator.mediaDevices as any).selectAudioOutput();
+                    }
+                  } catch {}
+                }}
+                title="Speaker / Audio Output"
+                aria-label="Speaker / Audio Output"
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
+                style={{
+                  background: 'rgba(24, 26, 34, 0.70)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.40)',
+                }}
+              >
+                <SpeakerIcon className="w-4 h-4 text-emerald-400" />
+              </button>
+
+              {/* Flip Camera Button */}
+              {hasMultipleCameras && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cycleCamera();
+                  }}
+                  title="Flip camera"
+                  aria-label="Flip camera"
+                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
+                  style={{
+                    background: 'rgba(24, 26, 34, 0.70)',
+                    backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                    WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                    border: '1px solid rgba(255, 255, 255, 0.20)',
+                    boxShadow: '0 12px 36px rgba(0, 0, 0, 0.40)',
+                  }}
+                >
+                  <FlipCameraIcon className="w-4 h-4" />
+                </button>
+              )}
+
+              {/* Layout Switcher */}
               <button
                 type="button"
                 onClick={(e) => {
@@ -1051,7 +1238,7 @@ export default function CustomVideoConference({
                 }}
               >
                 <LayoutIcon className="w-4 h-4 text-blue-400 shrink-0" />
-                <span className="capitalize text-xs font-semibold tracking-tight">
+                <span className="capitalize text-xs font-semibold tracking-tight hidden sm:inline">
                   {viewMode === 'gallery' ? 'Gallery View' : viewMode === 'speaker' ? 'Speaker View' : 'Active Speaker'}
                 </span>
                 <ChevronUpIcon className={`w-3.5 h-3.5 text-neutral-400 transition-transform ${viewMenuOpen ? 'rotate-180' : ''}`} />
@@ -1115,131 +1302,6 @@ export default function CustomVideoConference({
                         );
                       })}
                     </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Google Meet 3-Button Action Pill (Reframe, Visual Effects, More Menu) */}
-            <div
-              className={`absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[55] pointer-events-auto transition-all duration-300 ${
-                chromeHidden ? 'opacity-0 scale-90 pointer-events-none' : 'opacity-100 scale-100'
-              }`}
-            >
-              <div
-                className="flex items-center gap-1 p-1 rounded-full shadow-2xl"
-                style={{
-                  background: 'rgba(24, 26, 34, 0.65)',
-                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-                  border: '1px solid rgba(255, 255, 255, 0.20)',
-                  boxShadow:
-                    '0 16px 40px rgba(0, 0, 0, 0.50), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
-                }}
-              >
-                {/* Button 1: Reframe / Fit */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTileFit((prev) => (prev === 'cover' ? 'contain' : 'cover'));
-                  }}
-                  title="Reframe video"
-                  aria-label="Reframe video"
-                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 hover:bg-white/15 text-white/90 hover:text-white"
-                >
-                  <FramePersonIcon className="w-5 h-5" />
-                </button>
-
-                {/* Button 2: Visual Effects / Background Replace */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setEffectsOpen((v) => !v);
-                  }}
-                  title="Apply visual effects"
-                  aria-label="Apply visual effects"
-                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 text-white"
-                  style={{
-                    background: effects.active
-                      ? 'linear-gradient(135deg, rgba(0, 122, 255, 0.45) 0%, rgba(0, 90, 220, 0.35) 100%)'
-                      : 'transparent',
-                    border: effects.active ? '1px solid rgba(120, 190, 255, 0.50)' : '1px solid transparent',
-                    boxShadow: effects.active ? '0 4px 14px rgba(0, 122, 255, 0.35)' : 'none',
-                  }}
-                >
-                  <VisualEffectsSparkleIcon className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                </button>
-
-                {/* Button 3: More Options Menu */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setTileMenuOpen((v) => !v);
-                  }}
-                  title="More options"
-                  aria-label="More options"
-                  className="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-150 active:scale-90 hover:bg-white/15 text-white/90 hover:text-white"
-                >
-                  <MoreIcon className="w-5 h-5" />
-                </button>
-              </div>
-
-              {/* Context Menu matching Google Meet */}
-              {tileMenuOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-[80]"
-                    onPointerDown={(e) => {
-                      e.stopPropagation();
-                      setTileMenuOpen(false);
-                    }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setTileMenuOpen(false);
-                    }}
-                  />
-                  <div
-                    className="absolute left-1/2 -translate-x-1/2 top-14 z-[81] w-56 rounded-3xl p-2 shadow-2xl animate-fadeIn overflow-hidden"
-                    style={{
-                      background: 'rgba(24, 26, 34, 0.85)',
-                      backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
-                      WebkitBackdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
-                      border: '1px solid rgba(255, 255, 255, 0.20)',
-                      boxShadow:
-                        '0 24px 64px rgba(0, 0, 0, 0.60), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
-                    }}
-                  >
-                    {isModerator && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          handleSpotlight(localCamera?.base === focusIdentity ? null : localCamera?.base ?? null);
-                          setTileMenuOpen(false);
-                        }}
-                        className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
-                      >
-                        <span className="text-sm">📌</span>
-                        <span>{localCamera?.base === focusIdentity ? 'Unpin self-view' : 'Spotlight / Pin self-view'}</span>
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (!document.fullscreenElement) {
-                          document.documentElement.requestFullscreen().catch(() => {});
-                        } else {
-                          document.exitFullscreen().catch(() => {});
-                        }
-                        setTileMenuOpen(false);
-                      }}
-                      className="w-full flex items-center gap-3 px-3 py-2.5 rounded-2xl text-xs font-semibold text-white/90 hover:text-white hover:bg-white/10 cursor-pointer transition-colors"
-                    >
-                      <span className="text-sm">⛶</span>
-                      <span>Toggle Fullscreen</span>
-                    </button>
                   </div>
                 </>
               )}
@@ -1329,6 +1391,8 @@ export default function CustomVideoConference({
               onTogglePeople={() => setPeopleOpen((v) => !v)}
               viewMode={viewMode}
               onViewModeChange={setViewMode}
+              onToggleEffects={() => setEffectsOpen((v) => !v)}
+              onToggleMeetingInfo={() => setInviteOpen((v) => !v)}
             />
           </div>
         </div>
