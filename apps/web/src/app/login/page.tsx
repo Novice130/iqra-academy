@@ -476,12 +476,16 @@ export default function LoginPage() {
                   setGoogleLoading(true);
                   setError("");
                   try {
-                    await authClient.signIn.social({
+                    const res = await authClient.signIn.social({
                       provider: "google",
                       callbackURL: "/dashboard",
                     });
-                  } catch {
-                    setError("Couldn't start Google sign-in. Try your email and password.");
+                    if (res?.error) {
+                      setError(res.error.message || "Google Sign-In is currently unavailable. Please sign in with email and password.");
+                      setGoogleLoading(false);
+                    }
+                  } catch (err: any) {
+                    setError(err?.message || "Couldn't start Google sign-in. Try your email and password.");
                     setGoogleLoading(false);
                   }
                 }}

@@ -23,13 +23,9 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { twoFactor } from "better-auth/plugins";
-import { drizzle } from "drizzle-orm/neon-http";
-import { neon } from "@neondatabase/serverless";
-import "./db";
+import { db } from "./db";
 import * as schema from "@/db/schema";
 import { sendTwoFactorEmail } from "./email";
-
-const authDb = drizzle(neon(process.env.DATABASE_URL!), { schema });
 
 /**
  * Better Auth server instance.
@@ -54,9 +50,9 @@ export const auth = betterAuth({
   ],
 
   /**
-   * Database adapter — explicit table mapping for Better Auth using stateless HTTP client.
+   * Database adapter — explicit table mapping for Better Auth using request-scoped db.
    */
-  database: drizzleAdapter(authDb, {
+  database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
       user: schema.users,
@@ -92,24 +88,16 @@ export const auth = betterAuth({
 
   /**
    * Social/OAuth providers.
-   *
-   * 📚 GOOGLE SIGN-IN SETUP:
-   * 1. Go to https://console.cloud.google.com/apis/credentials
-   * 2. Create OAuth 2.0 Client ID (Web application)
-   * 3. Add authorized redirect URI:
-   *    - Dev:  http://localhost:3000/api/auth/callback/google
-   *    - Prod: https://yourdomain.com/api/auth/callback/google
-   * 4. Copy Client ID + Client Secret to .env
-   *
-   * WHY GOOGLE?
-   * Many Quran school parents use Gmail. Google Sign-In skips the
-   * "create password → verify email" friction, boosting signup conversion.
    */
   socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID!,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-    },
+    ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+      ? {
+          google: {
+            clientId: process.env.GOOGLE_CLIENT_ID,
+            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+          },
+        }
+      : {}),
   },
 
   /**
