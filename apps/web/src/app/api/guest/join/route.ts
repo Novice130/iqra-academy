@@ -154,6 +154,20 @@ export async function POST(request: NextRequest) {
         });
       }
 
+      // Check if room is locked by the host
+      const { generateRoomName, getRoomServiceClient } = await import("@/lib/livekit");
+      const { parseRoomMetadata } = await import("@/lib/room-metadata");
+      const checkRoomName = generateRoomName(session.id);
+      try {
+        const rooms = await getRoomServiceClient().listRooms([checkRoomName]);
+        const meta = parseRoomMetadata(rooms[0]?.metadata);
+        if (meta.isLocked) {
+          throw new BusinessRuleError("This meeting is locked by the host.");
+        }
+      } catch (err: any) {
+        if (err instanceof BusinessRuleError) throw err;
+      }
+
       const knockedSince = new Date(Date.now() - KNOCK_WINDOW_MS);
 
       // 2. Knocking twice is the same knock. Match on canonical session or requested session

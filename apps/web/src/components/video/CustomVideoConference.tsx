@@ -38,6 +38,7 @@ import SoloInactivityPrompt from './SoloInactivityPrompt';
 import { useBackgroundEffects, BackgroundEffectsContent, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
+import WhiteboardOverlay from './WhiteboardOverlay';
 import { gainForSlider } from '@/lib/audio-gain';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
@@ -565,17 +566,30 @@ export default function CustomVideoConference({
   const [tileFit] = useState<'cover' | 'contain'>('cover');
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
+  const [handRaisedMap, setHandRaisedMap] = useState<Record<string, boolean>>({});
+  const [floatingReactions, setFloatingReactions] = useState<{ id: string; emoji: string; x: number }[]>([]);
+  const [captionsActive, setCaptionsActive] = useState(false);
+  const [whiteboardActive, setWhiteboardActive] = useState(false);
   const tapStartTimeRef = useRef(0);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerReaction = useCallback((emoji: string) => {
+    const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    const x = 15 + Math.random() * 70;
+    setFloatingReactions((prev) => [...prev.slice(-10), { id, emoji, x }]);
+    setTimeout(() => {
+      setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
+    }, 2800);
+  }, []);
 
   const resetIdleTimer = useCallback(() => {
     setChromeHidden(false);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen) return;
+    if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen || whiteboardActive) return;
     idleTimerRef.current = setTimeout(() => {
       setChromeHidden(true);
     }, 3500);
-  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen]);
+  }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen, whiteboardActive]);
 
   useEffect(() => {
     resetIdleTimer();
@@ -585,7 +599,12 @@ export default function CustomVideoConference({
   }, [resetIdleTimer]);
 
   useEffect(() => {
-    const handleData = (payload: Uint8Array) => {
+    const handleData = (
+      payload: Uint8Array,
+      participant?: { identity?: string },
+      _kind?: unknown,
+      topic?: string
+    ) => {
       try {
         const text = new TextDecoder().decode(payload);
         const data = JSON.parse(text);
@@ -594,6 +613,25 @@ export default function CustomVideoConference({
           if (typeof window !== 'undefined') {
             window.location.href = '/dashboard?notice=class_ended';
           }
+          return;
+        }
+        if (topic === 'hand_raise' || data?.type === 'hand_raise') {
+          const sender = data?.senderIdentity || participant?.identity;
+          if (sender) {
+            const base = baseIdentity(sender) || sender;
+            setHandRaisedMap((prev) => ({
+              ...prev,
+              [sender]: Boolean(data?.raised),
+              [base]: Boolean(data?.raised),
+            }));
+          }
+          return;
+        }
+        if (topic === 'reaction' || data?.emoji) {
+          if (data?.emoji) {
+            triggerReaction(data.emoji);
+          }
+          return;
         }
       } catch {}
     };
@@ -602,7 +640,7 @@ export default function CustomVideoConference({
     return () => {
       room.off(RoomEvent.DataReceived, handleData);
     };
-  }, [room]);
+  }, [room, triggerReaction]);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
@@ -715,6 +753,7 @@ export default function CustomVideoConference({
       cameraOff={p.cameraOff}
       isLocal={p.isLocal}
       isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
+      handRaised={Boolean(handRaisedMap[p.identity] || handRaisedMap[p.base])}
       actions={actionsFor(p)}
       fit={viewMode === 'gallery' ? 'cover' : (p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit)}
     />
@@ -1393,8 +1432,63 @@ export default function CustomVideoConference({
               onViewModeChange={setViewMode}
               onToggleEffects={() => setEffectsOpen((v) => !v)}
               onToggleMeetingInfo={() => setInviteOpen((v) => !v)}
+              onToggleCaptions={() => setCaptionsActive((v) => !v)}
+              captionsActive={captionsActive}
+              onToggleWhiteboard={() => setWhiteboardActive((v) => !v)}
+              whiteboardActive={whiteboardActive}
+              participantsCount={all.length}
+              onHandRaiseChange={(raised) => {
+                const myId = room.localParticipant.identity;
+                const myBase = baseIdentity(myId) || myId;
+                setHandRaisedMap((prev) => ({ ...prev, [myId]: raised, [myBase]: raised }));
+              }}
+              onReaction={(emoji) => triggerReaction(emoji)}
             />
           </div>
+
+          {whiteboardActive && (
+            <WhiteboardOverlay onClose={() => setWhiteboardActive(false)} />
+          )}
+
+          {captionsActive && (
+            <div
+              className="fixed bottom-[96px] left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-2xl max-w-xl text-center pointer-events-none transition-all shadow-xl"
+              style={{
+                background: 'rgba(10, 12, 16, 0.85)',
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                border: '1px solid rgba(255, 255, 255, 0.15)',
+              }}
+            >
+              <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 mb-0.5">
+                Live Captions · Subtitles
+              </div>
+              <div className="text-sm font-medium text-white">
+                {lastSpeaker ? (
+                  <>
+                    <span className="text-emerald-300 font-semibold">{lastSpeaker.split('#')[0]}: </span>
+                    <span className="italic text-neutral-300">Speaking / reciting…</span>
+                  </>
+                ) : (
+                  <span className="text-neutral-400 italic">Waiting for audio speech…</span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Floating Emoji Reactions Layer */}
+          {floatingReactions.map((r) => (
+            <div
+              key={r.id}
+              className="fixed pointer-events-none select-none text-4xl sm:text-5xl z-50 animate-float-reaction"
+              style={{
+                left: `${r.x}%`,
+                bottom: '108px',
+              }}
+            >
+              {r.emoji}
+            </div>
+          ))}
         </div>
 
         <Chat style={{ display: widgetState.showChat ? 'grid' : 'none' }} />
@@ -1411,6 +1505,7 @@ export default function CustomVideoConference({
             volumes={volumes}
             onVolume={setVolume}
             onClose={() => setPeopleOpen(false)}
+            handRaisedMap={handRaisedMap}
           />
         )}
       </div>

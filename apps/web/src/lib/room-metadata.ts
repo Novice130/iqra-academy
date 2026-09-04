@@ -28,6 +28,10 @@ export interface RoomMetadata {
    * about one person's ears.
    */
   volumes?: Record<string, number>;
+  /** Meeting lock: prevents new guest knocks and entry */
+  isLocked?: boolean;
+  /** Participant sharing policy: whether non-hosts can share screen */
+  allowParticipantShare?: boolean;
 }
 
 /** Parse room metadata, tolerating the empty and the malformed. */

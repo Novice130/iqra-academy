@@ -8,7 +8,7 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
-import { useLocalParticipant, useRoomContext, useTracks } from '@livekit/components-react';
+import { useLocalParticipant, useRemoteParticipants, useRoomContext } from '@livekit/components-react';
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
 import { CameraIcon, MicIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
@@ -378,31 +378,38 @@ export default function PeoplePanel({
   joinCode,
   sessionTitle,
   teacherName,
+  teacherIdentity,
   isModerator,
   spotlightIdentity,
   onSpotlight,
   volumes,
   onVolume,
   onClose,
+  handRaisedMap,
 }: {
   sessionId: string;
   joinCode?: string | null;
   sessionTitle?: string | null;
   teacherName?: string | null;
+  teacherIdentity?: string | null;
   isModerator: boolean;
   spotlightIdentity: string | null;
   onSpotlight: (identity: string | null) => void;
   volumes: Record<string, number>;
   onVolume: (base: string, volume: number) => void;
   onClose: () => void;
+  handRaisedMap?: Record<string, boolean>;
 }) {
-  const { muteTrack, askToUnmute, removeParticipant, rename } = useHostControls(sessionId);
+  const { muteTrack, askToUnmute, askForCamera, removeParticipant, rename } = useHostControls(sessionId);
   const { localParticipant } = useLocalParticipant();
+  const remotes = useRemoteParticipants();
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
-  const micTracks = useTracks([Track.Source.Microphone], { onlySubscribed: false });
-  const cameraTracks = useTracks([Track.Source.Camera], { onlySubscribed: false });
+
+  const allParticipants = useMemo(() => {
+    return [localParticipant, ...remotes];
+  }, [localParticipant, remotes]);
 
   const handleSaveRename = (p: { identity: string; isLocal: boolean }) => {
     const trimmed = renameDraft.trim();
@@ -427,25 +434,36 @@ export default function PeoplePanel({
     setRenamingId(null);
   };
 
-  const seen = new Set<string>();
-  const people = cameraTracks
-    .filter((t) => {
-      const base = baseIdentity(t.participant.identity)!;
-      if (seen.has(base)) return false;
+  const people = useMemo(() => {
+    const seen = new Set<string>();
+    const list = [];
+    for (const p of allParticipants) {
+      const base = baseIdentity(p.identity) || p.identity;
+      if (seen.has(base)) continue;
       seen.add(base);
-      return true;
-    })
-    .map((t) => {
-      const mic = micTracks.find((m) => m.participant.identity === t.participant.identity);
-      return {
-        identity: t.participant.identity,
-        base: baseIdentity(t.participant.identity)!,
-        name: t.participant.name || baseIdentity(t.participant.identity)!,
-        isLocal: t.participant.isLocal,
-        micMuted: mic?.publication?.isMuted ?? true,
-        micSid: mic?.publication?.trackSid,
-      };
-    });
+
+      const micPub = p.getTrackPublication(Track.Source.Microphone);
+      const camPub = p.getTrackPublication(Track.Source.Camera);
+      const isTeacher = Boolean(teacherIdentity && base === baseIdentity(teacherIdentity));
+      const isGuest = p.identity.startsWith('guest-');
+
+      list.push({
+        identity: p.identity,
+        base,
+        name: p.name || base,
+        isLocal: p.isLocal,
+        isSpeaking: p.isSpeaking,
+        isTeacher,
+        isGuest,
+        handRaised: Boolean(handRaisedMap?.[p.identity] || handRaisedMap?.[base]),
+        micMuted: micPub ? micPub.isMuted : true,
+        micSid: micPub?.trackSid,
+        cameraOff: camPub ? camPub.isMuted : true,
+        camSid: camPub?.trackSid,
+      });
+    }
+    return list;
+  }, [allParticipants, teacherIdentity, handRaisedMap]);
 
   return (
     <>
@@ -532,9 +550,27 @@ export default function PeoplePanel({
               ) : (
                 <div className="flex items-center justify-between gap-2">
                   <div className="min-w-0">
-                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5">
+                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5 flex-wrap">
                       <span>{p.name}</span>
                       {p.isLocal && <span className="text-white/40"> (you)</span>}
+                      {p.isTeacher ? (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                          Host
+                        </span>
+                      ) : p.isGuest ? (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                          Guest
+                        </span>
+                      ) : (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                          Student
+                        </span>
+                      )}
+                      {p.handRaised && (
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 flex items-center gap-0.5 animate-pulse">
+                          ✋ Hand
+                        </span>
+                      )}
                       {(p.isLocal || isModerator) && (
                         <button
                           type="button"
@@ -548,8 +584,8 @@ export default function PeoplePanel({
                         </button>
                       )}
                     </div>
-                    <div className="text-[11px] font-medium" style={{ color: p.micMuted ? '#fca5a5' : '#6ee7b7' }}>
-                      {p.micMuted ? 'Muted' : 'Speaking'}
+                    <div className="text-[11px] font-medium mt-0.5" style={{ color: p.isSpeaking ? '#6ee7b7' : p.micMuted ? '#fca5a5' : '#94a3b8' }}>
+                      {p.isSpeaking ? 'Speaking' : p.micMuted ? 'Muted' : 'Mic Active'}
                     </div>
                   </div>
 
@@ -584,6 +620,15 @@ export default function PeoplePanel({
                           Mute
                         </button>
                       ))}
+
+                    {!p.isLocal && isModerator && p.cameraOff && (
+                      <button
+                        onClick={() => askForCamera(p.identity)}
+                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-white hover:bg-white/15"
+                      >
+                        Ask camera
+                      </button>
+                    )}
 
                     {!p.isLocal && isModerator &&
                       (confirmRemove === p.identity ? (

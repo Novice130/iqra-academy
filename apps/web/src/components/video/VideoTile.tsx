@@ -36,6 +36,7 @@ export default function VideoTile({
   cameraOff,
   isLocal,
   isSpotlighted,
+  handRaised,
   actions,
   rounded = true,
   fit = 'contain',
@@ -46,6 +47,7 @@ export default function VideoTile({
   cameraOff: boolean;
   isLocal: boolean;
   isSpotlighted?: boolean;
+  handRaised?: boolean;
   actions?: TileActions;
   rounded?: boolean;
   fit?: 'cover' | 'contain';
@@ -211,7 +213,29 @@ export default function VideoTile({
           {name}
           {isLocal ? ' (you)' : ''}
         </span>
+        {actions?.volume !== undefined && Math.round(actions.volume * 100) !== 100 && (
+          <span className="text-[10px] text-neutral-400 shrink-0 font-mono ml-0.5">
+            {Math.round(actions.volume * 100)}%
+          </span>
+        )}
       </div>
+
+      {handRaised && (
+        <div
+          className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 z-10 animate-bounce"
+          style={{
+            background: 'rgba(245, 158, 11, 0.95)',
+            backdropFilter: 'blur(12px)',
+            WebkitBackdropFilter: 'blur(12px)',
+            color: '#fff',
+            boxShadow: '0 4px 14px rgba(245, 158, 11, 0.5)',
+            border: '1px solid rgba(255, 255, 255, 0.35)',
+          }}
+        >
+          <span>✋</span>
+          <span className="text-[11px] font-bold">Hand Raised</span>
+        </div>
+      )}
 
       {isSpotlighted && (
         <div

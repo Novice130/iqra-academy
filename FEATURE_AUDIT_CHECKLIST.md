@@ -169,7 +169,7 @@
 | 4 | Secure realtime scheduling | ✅ Complete | 2026-09-04 | See below |
 | 5 | Class action button & navigation responsiveness | ✅ Complete | 2026-09-04 | See below |
 | 6 | Admin information architecture | ✅ Complete | 2026-09-04 | See below |
-| 7 | Meeting control parity | ⬜ Pending | — | — |
+| 7 | Meeting control parity | ✅ Complete | 2026-09-04 | See below |
 | 8 | Visual system & every active page | ⬜ Pending | — | — |
 | 9 | Native iOS & Android | ⬜ Pending | — | — |
 | 10 | Tests & CI | ⬜ Pending | — | — |
@@ -327,6 +327,49 @@
     - Created `tests/api/admin-architecture.spec.ts` verifying catch-all removal (404), `PATCH /api/sessions/[id]` authorization boundaries and transactional outbox emission, tenant isolation, and strict absence of future classes on admin overview.
 - **Key files**: `apps/web/src/app/admin/page.tsx`, `apps/web/src/app/admin/not-found.tsx`, `apps/web/src/app/admin/live-classes/**`, `apps/web/src/app/admin/scheduled-classes/**`, `apps/web/src/app/admin/teacher-schedules/**`, `apps/web/src/app/api/sessions/[id]/route.ts`, `apps/web/src/app/dashboard/DashboardChrome.tsx`, `apps/web/tests/api/admin-architecture.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (53 passed, 2 skipped, 1 expected fail, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+### Phase 7 — Meeting Control Parity (2026-09-04)
+- **What was done**:
+  - **Canonical 9-Position Bottom Dock (Desktop $\ge 768$px)**:
+    - Position 1: Mute with device picker caret
+    - Position 2: Video with device picker caret
+    - Position 3: Participants with badge counter
+    - Position 4: Chat with unread badge counter
+    - Position 5: Reactions popover (👍, 👏, ❤️, 🎉, 😂, 🤲) & persistent hand raise toggle
+    - Position 6: Screen Share (green active state indicator)
+    - Position 7: Host Tools (shield icon, host only)
+    - Position 8: More (secondary controls popover)
+    - Position 9: End (rightmost red pill button with leave vs end confirmation modal)
+    - Ensured labels remain below icons with stable, non-jumping positions.
+  - **Mobile Dock & Compact Overflow (< 768px)**:
+    - Visible dock reduced to 5 items: Mute, Video, Share, More, End.
+    - More sheet contains grouped overflow: Host Tools (top section for hosts), Collaboration (Participants, Chat, Reactions), In-Call Tools (Captions, Whiteboard, Backgrounds, Stop Incoming Video, Settings, Info).
+  - **Device Carets & Modal Selectors**:
+    - Split-button style carets on Mute and Video buttons opening frosted glass device pickers.
+    - Live enumeration and hot-swapping across cameras, microphones, and audio output speakers.
+  - **Host Moderation Tools (`HostToolsModal.tsx`)**:
+    - One-click "Mute All" remote participants with confirmation.
+    - "Lock Meeting" toggle updating room metadata (`isLocked: true`), preventing new guest knocks or joins.
+    - "Student Screen Sharing" permission toggle (`allowParticipantShare`).
+    - Quick shortcut to guest admission waiting room.
+    - Safe "End Class for Everyone" confirmation dialog.
+    - Backed by server API route `POST /api/sessions/[id]/host-tools` enforcing host/admin RBAC.
+  - **Dedicated Settings Dialog (`CallSettingsModal.tsx`)**:
+    - Desktop left category rail and mobile segmented top tabs across 6 categories: General, Audio, Video, Backgrounds, Statistics, and About.
+  - **LiveKit Data Channel Reactions & Hand Raising**:
+    - Topics: `topic: 'reaction'` and `topic: 'hand_raise'`.
+    - Live floating emoji animations (`animate-float-reaction`) rising from dock on sent/received reactions.
+    - Persistent `✋ Hand Raised` golden badges rendered on participant video tiles and in the participant roster.
+  - **Interactive Quran Teaching Whiteboard (`WhiteboardOverlay.tsx`)**:
+    - Full-stage interactive digital whiteboard with pen, eraser, color palette, stroke thickness selector, and canvas clearing.
+  - **Live Captions & Bandwidth Saver**:
+    - Real-time subtitle/caption banner showing active speaker status.
+    - "Stop Incoming Video" bandwidth-saver toggle pausing remote video track rendering while preserving crisp audio.
+  - **Automated Test Suite**:
+    - Created `tests/api/meeting-controls.spec.ts` covering host tools RBAC, room locking enforcement rejecting guest knocks with 423, volume control limits, spotlight state transitions, and room metadata parsing.
+- **Key files**: `apps/web/src/components/video/CallControlBar.tsx`, `apps/web/src/components/video/VideoTile.tsx`, `apps/web/src/components/video/CustomVideoConference.tsx`, `apps/web/src/components/video/PeoplePanel.tsx`, `apps/web/src/components/video/HostToolsModal.tsx`, `apps/web/src/components/video/CallSettingsModal.tsx`, `apps/web/src/components/video/WhiteboardOverlay.tsx`, `apps/web/src/components/video/CallIcons.tsx`, `apps/web/src/components/video/hostControls.ts`, `apps/web/src/lib/room-metadata.ts`, `apps/web/src/app/api/sessions/[id]/host-tools/route.ts`, `apps/web/src/app/api/guest/join/route.ts`, `apps/web/tests/api/meeting-controls.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (58 passed, 2 skipped, 1 expected fail, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
 
 
 

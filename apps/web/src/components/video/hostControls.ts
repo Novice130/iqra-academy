@@ -85,5 +85,62 @@ export function useHostControls(sessionId: string) {
     [sessionId]
   );
 
-  return { muteTrack, askToUnmute, askForCamera, rename, removeParticipant };
+  /** Mute all remote participants in the room */
+  const muteAll = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/sessions/${sessionId}/host-tools`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'muteAll' }),
+      });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }, [sessionId]);
+
+  /** Lock or unlock the room to block new guest knocks/joins */
+  const setRoomLocked = useCallback(
+    async (locked: boolean) => {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/host-tools`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'lock', value: locked }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [sessionId]
+  );
+
+  /** Toggle whether non-hosts can share their screen */
+  const setAllowParticipantShare = useCallback(
+    async (allow: boolean) => {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/host-tools`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'participantShare', value: allow }),
+        });
+        return res.ok;
+      } catch {
+        return false;
+      }
+    },
+    [sessionId]
+  );
+
+  return {
+    muteTrack,
+    askToUnmute,
+    askForCamera,
+    rename,
+    removeParticipant,
+    muteAll,
+    setRoomLocked,
+    setAllowParticipantShare,
+  };
 }
