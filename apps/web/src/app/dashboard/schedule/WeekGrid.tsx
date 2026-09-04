@@ -16,6 +16,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useViewerTimeZone } from '@/components/LocalTime';
+import { getMeetingLifecycleState } from '@/lib/class-action';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -133,19 +134,52 @@ export default function WeekGrid({
                     className="p-1 relative min-h-[64px]"
                     style={{ borderRight: dayIndex < 6 ? '1px solid var(--border)' : undefined }}
                   >
-                    {atSlot.map((b) => (
-                      <Link
-                        key={b.id}
-                        href={`/dashboard/session/${b.sessionId}`}
-                        className="block rounded-lg p-2 text-white text-[10px] cursor-pointer transition-transform hover:scale-[1.02] mb-1 leading-tight shadow-sm"
-                        style={{ background: getStudentColor(b.studentId) }}
-                      >
-                        <div className="font-bold truncate">{b.studentName}</div>
-                        <div className="truncate opacity-90">
-                          {new Date(b.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
-                        </div>
-                      </Link>
-                    ))}
+                    {atSlot.map((b) => {
+                      const lifecycle = getMeetingLifecycleState({ status: 'SCHEDULED', scheduledStart: b.start });
+                      const isPast = lifecycle === 'COMPLETED' || lifecycle === 'EXPIRED';
+                      const isLive = lifecycle === 'LIVE';
+
+                      const tileContent = (
+                        <>
+                          <div className="flex items-center justify-between gap-1">
+                            <span className="font-bold truncate">{b.studentName}</span>
+                            {isLive && (
+                              <span className="relative flex h-2 w-2 shrink-0">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                              </span>
+                            )}
+                          </div>
+                          <div className="truncate opacity-90">
+                            {new Date(b.start).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
+                          </div>
+                        </>
+                      );
+
+                      if (isPast) {
+                        return (
+                          <div
+                            key={b.id}
+                            className="block rounded-lg p-2 text-white text-[10px] cursor-default mb-1 leading-tight shadow-xs opacity-60 grayscale-[40%]"
+                            style={{ background: getStudentColor(b.studentId) }}
+                            title="Class completed / expired"
+                          >
+                            {tileContent}
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <Link
+                          key={b.id}
+                          href={`/dashboard/session/${b.sessionId}`}
+                          className="block rounded-lg p-2 text-white text-[10px] cursor-pointer transition-transform hover:scale-[1.02] mb-1 leading-tight shadow-sm"
+                          style={{ background: getStudentColor(b.studentId) }}
+                        >
+                          {tileContent}
+                        </Link>
+                      );
+                    })}
                   </div>
                 );
               })}

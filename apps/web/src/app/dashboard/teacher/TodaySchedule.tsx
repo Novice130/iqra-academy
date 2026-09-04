@@ -14,6 +14,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import LocalTime from '@/components/LocalTime';
+import ClassActionButton from '@/components/ClassActionButton';
 import SessionRowActions from './SessionRowActions';
 
 export interface ScheduleRow {
@@ -77,36 +78,19 @@ export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
               </div>
             </div>
           </div>
-          {s.status === 'SCHEDULED' ? (
-            <Link
-              href={`/dashboard/session/${s.id}`}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
-              style={{ background: 'var(--accent)' }}
-            >
-              Start Class
-            </Link>
-          ) : s.status === 'IN_PROGRESS' ? (
-            <div className="flex items-center gap-2">
-              <Link
-                href={`/dashboard/session/${s.id}`}
-                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
-                style={{ background: '#0a8967' }}
-              >
-                Rejoin Class
-              </Link>
-              <SessionRowActions sessionId={s.id} showEnd={true} />
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span
-                className="px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase"
-                style={{ background: '#dcfce7', color: '#166534' }}
-              >
-                {s.status.toLowerCase()}
-              </span>
-              <SessionRowActions sessionId={s.id} showEnd={false} />
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <ClassActionButton
+              session={{
+                id: s.id,
+                scheduledStart: s.scheduledStart,
+                status: s.status,
+                title: s.title,
+              }}
+              viewer={{ role: 'TEACHER', isTeacher: true }}
+              variant="compact"
+            />
+            <SessionRowActions sessionId={s.id} showEnd={s.status === 'IN_PROGRESS'} />
+          </div>
         </div>
       ))}
     </>

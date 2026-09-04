@@ -166,8 +166,8 @@
 | 1 | P0 authorization & tenant isolation | ✅ Complete | 2026-09-04 | See below |
 | 2 | Data model & migration | ✅ Complete | 2026-09-04 | See below |
 | 3 | Canonical scheduling & meeting lifecycle | ✅ Complete | 2026-09-04 | See below |
-| 4 | Secure realtime scheduling | ⬜ Pending | — | — |
-| 5 | Class action button & navigation responsiveness | ⬜ Pending | — | — |
+| 4 | Secure realtime scheduling | ✅ Complete | 2026-09-04 | See below |
+| 5 | Class action button & navigation responsiveness | ✅ Complete | 2026-09-04 | See below |
 | 6 | Admin information architecture | ⬜ Pending | — | — |
 | 7 | Meeting control parity | ⬜ Pending | — | — |
 | 8 | Visual system & every active page | ⬜ Pending | — | — |
@@ -271,5 +271,41 @@
     - Created `tests/api/realtime.spec.ts` covering JWT ticket issuance and claims, Hub DO partitioning and subscription authorization, protocol message structure, transactional outbox insertion, publisher retry and dead-letter limits, and informational modal acknowledgement.
 - **Key files**: `apps/web/src/realtime/protocol.ts`, `apps/web/src/realtime/AvailabilityHub.ts`, `apps/web/src/lib/realtime/ticket.ts`, `apps/web/src/lib/realtime/outbox.ts`, `apps/web/src/lib/realtime/outbox-publisher.ts`, `apps/web/src/lib/useSchedulingRealtime.ts`, `apps/web/src/components/TeacherAvailabilityModal.tsx`, `apps/web/src/app/api/realtime/**`, `apps/web/drizzle/0008_scheduling_events_version.sql`, `apps/web/tests/api/realtime.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test:api` (38 passed, 2 skipped, exit 0).
+
+### Phase 5 — Class Action Button & Navigation Responsiveness (2026-09-04)
+- **What was done**:
+  - **Pure Client/Server Decoupling**: Created `apps/web/src/lib/class-action.ts` completely isolated from Node drivers and database packages, exporting `getClassActionState()`, `getMeetingLifecycleState()`, `formatClassDuration()`, and `formatClassCountdown()`. Re-exported all functions and constants from `meeting-service.ts` for full backward compatibility with server routes and tests.
+  - **Canonical Class Action Button (`ClassActionButton.tsx`)**:
+    - `UPCOMING`: Neutral time card / countdown badge (e.g. `Starts in 2h 15m`); strictly suppresses blue action button prior to T-60.
+    - `READY`: Vibrant `#0A84FF` prominent blue button ($\ge 48$px min height on prominent variant), video camera icon, hover/touch prefetch, labeled by role: "Start Class" (teacher) / "Join Class" (student) / "Observe Live" (admin).
+    - `LIVE`: `#0A84FF` blue button with pulsating red live dot; labeled: "Rejoin Class" (teacher) / "Join Live Class" (student) / "Observe Live" (admin).
+    - `EXPIRED`, `COMPLETED`, `CANCELLED`: Terminal status chip with `actionUrl: ""` and disabled state, eliminating dead clicks.
+  - **Sub-frame (<16ms) Navigation Feedback (`NavigationProgress.tsx`)**:
+    - Global click interceptor catching internal anchor clicks with instantaneous progress initialization (`#0A84FF` slim bar with blur glow).
+    - Safely wrapped in `Suspense` to preserve Next.js static generation across all routes.
+    - Mounted in root `RootLayout` (`apps/web/src/app/layout.tsx`) and `DashboardChrome` / `AppChrome`.
+  - **Focused Streaming Suspense Skeletons (`loading.tsx`)**:
+    - Created 8 focused loading skeletons with zero generic full-page spinners, strictly mirroring underlying page geometries:
+      1. `/dashboard/loading.tsx` (greeting, hero next class card, 4 stat cards, quick actions, student profiles)
+      2. `/admin/loading.tsx` (header + action pills, 6 stat cards, live classes monitor, scheduled classes matrix)
+      3. `/dashboard/booking/loading.tsx` (teacher selection chips, day strip, slot pills grid)
+      4. `/dashboard/schedule/loading.tsx` (week nav, 8-column header, hourly grid rows)
+      5. `/dashboard/attendance/loading.tsx` (date/teacher filter controls, day cards, attendance table rows)
+      6. `/dashboard/teacher/students/loading.tsx` (header with assign button, student cards grid)
+      7. `/admin/invoices/loading.tsx` (breadcrumbs, title, desk search/filter controls, invoice table)
+      8. `/dashboard/session/[id]/loading.tsx` (immersive dark canvas, center camera preview shimmer with spinner, bottom control bar)
+  - **Full UI Integration**:
+    - Integrated `ClassActionButton` in student home next class card (`/dashboard/page.tsx`).
+    - Integrated `ClassActionButton` with `compact` variant in teacher today schedule (`TodaySchedule.tsx`), preserving row actions.
+    - Integrated `ClassActionButton` in teacher dashboard school-wide live classes (`teacher/page.tsx`).
+    - Integrated `ClassActionButton` in live class ribbon (`LiveClassRibbon.tsx`).
+    - Integrated `ClassActionButton` in admin live classes monitor (`admin/[[...slug]]/page.tsx`).
+    - Integrated `ClassActionButton` in admin scheduled classes matrix (`ScheduledClassesMatrix.tsx`).
+    - Updated `WeekGrid.tsx` to use lifecycle-aware tiles with live pulses and disabled past classes.
+  - **Automated Test Suite**:
+    - Created `tests/api/class-action.spec.ts` covering T-60 boundary transition, role-specific labels, duration derivation, countdown formats, backward compatibility re-exports, and zero dead navigation on terminal states.
+- **Key files**: `apps/web/src/lib/class-action.ts`, `apps/web/src/components/ClassActionButton.tsx`, `apps/web/src/components/NavigationProgress.tsx`, `apps/web/src/app/dashboard/loading.tsx`, `apps/web/src/app/admin/loading.tsx`, `apps/web/src/app/dashboard/booking/loading.tsx`, `apps/web/src/app/dashboard/schedule/loading.tsx`, `apps/web/src/app/dashboard/attendance/loading.tsx`, `apps/web/src/app/dashboard/teacher/students/loading.tsx`, `apps/web/src/app/admin/invoices/loading.tsx`, `apps/web/src/app/dashboard/session/[id]/loading.tsx`, `apps/web/tests/api/class-action.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test:api` (44 passed, 2 skipped, exit 0).
+
 
 

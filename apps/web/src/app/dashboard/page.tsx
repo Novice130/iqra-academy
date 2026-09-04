@@ -16,6 +16,7 @@ import { format } from "date-fns";
 import { redirect } from "next/navigation";
 import { shouldHidePricing, subscriptionLabel } from "@/lib/pricing-visibility";
 import LocalTime from "@/components/LocalTime";
+import ClassActionButton from "@/components/ClassActionButton";
 
 export default async function DashboardPage() {
   return withDb(async () => {
@@ -126,9 +127,12 @@ export default async function DashboardPage() {
                   <LocalTime iso={upcoming.sessions.scheduledStart.toISOString()} mode="weekday-time" withZone />
                 </p>
               </div>
-              <Link href={`/dashboard/session/${upcoming.sessions.id}`} className="btn-primary" style={{ fontSize: "13px", padding: "10px 20px" }}>
-                Join Class
-              </Link>
+              <ClassActionButton
+                session={upcoming.sessions}
+                viewer={{ userId: user.id, role }}
+                variant="prominent"
+                showDuration
+              />
             </div>
           </div>
         ) : (

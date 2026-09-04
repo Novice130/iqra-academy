@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import LocalTime from "@/components/LocalTime";
+import ClassActionButton from "@/components/ClassActionButton";
 
 export interface ScheduledClassItem {
   id: string;
@@ -161,12 +162,17 @@ export default function ScheduledClassesMatrix({
                           </span>
                         </td>
                         <td className="py-3 px-4 text-right">
-                          <Link
-                            href={`/dashboard/session/${item.id}`}
-                            className="font-semibold text-[var(--accent)] hover:underline"
-                          >
-                            Open Class →
-                          </Link>
+                          <ClassActionButton
+                            session={{
+                              id: item.id,
+                              scheduledStart: item.scheduledStart,
+                              scheduledEnd: item.scheduledEnd,
+                              status: 'SCHEDULED',
+                              title: item.title,
+                            }}
+                            viewer={{ role: 'ORG_ADMIN', isAdmin: true }}
+                            variant="compact"
+                          />
                         </td>
                       </tr>
                     ))}

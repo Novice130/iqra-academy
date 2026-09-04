@@ -14,6 +14,7 @@ import { db, withDb } from "@/lib/db";
 import { sessions, users } from "@/db/schema";
 import { sql, inArray, asc, and, eq } from "drizzle-orm";
 import { getRoomServiceClient } from "@/lib/livekit";
+import ClassActionButton from "@/components/ClassActionButton";
 import ScheduledClassesMatrix, { type ScheduledClassItem } from "../ScheduledClassesMatrix";
 
 const TABLE_PAGES: Record<string, string> = {
@@ -154,12 +155,15 @@ export default async function AdminPage() {
                         {room.numParticipants} online
                       </span>
                       {room.session && (
-                        <Link
-                          href={`/dashboard/session/${room.session.id}`}
-                          className="font-semibold text-[var(--accent)] hover:underline"
-                        >
-                          Join/Inspect →
-                        </Link>
+                        <ClassActionButton
+                          session={{
+                            id: room.session.id,
+                            status: 'IN_PROGRESS',
+                            title: room.session.title || room.session.track,
+                          }}
+                          viewer={{ role: 'ORG_ADMIN', isAdmin: true }}
+                          variant="compact"
+                        />
                       )}
                     </div>
                   </div>

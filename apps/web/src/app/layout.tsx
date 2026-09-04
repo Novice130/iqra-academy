@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import WhatsAppButton from "@/components/WhatsAppButton";
 import NativeAppFlag from "@/components/NativeAppFlag";
+import NavigationProgress from "@/components/NavigationProgress";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -49,6 +50,7 @@ export default function RootLayout({
             is decided on the server in dashboard/layout.tsx, which is dynamic
             regardless because it reads the session. */}
         <NativeAppFlag />
+        <NavigationProgress />
         {children}
         {/* A floating chat bubble is a website's way of offering help. In the
             app, support lives in Messages — hidden via .native-app in CSS. */}

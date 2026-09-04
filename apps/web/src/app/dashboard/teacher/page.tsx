@@ -18,6 +18,7 @@ import TodaySchedule, { type ScheduleRow } from "./TodaySchedule";
 import CombineClasses from "./CombineClasses";
 import LocalTime from "@/components/LocalTime";
 import CopyLinkButton from "@/components/CopyLinkButton";
+import ClassActionButton from "@/components/ClassActionButton";
 import { getAttendanceReport } from "@/lib/attendance";
 
 function safeDistanceToNow(d: Date | string | null | undefined): string {
@@ -235,13 +236,16 @@ export default async function TeacherDashboard() {
                       </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <Link
-                        href={`/dashboard/session/${s.id}`}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                        style={{ background: "var(--accent)" }}
-                      >
-                        Join / Observe
-                      </Link>
+                      <ClassActionButton
+                        session={{
+                          id: s.id,
+                          status: 'IN_PROGRESS',
+                          actualStart: s.actualStart,
+                          title: s.title,
+                        }}
+                        viewer={{ role: 'ORG_ADMIN', isAdmin: true }}
+                        variant="compact"
+                      />
                       <CopyLinkButton path={`/dashboard/session/${s.id}`} />
                       <SessionRowActions sessionId={s.id} showEnd={true} />
                     </div>

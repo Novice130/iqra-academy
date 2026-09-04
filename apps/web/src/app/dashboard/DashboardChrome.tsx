@@ -16,6 +16,7 @@ import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
 import PushRegistrar from "./PushRegistrar";
 import TeacherAvailabilityModal from "@/components/TeacherAvailabilityModal";
+import NavigationProgress from "@/components/NavigationProgress";
 import { authClient } from "@/lib/auth-client";
 
 interface DashboardUser {
@@ -71,6 +72,7 @@ export default function DashboardChrome({
       className="min-h-screen flex"
       style={{ background: "var(--bg-secondary)" }}
     >
+      <NavigationProgress />
       <IncomingCallOverlay />
       <PushRegistrar />
 
@@ -430,6 +432,7 @@ function AppChrome({
 
   return (
     <div className="app-shell" style={{ background: "var(--bg-secondary)" }}>
+      <NavigationProgress />
       <IncomingCallOverlay />
       <PushRegistrar />
 

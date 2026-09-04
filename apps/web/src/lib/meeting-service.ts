@@ -39,107 +39,16 @@ export { EARLY_JOIN_MS, LATE_JOIN_MS, LIVE_WINDOW_MS, SIBLING_WINDOW_MS };
 export const SCHEDULED_BEFORE_MS = 60 * 60 * 1000; // T-60
 export const SCHEDULED_AFTER_MS = 2 * 60 * 60 * 1000; // T+120
 
-export type MeetingLifecycleState =
-  | "UPCOMING"
-  | "READY"
-  | "LIVE"
-  | "EXPIRED"
-  | "COMPLETED"
-  | "CANCELLED";
-
-export interface ClassActionState {
-  state: MeetingLifecycleState;
-  label: string;
-  actionUrl: string;
-  disabled: boolean;
-  isHost: boolean;
-}
-
-/**
- * Returns canonical lifecycle state based on single-source class-room constants.
- */
-export function getMeetingLifecycleState(
-  session: Pick<typeof sessions.$inferSelect, "status" | "scheduledStart" | "actualStart">,
-  now: Date = new Date()
-): MeetingLifecycleState {
-  if (session.status === "COMPLETED") return "COMPLETED";
-  if (session.status === "CANCELLED") return "CANCELLED";
-
-  const nowMs = now.getTime();
-
-  if (session.status === "IN_PROGRESS") {
-    const startMs = session.actualStart?.getTime() ?? session.scheduledStart?.getTime() ?? nowMs;
-    if (nowMs - startMs > LIVE_WINDOW_MS) {
-      return "EXPIRED";
-    }
-    return "LIVE";
-  }
-
-  // SCHEDULED status
-  const scheduledMs = session.scheduledStart?.getTime() ?? nowMs;
-  if (nowMs < scheduledMs - EARLY_JOIN_MS) {
-    return "UPCOMING";
-  }
-  if (nowMs > scheduledMs + LATE_JOIN_MS) {
-    return "EXPIRED";
-  }
-  return "READY";
-}
-
-/**
- * Derives canonical button label, disabled state, and action link for any viewer.
- *
- * Labels:
- * - global ad-hoc: "Instant Meeting"
- * - due scheduled teacher action: "Start Class"
- * - booked student action: "Join Class"
- * - running action (teacher): "Rejoin Class"
- * - running action (student): "Join Live Class" or "Rejoin Class"
- * - observer: "Observe Live"
- */
-export function getClassActionState(
-  session: typeof sessions.$inferSelect,
-  viewer: { userId: string; role: string; orgId: string },
-  now: Date = new Date()
-): ClassActionState {
-  const state = getMeetingLifecycleState(session, now);
-  const isTeacher = session.teacherId === viewer.userId;
-  const isAdmin = viewer.role === "ORG_ADMIN" || viewer.role === "SUPER_ADMIN";
-  const isHost = isTeacher;
-  const actionUrl = `/dashboard/session/${session.id}`;
-
-  if (state === "COMPLETED") {
-    return { state, label: "Class Completed", actionUrl, disabled: true, isHost };
-  }
-  if (state === "CANCELLED") {
-    return { state, label: "Class Cancelled", actionUrl, disabled: true, isHost };
-  }
-  if (state === "EXPIRED") {
-    return { state, label: "Expired", actionUrl, disabled: true, isHost };
-  }
-  if (state === "UPCOMING") {
-    return { state, label: "Upcoming", actionUrl, disabled: true, isHost };
-  }
-
-  if (state === "LIVE") {
-    if (isTeacher) {
-      return { state, label: "Rejoin Class", actionUrl, disabled: false, isHost: true };
-    }
-    if (isAdmin) {
-      return { state, label: "Observe Live", actionUrl, disabled: false, isHost: false };
-    }
-    return { state, label: "Join Live Class", actionUrl, disabled: false, isHost: false };
-  }
-
-  // READY (within join window T-60 to T+180)
-  if (isTeacher) {
-    return { state, label: "Start Class", actionUrl, disabled: false, isHost: true };
-  }
-  if (isAdmin) {
-    return { state, label: "Observe Live", actionUrl, disabled: false, isHost: false };
-  }
-  return { state, label: "Join Class", actionUrl, disabled: false, isHost: false };
-}
+export {
+  getMeetingLifecycleState,
+  getClassActionState,
+  formatClassDuration,
+  formatClassCountdown,
+  type MeetingLifecycleState,
+  type ClassActionState,
+  type ClassActionSession,
+  type ClassActionViewer,
+} from "@/lib/class-action";
 
 /**
  * Checks if the assigned teacher is actively in the room.

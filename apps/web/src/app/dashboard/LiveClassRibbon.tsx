@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import ClassActionButton from '@/components/ClassActionButton';
 import { useSchedulingRealtime } from '@/lib/useSchedulingRealtime';
 
 /**
@@ -119,13 +120,17 @@ export default function LiveClassRibbon() {
         />
         Classroom is open — {live.teacherName} is live
       </span>
-      <Link
-        href={`/dashboard/session/${live.sessionId}`}
-        className="shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold transition hover:bg-white/30"
-        style={{ background: 'rgba(255,255,255,0.22)' }}
-      >
-        Join Live Class
-      </Link>
+      <ClassActionButton
+        session={{
+          id: live.sessionId,
+          status: 'IN_PROGRESS',
+          actualStart: live.startedAt,
+          title: live.title,
+        }}
+        viewer={{ role: 'STUDENT' }}
+        variant="compact"
+        className="shrink-0 font-bold shadow-md"
+      />
     </div>
   );
 }
