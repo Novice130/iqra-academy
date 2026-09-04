@@ -46,10 +46,10 @@ class NoviceTutorApp extends StatelessWidget {
       theme: ThemeData(
         useMaterial3: true,
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF059669), // emerald-600, same as the web app
+          seedColor: const Color(0xFF0A84FF), // Phase 8 accent blue
           brightness: Brightness.dark,
         ),
-        scaffoldBackgroundColor: const Color(0xFF0A0A0A),
+        scaffoldBackgroundColor: const Color(0xFF090B0F),
       ),
       // Straight to the dashboard, never the marketing site. Someone who
       // installed the app has already been sold to, and "Trusted by 200+

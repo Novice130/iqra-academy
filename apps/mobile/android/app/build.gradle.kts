@@ -65,12 +65,8 @@ android {
 
     buildTypes {
         release {
-            val storeFile = keystoreProperties.getProperty("storeFile")
-            if (storeFile != null) {
-                signingConfig = signingConfigs.getByName("release")
-            } else {
-                signingConfig = signingConfigs.getByName("debug")
-            }
+            // Require valid release signing configuration; fails loudly if key.properties / keystore is missing
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

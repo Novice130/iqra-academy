@@ -35,10 +35,12 @@ import 'screen_share.dart';
 /// what the marker was introduced to prevent.
 ///
 /// What the shell tells the server, enabling native screen share bridge.
-String get shellUserAgent => 'NoviceTutorApp/1.2 (screenshare)';
+String get shellUserAgent => Platform.isAndroid
+    ? 'NoviceTutorApp/1.2 (screenshare)'
+    : 'NoviceTutorApp/1.2';
 
-/// Screen sharing bridge supported across mobile platforms.
-bool get nativeScreenShareSupported => true;
+/// Screen sharing bridge supported on Android only until iOS ReplayKit extension is built.
+bool get nativeScreenShareSupported => Platform.isAndroid;
 
 class WebShell extends StatefulWidget {
   final String initialUrl;
@@ -66,6 +68,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   /// picture-in-picture to AVPlayer and to WebRTC through a native video view,
   /// neither of which a WKWebView-hosted call page is.
   static const _pipChannel = MethodChannel('novicetutor/pip');
+  static const _deepLinkChannel = MethodChannel('novicetutor/deeplink');
   StreamSubscription<String>? _deepLinks;
 
   /// Watches for a load that starts and then goes nowhere.
@@ -86,7 +89,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
 
     try {
       _refresh = PullToRefreshController(
-        settings: PullToRefreshSettings(color: const Color(0xFF10B981)),
+        settings: PullToRefreshSettings(color: const Color(0xFF0A84FF)),
         onRefresh: () => _controller?.reload(),
       );
     } catch (_) {
@@ -97,8 +100,28 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
     // A notification tapped while the app was closed is already waiting here.
     _deepLinks = PushService.instance.deepLinks.listen(_openPath);
 
+    // Consume launch and runtime verified app links / universal links
+    _initDeepLinks();
+
     WidgetsBinding.instance.addObserver(this);
     _checkFullScreenPermission();
+  }
+
+  Future<void> _initDeepLinks() async {
+    _deepLinkChannel.setMethodCallHandler((call) async {
+      if (call.method == 'onDeepLink' && call.arguments is String) {
+        _openPath(call.arguments as String);
+      }
+    });
+
+    try {
+      final initial = await _deepLinkChannel.invokeMethod<String>('getInitialUrl');
+      if (initial != null && initial.isNotEmpty) {
+        _openPath(initial);
+      }
+    } catch (_) {
+      // Ignore in tests or if channel is unavailable
+    }
   }
 
   @override
@@ -136,9 +159,24 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
     });
   }
 
-  void _openPath(String path) {
-    final url = _appOrigin.resolve(path);
-    _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(url)));
+  void _openPath(String pathOrUrl) {
+    if (pathOrUrl.isEmpty) return;
+    try {
+      final parsed = Uri.parse(pathOrUrl);
+      final Uri targetUri;
+      if (parsed.hasScheme) {
+        if (!_isInternal(parsed)) {
+          // Disallow navigation to foreign origins inside the web shell
+          return;
+        }
+        targetUri = parsed;
+      } else {
+        targetUri = _appOrigin.resolve(pathOrUrl);
+      }
+      _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(targetUri)));
+    } catch (_) {
+      // Malformed URI format, ignore
+    }
   }
 
   /// Holds the OS camera and microphone permissions, asking once if we don't
@@ -361,6 +399,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
         if (await _handleBack()) SystemNavigator.pop();
       },
       child: Scaffold(
+        backgroundColor: const Color(0xFF090B0F),
         body: SafeArea(
           child: Column(
             children: [
@@ -489,13 +528,17 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
         ),
         if (!_firstLoadDone)
           const ColoredBox(
-            color: Color(0xFF0A0A0A),
-            child: Center(child: CircularProgressIndicator()),
+            color: Color(0xFF090B0F),
+            child: Center(
+              child: CircularProgressIndicator(color: Color(0xFF0A84FF)),
+            ),
           ),
         if (_signingIn)
           const ColoredBox(
-            color: Color(0xCC0A0A0A),
-            child: Center(child: CircularProgressIndicator()),
+            color: Color(0xCC090B0F),
+            child: Center(
+              child: CircularProgressIndicator(color: Color(0xFF0A84FF)),
+            ),
           ),
       ],
     );
@@ -511,11 +554,11 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   Widget _fullScreenPrompt() {
     return Container(
       width: double.infinity,
-      color: const Color(0xFF1F2937),
+      color: const Color(0xFF1C2028),
       padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
       child: Row(
         children: [
-          const Icon(Icons.phone_in_talk, color: Color(0xFF34C759), size: 20),
+          const Icon(Icons.phone_in_talk, color: Color(0xFF30D158), size: 20),
           const SizedBox(width: 12),
           const Expanded(
             child: Text(
@@ -526,7 +569,13 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
           ),
           TextButton(
             onPressed: () => CallService.instance.requestFullScreen(),
-            child: const Text('Allow', style: TextStyle(color: Color(0xFF34C759))),
+            child: const Text(
+              'Allow',
+              style: TextStyle(
+                color: Color(0xFF30D158),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           ),
           IconButton(
             onPressed: () => setState(() => _fullScreenDismissed = true),
@@ -545,27 +594,42 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.wifi_off, size: 48, color: Colors.white54),
+            const Icon(Icons.wifi_off, size: 48, color: Color(0xFF9CA3AF)),
             const SizedBox(height: 16),
             const Text(
               "Can't reach Novice Tutor",
-              style: TextStyle(fontSize: 18, color: Colors.white),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+                color: Colors.white,
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
               'Check your connection and try again.',
-              style: TextStyle(color: Colors.white54),
+              style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 14),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0A84FF),
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
               onPressed: () {
                 setState(() => _offline = false);
                 _controller?.loadUrl(
                   urlRequest: URLRequest(url: WebUri(widget.initialUrl)),
                 );
               },
-              child: const Text('Retry'),
+              child: const Text(
+                'Retry',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
             ),
           ],
         ),

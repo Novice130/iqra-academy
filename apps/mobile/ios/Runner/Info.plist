@@ -51,11 +51,21 @@
 	     questionnaire on every upload to App Store Connect. -->
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<!-- Google sign-in needs a CFBundleURLTypes entry holding the
-	     REVERSED_CLIENT_ID from GoogleService-Info.plist, plus a GIDClientID.
-	     Neither exists yet: there is no iOS OAuth client, so the shell does
-	     not intercept Google's OAuth pages on iOS at all
-	     (see lib/shell/google_sign_in_bridge.dart). Add both together. -->
+	<!-- Google Sign-In and deep link URL types -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+				<string>novicetutor</string>
+			</array>
+		</dict>
+	</array>
+	<key>GIDClientID</key>
+	<string>$(GOOGLE_IOS_CLIENT_ID)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

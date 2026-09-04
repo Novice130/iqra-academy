@@ -172,7 +172,9 @@ export default function CallControlBar({
   };
 
   const isModerator = room.localParticipant.permissions?.canPublishData ?? false;
-  const canScreenShare = isModerator || isHost;
+  const isAppShell = typeof window !== 'undefined' && (/NoviceTutorApp/.test(navigator.userAgent) || typeof window.flutter_inappwebview !== 'undefined');
+  const hasBrowserDisplayMedia = typeof navigator !== 'undefined' && typeof navigator.mediaDevices !== 'undefined' && !!navigator.mediaDevices.getDisplayMedia;
+  const canScreenShare = (isModerator || isHost) && (nativeShell || (!isAppShell && hasBrowserDisplayMedia));
   const isSharing = nativeShell ? nativeSharing : screenShare.enabled;
 
   const toggleHandRaise = () => {

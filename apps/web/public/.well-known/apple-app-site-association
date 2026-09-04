@@ -1,0 +1,39 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TT3HQ774N4.com.novicetutor.app",
+        "paths": [
+          "/dashboard/session/*",
+          "/join/*",
+          "/dashboard/*",
+          "/login"
+        ],
+        "components": [
+          {
+            "/": "/dashboard/session/*",
+            "comment": "Matches live classroom sessions"
+          },
+          {
+            "/": "/join/*",
+            "comment": "Matches guest join links"
+          },
+          {
+            "/": "/dashboard/*",
+            "comment": "Matches authenticated dashboard routes"
+          },
+          {
+            "/": "/login",
+            "comment": "Matches login authentication screen"
+          }
+        ]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": [
+      "TT3HQ774N4.com.novicetutor.app"
+    ]
+  }
+}

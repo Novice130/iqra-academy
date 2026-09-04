@@ -1,7 +1,9 @@
 package com.novicetutor.app
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Rational
@@ -23,6 +25,13 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class MainActivity : FlutterActivity() {
     private var pipAllowed = false
+    private var deepLinkChannel: MethodChannel? = null
+    private var initialDeepLink: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        intent?.dataString?.let { initialDeepLink = it }
+    }
 
     /**
      * True from the moment the capture service goes up until it comes down.
@@ -67,11 +76,35 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        // Deep link handler for App Links (cold launch intent or runtime onNewIntent)
+        val dlChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEEPLINK_CHANNEL)
+        deepLinkChannel = dlChannel
+        dlChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getInitialUrl" -> {
+                    val link = initialDeepLink
+                    initialDeepLink = null
+                    result.success(link)
+                }
+                else -> result.notImplemented()
+            }
+        }
+
         // Stop from the notification. The service can't end the share on its
         // own — Dart owns the room that is publishing — so it comes back
         // through here and Dart tears the whole thing down, service included.
         ScreenShareService.onStopRequested = {
             runOnUiThread { screenShare.invokeMethod("stopRequested", null) }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { url ->
+            runOnUiThread {
+                deepLinkChannel?.invokeMethod("onDeepLink", url)
+            }
         }
     }
 
@@ -107,6 +140,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        deepLinkChannel?.setMethodCallHandler(null)
+        deepLinkChannel = null
         ScreenShareService.onStopRequested = null
         ScreenShareService.onStarted = null
         super.onDestroy()
@@ -132,6 +167,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "novicetutor/pip"
         private const val SCREEN_SHARE_CHANNEL = "novicetutor/screenshare"
+        private const val DEEPLINK_CHANNEL = "novicetutor/deeplink"
 
         /** Generous: the service does nothing but post a notification. */
         private const val SERVICE_START_TIMEOUT_MS = 4_000L

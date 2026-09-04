@@ -31,6 +31,7 @@
 | 10 | **Floating Student Tiles Clearance Above Bottom Menu** | ✅ Complete | `apps/web/src/components/video/CustomVideoConference.tsx` | Yes |
 | 11 | **Free-Form Tile Dragging & Magnetic Snapping/Clipping** | ✅ Complete | `apps/web/src/components/video/CustomVideoConference.tsx` | Yes |
 | 12 | **Super Admin Teacher Email Onboarding (`syedamer130@gmail.com`)** | ✅ Complete | `apps/web/src/app/admin/users/page.tsx`, `/api/admin/users` | Yes |
+| 13 | **Native iOS and Android Parity & Deep Linking** | ✅ Complete | `apps/mobile/lib/shell/web_shell.dart`, `MainActivity.kt`, `CallControlBar.tsx` | Yes |
 
 ---
 
@@ -407,6 +408,36 @@
     - Created `apps/web/tests/api/visual-system.spec.ts` (9 tests) verifying tokens, responsive chrome geometry, placeholder absence, math precision, route protections, legal measures, and auth toggles.
 - **Key files**: `apps/web/src/app/globals.css`, `apps/web/src/app/dashboard/DashboardChrome.tsx`, `apps/web/src/app/dashboard/MeetingNotificationBanner.tsx`, `apps/web/src/app/dashboard/page.tsx`, `apps/web/src/app/dashboard/progress/page.tsx`, `apps/web/src/app/dashboard/chat/page.tsx`, `apps/web/src/app/dashboard/teacher/page.tsx`, `apps/web/src/app/dashboard/teacher/StartInstantMeetingButton.tsx`, `apps/web/src/app/dashboard/teacher/availability/page.tsx`, `apps/web/src/app/dashboard/teacher/students/page.tsx`, `apps/web/src/app/dashboard/teacher/students/[id]/page.tsx`, `apps/web/src/app/dashboard/schedule/WeekGrid.tsx`, `apps/web/src/app/login/page.tsx`, `apps/web/src/app/register/page.tsx`, `apps/web/src/app/join/[id]/page.tsx`, `apps/web/src/app/terms/page.tsx`, `apps/web/src/app/privacy/page.tsx`, `apps/web/src/app/debug/layout.tsx`, `apps/web/src/lib/class-action.ts`, `apps/web/src/lib/meeting-service.ts`, `apps/web/tests/api/visual-system.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (70 passed, 2 skipped, 1 expected fail, exit 0), `npm run test` (root turbo 73 passed, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+### Phase 9 — Native iOS and Android Parity & Hardening (2026-09-05)
+- **What was done**:
+  - **Shared Flutter Shell Capability & Origin Hardening (`web_shell.dart`)**:
+    - Gated `shellUserAgent` (`Platform.isAndroid ? 'NoviceTutorApp/1.2 (screenshare)' : 'NoviceTutorApp/1.2'`) and `nativeScreenShareSupported` on `Platform.isAndroid`, eliminating false capability advertisement on iOS where MediaProjection is absent.
+    - Added bi-directional platform deep link channel `novicetutor/deeplink` consuming verified Android App Links and iOS Universal Links on cold launch (`getInitialUrl`) and while running (`onDeepLink`).
+    - Integrated with `PushService.instance.deepLinks` for FCM notifications.
+    - Implemented strict same-origin link validation in `_openPath(String pathOrUrl)`: accepts `novicetutor.com`, its subdomains, and `meet.novicetutor.com`; rejects untrusted third-party origins, preventing shell hijacking while preserving exact path, query parameters, and fragments.
+    - Updated UI tokens and surfaces to align with Phase 8 visual system: dark background `#090B0F`, Apple glass container `#1C2028`, accent blue `#0A84FF`, success green `#30D158`, muted gray `#9CA3AF`, and 12px button corner radii.
+    - Preserved WebView cookie jar as the single authoritative source of user authentication across both platforms.
+  - **Android Build Hardening & App Link Association**:
+    - Updated `MainActivity.kt` to bind `novicetutor/deeplink` MethodChannel, dispatching initial launch intent URIs and runtime `onNewIntent` events to Dart.
+    - Hardened `apps/mobile/android/app/build.gradle.kts` by removing the debug signing fallback (`signingConfig = signingConfigs.getByName("release")`), ensuring release builds fail loudly when keystore properties are missing instead of silently signing with debug keys.
+    - Created hosted Android Digital Asset Links verification file at `apps/web/public/.well-known/assetlinks.json` configured for package `com.novicetutor.app` with `delegate_permission/common.handle_all_urls`.
+  - **iOS Entitlements & Universal Link Association**:
+    - Created `apps/mobile/ios/Runner/Runner.entitlements` configuring `com.apple.developer.associated-domains` (`applinks:novicetutor.com`, `applinks:www.novicetutor.com`) and APNs environment.
+    - Configured `CODE_SIGN_ENTITLEMENTS = Runner/Runner.entitlements;` across Debug, Release, and Profile build targets in `apps/mobile/ios/Runner.xcodeproj/project.pbxproj`.
+    - Updated `apps/mobile/ios/Runner/Info.plist` with `CFBundleURLTypes` supporting `$(GOOGLE_REVERSED_CLIENT_ID)` and custom scheme `novicetutor`, plus `GIDClientID`.
+    - Added `apps/mobile/ios/Runner/GoogleService-Info.plist.example` template without committing secret production credentials.
+    - Created hosted Apple App Site Association file at `apps/web/public/.well-known/apple-app-site-association` for App ID `TT3HQ774N4.com.novicetutor.app` specifying universal link routes (`/dashboard/session/*`, `/join/*`, `/dashboard/*`, `/login`) in both modern components and legacy path formats.
+    - Added `headers()` in `apps/web/next.config.ts` enforcing `Content-Type: application/json` for both `.well-known` endpoints.
+  - **Call Control Bar Screen Share Guarding (`CallControlBar.tsx`)**:
+    - Hardened `canScreenShare` condition: `(isModerator || isHost) && (nativeShell || (!isAppShell && hasBrowserDisplayMedia))`.
+    - Guarantees that iOS native shell (and unsupported mobile web browsers) completely hides the Share button, preventing dead taps until an iOS Broadcast Upload Extension and ReplayKit bridge is introduced.
+  - **Automated Test Suites**:
+    - Created mobile unit/widget test suite in `apps/mobile/test/shell_test.dart` (7 tests): platform UA formatting, capability gating, origin validation, cuid2 format enforcement, Phase 8 dark theme tokens, and deep link channel handling.
+    - Created web API test suite in `apps/web/tests/api/mobile-parity.spec.ts` (7 tests): verifying assetlinks, apple-app-site-association, next.config headers, release signing enforcement, entitlements, and UA regex rules.
+- **Key files**: `apps/mobile/lib/shell/web_shell.dart`, `apps/mobile/lib/main.dart`, `apps/mobile/android/app/src/main/kotlin/com/novicetutor/app/MainActivity.kt`, `apps/mobile/android/app/build.gradle.kts`, `apps/mobile/ios/Runner/Runner.entitlements`, `apps/mobile/ios/Runner.xcodeproj/project.pbxproj`, `apps/mobile/ios/Runner/Info.plist`, `apps/mobile/ios/Runner/GoogleService-Info.plist.example`, `apps/web/src/components/video/CallControlBar.tsx`, `apps/web/public/.well-known/assetlinks.json`, `apps/web/public/.well-known/apple-app-site-association`, `apps/web/next.config.ts`, `apps/mobile/test/shell_test.dart`, `apps/web/tests/api/mobile-parity.spec.ts`.
+- **Verification**: `flutter analyze` (0 issues), `flutter test` (7 passed in `shell_test.dart`, 1 passed in `widget_test.dart`), `npm run test:api` (77 passed, 2 skipped, 1 expected mock fail, exit 0), `npm run test` (root turbo 80 passed, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
 
 
 
