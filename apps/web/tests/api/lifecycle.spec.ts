@@ -10,6 +10,8 @@ import {
   LATE_JOIN_MS,
   LIVE_WINDOW_MS,
 } from "../../src/lib/meeting-service";
+import * as classRoom from "../../src/lib/class-room";
+import * as classAction from "../../src/lib/class-action";
 import { sessions, bookings, studentProfiles, callInvites, notifications } from "../../src/db/schema";
 import { eq, and } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
@@ -319,11 +321,19 @@ test.describe("Phase 3: Database & Meeting Service Integration", () => {
     orgA,
   }) => {
     const { db } = getTestDb();
-    const { SCHEDULED_AFTER_MS } = await import("../../src/lib/meeting-service");
-    const { LATE_JOIN_MS } = await import("../../src/lib/class-room");
-    // The competing-room bug: if these disagree, the button invites the
-    // student in while the resolver refuses to converge the teacher there.
+    const { SCHEDULED_AFTER_MS, SCHEDULED_BEFORE_MS } = await import(
+      "../../src/lib/meeting-service"
+    );
+    // The competing-room bug: if resolver and button disagree on "due", the
+    // button invites the student in while the resolver refuses to converge
+    // the teacher there. class-action.ts mirrors class-room.ts by design
+    // (client-safe); this assertion is what keeps the mirror honest.
     expect(SCHEDULED_AFTER_MS).toBe(LATE_JOIN_MS);
+    expect(SCHEDULED_BEFORE_MS).toBe(EARLY_JOIN_MS);
+    expect(classAction.EARLY_JOIN_MS).toBe(classRoom.EARLY_JOIN_MS);
+    expect(classAction.LATE_JOIN_MS).toBe(classRoom.LATE_JOIN_MS);
+    expect(classAction.LIVE_WINDOW_MS).toBe(classRoom.LIVE_WINDOW_MS);
+    expect(classAction.SIBLING_WINDOW_MS).toBe(classRoom.SIBLING_WINDOW_MS);
 
     // Class started 130 min ago (inside T+180, outside old T+120): both
     // sides must still call it due/READY.

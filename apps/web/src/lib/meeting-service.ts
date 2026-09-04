@@ -36,9 +36,10 @@ import { afterResponse } from "@/lib/after-response";
 export { EARLY_JOIN_MS, LATE_JOIN_MS, LIVE_WINDOW_MS, SIBLING_WINDOW_MS };
 
 /** Time windows around now for scheduled class resolution.
- * Bound to the join window (EARLY/LATE_JOIN_MS in lib/class-room.ts): at any
- * instant the button and the resolver must agree on whether a class is "due",
- * or teacher and student land in different rooms.
+ * Aliased (not copied) from lib/class-room.ts so the resolver and the join
+ * window cannot drift: at any instant the button and the resolver must agree
+ * on whether a class is "due", or teacher and student land in different rooms.
+ * (The client-side mirror in lib/class-action.ts is value-checked by test.)
  */
 export const SCHEDULED_BEFORE_MS = EARLY_JOIN_MS; // T-60
 export const SCHEDULED_AFTER_MS = LATE_JOIN_MS; // T+180

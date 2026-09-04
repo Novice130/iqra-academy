@@ -51,6 +51,12 @@ export const auth = betterAuth({
 
   /**
    * Database adapter — explicit table mapping for Better Auth using request-scoped db.
+   *
+   * New signups MUST land in an explicit org: the users.org_id column has no
+   * database default (migration 0009 dropped the seed-org default that used
+   * to silently home every signup under the seed tenant). Registering without
+   * one would violate NOT NULL, so the adapter stamps the default org here —
+   * visibly, in code, instead of invisibly in the schema.
    */
   database: drizzleAdapter(db, {
     provider: "pg",
@@ -84,6 +90,36 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+  },
+
+  databaseHooks: {
+    user: {
+      create: {
+        before: async (user) => {
+          // Single-tenant today: every self-serve signup joins the default
+          // school org explicitly. Multi-org signup (invite code / subdomain)
+          // replaces this lookup, not the column default — the default stays
+          // dropped so a missing org always fails loudly.
+          const { eq } = await import("drizzle-orm");
+          const { organizations } = await import("@/db/schema");
+          const existing = await db.query.users.findFirst({
+            columns: { orgId: true },
+          });
+          let orgId = existing?.orgId;
+          if (!orgId) {
+            const seed = await db.query.organizations.findFirst({
+              where: eq(organizations.slug, "iqra-academy"),
+              columns: { id: true },
+            });
+            orgId = seed?.id;
+          }
+          if (!orgId) {
+            throw new Error("No organization available for signup.");
+          }
+          return { data: { ...user, orgId } };
+        },
+      },
+    },
   },
 
   /**
