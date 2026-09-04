@@ -19,7 +19,7 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
       .values({
         orgId: orgA.orgId,
         teacherId: orgA.teacher.id,
-        type: "ONE_ON_ONE",
+        type: "INDIVIDUAL",
         status: "SCHEDULED",
         title: "Org A Quran Class",
         scheduledStart: start,
@@ -69,7 +69,7 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
       .values({
         orgId: orgA.orgId,
         teacherId: orgA.teacher.id,
-        type: "ONE_ON_ONE",
+        type: "INDIVIDUAL",
         status: "SCHEDULED",
         title: "Org A Unbooked Class",
         scheduledStart: start,
@@ -102,7 +102,7 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
       .values({
         orgId: orgA.orgId,
         teacherId: orgA.teacher.id,
-        type: "ONE_ON_ONE",
+        type: "INDIVIDUAL",
         status: "SCHEDULED",
         title: "Org A Teacher A Class",
         scheduledStart: start,

@@ -87,6 +87,7 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
       orgId,
       teacherId: teacher.id,
       type: sessionType as typeof sessions.type.enumValues[number],
+      origin: "WEBHOOK",
       status: "SCHEDULED",
       title: payload.title,
       scheduledStart: new Date(payload.startTime),

@@ -102,6 +102,7 @@ export async function POST(request: NextRequest) {
           orgId: ctx.orgId || "seed_org_iqra_academy", // Fallback for safety
           teacherId: ctx.userId,
           type: "INDIVIDUAL", // Instant meetings are handled dynamically, INDIVIDUAL is fine as a placeholder
+          origin: "INSTANT",
           status: "IN_PROGRESS",
           title: `Instant Meeting with ${teacher.name}`,
           scheduledStart: now,

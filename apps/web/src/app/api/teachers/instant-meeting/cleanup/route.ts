@@ -8,7 +8,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { and, eq, like } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { sessions } from "@/db/schema";
 import { deleteSessionCascade } from "@/lib/session-cleanup";
 import { requireRole } from "@/lib/rbac";
@@ -24,8 +24,8 @@ export async function POST(request: NextRequest) {
       const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(ctx.role);
 
       const target = isAdmin
-        ? and(eq(sessions.orgId, ctx.orgId), like(sessions.title, "Instant Meeting%"))
-        : and(eq(sessions.teacherId, ctx.userId), like(sessions.title, "Instant Meeting%"));
+        ? and(eq(sessions.orgId, ctx.orgId), eq(sessions.origin, "INSTANT"))
+        : and(eq(sessions.teacherId, ctx.userId), eq(sessions.origin, "INSTANT"));
 
       const toDelete = await db.query.sessions.findMany({
         where: target,

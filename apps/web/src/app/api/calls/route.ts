@@ -96,6 +96,7 @@ export async function POST(request: NextRequest) {
           orgId: sessionOrgId,
           teacherId: ctx.userId,
           type: "INDIVIDUAL",
+          origin: "INSTANT",
           status: "IN_PROGRESS",
           title: `Instant Meeting with ${teacher.name}`,
           scheduledStart: now,

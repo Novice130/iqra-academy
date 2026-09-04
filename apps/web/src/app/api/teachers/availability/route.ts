@@ -33,7 +33,7 @@
 
 import { db, withDb, withHttpDb } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
-import { teacherAvailability, users } from "@/db/schema";
+import { teacherAvailability, users, notifications } from "@/db/schema";
 import { NextResponse, NextRequest } from "next/server";
 import { requireRole, ROLE_HIERARCHY, type AuthContext } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
@@ -161,6 +161,24 @@ export async function POST(req: NextRequest) {
 
       const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
       const targetOrgId = teacher.orgId;
+      const isExternalEdit = ctx.userId !== teacherId;
+
+      let previousSlots: typeof teacherAvailability.$inferSelect[] = [];
+      let actorName = "An administrator";
+
+      if (isExternalEdit) {
+        previousSlots = await db.query.teacherAvailability.findMany({
+          where: and(
+            eq(teacherAvailability.teacherId, teacherId),
+            eq(teacherAvailability.orgId, targetOrgId)
+          ),
+        });
+        const actor = await db.query.users.findFirst({
+          where: eq(users.id, ctx.userId),
+          columns: { name: true },
+        });
+        if (actor?.name) actorName = actor.name;
+      }
 
       await db.transaction(async (tx) => {
         await tx
@@ -184,6 +202,32 @@ export async function POST(req: NextRequest) {
               slotMinutes,
             }))
           );
+        }
+
+        if (isExternalEdit) {
+          await tx.insert(notifications).values({
+            orgId: targetOrgId,
+            userId: teacherId,
+            type: "AVAILABILITY_CHANGED",
+            message: `${actorName} updated your weekly availability schedule.`,
+            payload: {
+              actorName,
+              teacherId,
+              before: previousSlots.map((s) => ({
+                dayOfWeek: s.dayOfWeek,
+                startTime: toHHMM(s.startTime),
+                endTime: toHHMM(s.endTime),
+                timezone: s.timezone,
+              })),
+              after: data.slots.map((s) => ({
+                dayOfWeek: s.dayOfWeek,
+                startTime: s.startTime,
+                endTime: s.endTime,
+                timezone: data.timezone,
+              })),
+              changedAt: new Date().toISOString(),
+            },
+          });
         }
       });
 

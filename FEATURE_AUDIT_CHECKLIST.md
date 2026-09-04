@@ -164,7 +164,7 @@
 |---|---|---|---|---|
 | 0 | Safe baseline (git, gates, test harness, script gating) | ✅ Complete | 2026-09-03 | See below |
 | 1 | P0 authorization & tenant isolation | ✅ Complete | 2026-09-04 | See below |
-| 2 | Data model & migration | ⬜ Pending | — | — |
+| 2 | Data model & migration | ✅ Complete | 2026-09-04 | See below |
 | 3 | Canonical scheduling & meeting lifecycle | ⬜ Pending | — | — |
 | 4 | Secure realtime scheduling | ⬜ Pending | — | — |
 | 5 | Class action button & navigation responsiveness | ⬜ Pending | — | — |
@@ -200,4 +200,20 @@
   - Added automated test suite in `apps/web/tests/api/tenant-isolation.spec.ts` and updated fixtures with isolated DB check.
 - **Key files**: `apps/web/src/lib/session-access.ts`, `apps/web/src/app/api/sessions/**`, `apps/web/src/app/api/admin/users/route.ts`, `apps/web/src/app/api/admin/assign-student/route.ts`, `apps/web/src/app/admin/**`, `apps/web/src/app/dashboard/**`, `apps/web/src/db/rls-policies.sql`, `apps/web/tests/api/tenant-isolation.spec.ts`.
 - **Verification**: `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (13 passed, exit 0).
+
+### Phase 2 — Data Model & Migration (2026-09-04)
+- **What was done**:
+  - Replaced title-prefix heuristics (`LIKE 'Instant Meeting%'`) with first-class `SessionOrigin` enum (`SCHEDULED`, `INSTANT`, `TRIAL`, `MAKEUP`, `WEBHOOK`).
+  - Added `sessions.origin` column, updated all creation routes (`instant-meeting`, `calls`, `trials`, `assign-student`, `calcom`), and refactored cleanup endpoint to filter by `origin = 'INSTANT'`.
+  - Added database check constraints: `sessions.scheduled_end > sessions.scheduled_start`, `teacher_availability.end_time > teacher_availability.start_time`, `teacher_time_off.ends_at > teacher_time_off.starts_at`.
+  - Added composite indexes: `sessions(org_id, status, scheduled_start)`, `sessions(org_id, teacher_id, scheduled_start)`.
+  - Added unique indexes to prevent double-booking: `bookings(org_id, user_id, session_id)` and `bookings(calcom_booking_id)`.
+  - Added `payload: jsonb` to `notifications` with `AVAILABILITY_CHANGED` notification dispatched when an admin modifies a teacher's schedule.
+  - Added breakout columns (`breakout_room_name`, `breakout_context`) to `session_attendance`.
+  - Defined 6 tenant-scoped collaboration models with Drizzle relations and RLS tenant isolation policies: `meeting_reactions`, `breakout_sets`, `breakout_rooms`, `breakout_assignments`, `whiteboards`, `caption_preferences`.
+  - Created migration `0007_data_model_parity.sql` with backfill DDL and reversible teardown script `drizzle/rollback/0007_data_model_parity_rollback.sql`.
+  - Added automated test suite `tests/api/data-model.spec.ts`.
+- **Key files**: `apps/web/src/db/schema.ts`, `apps/web/src/app/api/teachers/instant-meeting/cleanup/route.ts`, `apps/web/src/app/api/teachers/instant-meeting/route.ts`, `apps/web/src/app/api/calls/route.ts`, `apps/web/src/app/api/trials/route.ts`, `apps/web/src/app/api/admin/assign-student/route.ts`, `apps/web/src/app/api/webhooks/calcom/route.ts`, `apps/web/src/app/api/teachers/availability/route.ts`, `apps/web/drizzle/0007_data_model_parity.sql`, `apps/web/drizzle/rollback/0007_data_model_parity_rollback.sql`, `apps/web/tests/api/data-model.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (18 passed, exit 0).
+
 

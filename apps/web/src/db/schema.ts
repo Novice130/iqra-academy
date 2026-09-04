@@ -17,7 +17,7 @@
  * @module db/schema
  */
 
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   pgEnum,
@@ -26,10 +26,12 @@ import {
   integer,
   timestamp,
   json,
+  jsonb,
   uniqueIndex,
   index,
   smallint,
   time,
+  check,
 } from "drizzle-orm/pg-core";
 import { createId } from "@paralleldrive/cuid2";
 
@@ -182,6 +184,24 @@ export const notificationTypeEnum = pgEnum("NotificationType", [
   "ROLE_GRANTED",
   /** A class moved, because two consecutive ones were combined into one. */
   "CLASS_MOVED",
+  /** Teacher weekly hours updated by an admin. */
+  "AVAILABILITY_CHANGED",
+]);
+
+/** Origin of a session — distinguishing scheduled, ad-hoc, trial, makeup, and webhook-created classes. */
+export const sessionOriginEnum = pgEnum("SessionOrigin", [
+  "SCHEDULED",
+  "INSTANT",
+  "TRIAL",
+  "MAKEUP",
+  "WEBHOOK",
+]);
+
+/** Breakout room set status */
+export const breakoutStatusEnum = pgEnum("BreakoutStatus", [
+  "DRAFT",
+  "OPEN",
+  "CLOSED",
 ]);
 
 /** Direct call ring state machine. */
@@ -613,6 +633,7 @@ export const teacherAvailability = pgTable(
     index("teacher_availability_teacher_idx").on(t.teacherId),
     // How slot generation actually filters: active rows for one org on one day.
     index("teacher_availability_active_idx").on(t.orgId, t.isActive, t.dayOfWeek),
+    check("teacher_availability_end_after_start", sql`${t.endTime} > ${t.startTime}`),
   ]
 );
 
@@ -665,6 +686,7 @@ export const teacherTimeOff = pgTable(
   (t) => [
     index("teacher_time_off_teacher_range_idx").on(t.teacherId, t.startsAt, t.endsAt),
     index("teacher_time_off_org_idx").on(t.orgId),
+    check("teacher_time_off_ends_after_starts", sql`${t.endsAt} > ${t.startsAt}`),
   ]
 );
 
@@ -764,6 +786,9 @@ export const sessions = pgTable(
     // Video integration (LiveKit)
     videoRoomName: text("video_room_name").unique(),
 
+    /** Origin of the session */
+    origin: sessionOriginEnum("origin").notNull().default("SCHEDULED"),
+
     // Recording — teacher decides per session
     recordingUrl: text("recording_url"),
     /** Who can access the recording. Teacher sets this per-session. */
@@ -782,6 +807,9 @@ export const sessions = pgTable(
     // One teacher's day in order — what merge-candidate detection reads, and
     // the only query that needs both columns together.
     index("sessions_teacher_start_idx").on(t.teacherId, t.scheduledStart),
+    index("sessions_org_status_start_idx").on(t.orgId, t.status, t.scheduledStart),
+    index("sessions_org_teacher_start_idx").on(t.orgId, t.teacherId, t.scheduledStart),
+    check("sessions_end_after_start", sql`${t.scheduledEnd} > ${t.scheduledStart}`),
   ]
 );
 
@@ -811,6 +839,8 @@ export const bookings = pgTable(
     index("bookings_user_idx").on(t.userId),
     index("bookings_session_idx").on(t.sessionId),
     index("bookings_profile_idx").on(t.studentProfileId),
+    uniqueIndex("bookings_org_user_session_idx").on(t.orgId, t.userId, t.sessionId),
+    uniqueIndex("bookings_calcom_booking_id_unique").on(t.calcomBookingId),
   ]
 );
 
@@ -868,6 +898,8 @@ export const sessionAttendance = pgTable(
     joinedAt: timestamp("joined_at").notNull().defaultNow(),
     leftAt: timestamp("left_at"),
     durationSeconds: integer("duration_seconds"),
+    breakoutRoomName: text("breakout_room_name"),
+    breakoutContext: jsonb("breakout_context"),
   },
   (t) => [
     uniqueIndex("session_attendance_identity_idx").on(t.sessionId, t.identity),
@@ -892,12 +924,14 @@ export const notifications = pgTable(
     type: notificationTypeEnum("type").notNull(),
     sessionId: text("session_id").references(() => sessions.id),
     message: text("message").notNull(),
+    payload: jsonb("payload"),
     isRead: boolean("is_read").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
     index("notifications_user_idx").on(t.userId),
     index("notifications_session_idx").on(t.sessionId),
+    index("notifications_org_idx").on(t.orgId),
   ]
 );
 
@@ -1315,6 +1349,130 @@ export const twoFactors = pgTable(
   ]
 );
 
+/**
+ * MeetingReaction — transient emojis/reactions during a session for telemetry / replay / moderation.
+ */
+export const meetingReactions = pgTable(
+  "meeting_reactions",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    userId: text("user_id").notNull().references(() => users.id),
+    reaction: text("reaction").notNull(),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("meeting_reactions_session_idx").on(t.sessionId),
+    index("meeting_reactions_org_idx").on(t.orgId),
+    index("meeting_reactions_user_idx").on(t.userId),
+  ]
+);
+
+/**
+ * BreakoutSet — a cohort/group of breakout rooms within a parent session.
+ */
+export const breakoutSets = pgTable(
+  "breakout_sets",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    status: breakoutStatusEnum("status").notNull().default("DRAFT"),
+    openedAt: timestamp("opened_at"),
+    closedAt: timestamp("closed_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("breakout_sets_session_idx").on(t.sessionId),
+    index("breakout_sets_org_idx").on(t.orgId),
+  ]
+);
+
+/**
+ * BreakoutRoom — an individual breakout room inside a breakout set.
+ */
+export const breakoutRooms = pgTable(
+  "breakout_rooms",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    breakoutSetId: text("breakout_set_id").notNull().references(() => breakoutSets.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    videoRoomName: text("video_room_name"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("breakout_rooms_set_idx").on(t.breakoutSetId),
+    index("breakout_rooms_org_idx").on(t.orgId),
+  ]
+);
+
+/**
+ * BreakoutAssignment — assigns a participant or student profile to a breakout room.
+ */
+export const breakoutAssignments = pgTable(
+  "breakout_assignments",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    breakoutRoomId: text("breakout_room_id").notNull().references(() => breakoutRooms.id, { onDelete: "cascade" }),
+    userId: text("user_id").references(() => users.id),
+    studentProfileId: text("student_profile_id").references(() => studentProfiles.id),
+    participantIdentity: text("participant_identity"),
+    joinedAt: timestamp("joined_at"),
+    returnedAt: timestamp("returned_at"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("breakout_assignments_room_idx").on(t.breakoutRoomId),
+    index("breakout_assignments_org_idx").on(t.orgId),
+    index("breakout_assignments_user_idx").on(t.userId),
+  ]
+);
+
+/**
+ * Whiteboard — session whiteboard metadata and Durable Object coordination.
+ */
+export const whiteboards = pgTable(
+  "whiteboards",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    sessionId: text("session_id").notNull().references(() => sessions.id),
+    boardId: text("board_id").notNull(),
+    durableObjectKey: text("durable_object_key"),
+    stateVersion: integer("state_version").notNull().default(1),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("whiteboards_session_board_idx").on(t.sessionId, t.boardId),
+    index("whiteboards_org_idx").on(t.orgId),
+  ]
+);
+
+/**
+ * CaptionPreference — user-specific caption styling and language preferences.
+ */
+export const captionPreferences = pgTable(
+  "caption_preferences",
+  {
+    id: text("id").primaryKey().$defaultFn(() => createId()),
+    orgId: text("org_id").notNull().references(() => organizations.id),
+    userId: text("user_id").notNull().references(() => users.id),
+    language: text("language").notNull().default("ar"),
+    fontSize: text("font_size").notNull().default("medium"),
+    enabled: boolean("enabled").notNull().default(false),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow().$onUpdateFn(() => new Date()),
+  },
+  (t) => [
+    uniqueIndex("caption_preferences_org_user_idx").on(t.orgId, t.userId),
+  ]
+);
+
 // ============================================================================
 // RELATIONS
 // ============================================================================
@@ -1423,6 +1581,9 @@ export const sessionsRelations = relations(sessions, ({ one, many }) => ({
   chatRoom: many(chatRooms),
   feedback: many(teacherFeedback),
   progressRecords: many(progressRecords),
+  reactions: many(meetingReactions),
+  breakoutSets: many(breakoutSets),
+  whiteboards: many(whiteboards),
 }));
 
 export const sessionAttendeesRelations = relations(sessionAttendees, ({ one }) => ({
@@ -1575,3 +1736,39 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   org: one(organizations, { fields: [auditLogs.orgId], references: [organizations.id] }),
   actor: one(users, { fields: [auditLogs.actorId], references: [users.id] }),
 }));
+
+export const meetingReactionsRelations = relations(meetingReactions, ({ one }) => ({
+  org: one(organizations, { fields: [meetingReactions.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [meetingReactions.sessionId], references: [sessions.id] }),
+  user: one(users, { fields: [meetingReactions.userId], references: [users.id] }),
+}));
+
+export const breakoutSetsRelations = relations(breakoutSets, ({ one, many }) => ({
+  org: one(organizations, { fields: [breakoutSets.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [breakoutSets.sessionId], references: [sessions.id] }),
+  rooms: many(breakoutRooms),
+}));
+
+export const breakoutRoomsRelations = relations(breakoutRooms, ({ one, many }) => ({
+  org: one(organizations, { fields: [breakoutRooms.orgId], references: [organizations.id] }),
+  set: one(breakoutSets, { fields: [breakoutRooms.breakoutSetId], references: [breakoutSets.id] }),
+  assignments: many(breakoutAssignments),
+}));
+
+export const breakoutAssignmentsRelations = relations(breakoutAssignments, ({ one }) => ({
+  org: one(organizations, { fields: [breakoutAssignments.orgId], references: [organizations.id] }),
+  room: one(breakoutRooms, { fields: [breakoutAssignments.breakoutRoomId], references: [breakoutRooms.id] }),
+  user: one(users, { fields: [breakoutAssignments.userId], references: [users.id] }),
+  studentProfile: one(studentProfiles, { fields: [breakoutAssignments.studentProfileId], references: [studentProfiles.id] }),
+}));
+
+export const whiteboardsRelations = relations(whiteboards, ({ one }) => ({
+  org: one(organizations, { fields: [whiteboards.orgId], references: [organizations.id] }),
+  session: one(sessions, { fields: [whiteboards.sessionId], references: [sessions.id] }),
+}));
+
+export const captionPreferencesRelations = relations(captionPreferences, ({ one }) => ({
+  org: one(organizations, { fields: [captionPreferences.orgId], references: [organizations.id] }),
+  user: one(users, { fields: [captionPreferences.userId], references: [users.id] }),
+}));
+

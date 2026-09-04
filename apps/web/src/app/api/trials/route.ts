@@ -123,6 +123,7 @@ export async function POST(request: NextRequest) {
             orgId: ctx.orgId,
             teacherId: data.teacherId,
             type: "INDIVIDUAL",
+            origin: "TRIAL",
             status: "SCHEDULED",
             title: `Trial class — ${student?.name || student?.email || "New student"}`,
             scheduledStart: slot.startsAt,

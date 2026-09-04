@@ -92,6 +92,7 @@ export async function POST(request: NextRequest) {
           teacherId: teacher.id,
           track: resolvedTrack,
           type: "INDIVIDUAL",
+          origin: "SCHEDULED",
           status: "SCHEDULED",
           title: sessionTitle,
           scheduledStart: startTime,
