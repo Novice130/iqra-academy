@@ -465,7 +465,7 @@
     - `mobile-ios` job (macOS-14): Flutter stable, Xcode, `flutter analyze`, `flutter test`, and iOS simulator build (`flutter build ios --simulator --no-codesign`).
     - `ci-gate` job: Verifies that all web, Android, and iOS jobs succeed before permitting deployment.
 - **Key files**: `apps/web/tests/api/rbac-deep.spec.ts`, `apps/web/tests/e2e/student-journey.spec.ts`, `apps/web/tests/e2e/teacher-journey.spec.ts`, `apps/web/tests/e2e/admin-journey.spec.ts`, `apps/web/tests/e2e/meeting-experience.spec.ts`, `apps/web/tests/e2e/responsive-a11y.spec.ts`, `.github/workflows/ci.yml`.
-- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `flutter analyze` (0 issues), `flutter test` (8/8 passed), `npm run test:api` (90 passed, 2 skipped, 1 expected mock fail, exit 0), `npm run test:e2e` (28/28 passed, exit 0), `npm run test` (root turbo 126 tests passed across web and mobile, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npx drizzle-kit check` (0 drift, migration `0001_magenta_greymalkin.sql` generated), `flutter analyze` (0 issues), `flutter test` (8/8 passed), `flutter build apk --debug` (clean APK build), `npm run test:api` (90 passed, 2 skipped, 1 expected mock fail, exit 0), `npm run test:e2e` (28/28 passed, exit 0), `npm run test` (root turbo 126 tests passed across web and mobile, exit 0), `npm run build` (exit 0, all 67 routes compiled).
 
 ### Phase 11 — Docs & Rollout (2026-09-05)
 - **What was done**:
