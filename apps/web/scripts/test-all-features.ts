@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("test-all-features");
+
 import { db, withHttpDb } from "../src/lib/db";
 import {
   users,

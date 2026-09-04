@@ -44,7 +44,19 @@ export default async function AdminPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link
+              href="/dashboard/teacher"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition flex items-center gap-1.5"
+            >
+              <span>⚡</span> Start Instant Meeting
+            </Link>
+            <Link
+              href="/admin/assign-student"
+              className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition flex items-center gap-1.5"
+            >
+              <span>📋</span> Schedule with Teacher
+            </Link>
             <Link
               href="/admin/users"
               className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--accent)] text-white shadow-sm hover:opacity-95 transition"
@@ -359,8 +371,8 @@ async function getScheduledClasses(): Promise<ScheduledClassItem[]> {
       track: s.track || "QAIDAH",
       teacherName: s.teacher?.name || s.teacher?.email || "Teacher",
       teacherEmail: s.teacher?.email || "",
-      scheduledStart: s.scheduledStart.toISOString(),
-      scheduledEnd: s.scheduledEnd.toISOString(),
+      scheduledStart: s.scheduledStart ? new Date(s.scheduledStart).toISOString() : new Date().toISOString(),
+      scheduledEnd: s.scheduledEnd ? new Date(s.scheduledEnd).toISOString() : new Date().toISOString(),
       students: s.bookings.map((b) => b.studentProfile?.name || "Student").join(", "),
     }));
   } catch {

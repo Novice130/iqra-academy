@@ -87,7 +87,8 @@ export function groupIntoOccurrences<T extends { id: string; teacherId: string; 
 export type RoomResolution =
   | { kind: "live"; session: SessionRow }
   | { kind: "openable"; session: SessionRow }
-  | { kind: "too-early"; session: SessionRow };
+  | { kind: "too-early"; session: SessionRow }
+  | { kind: "expired"; session: SessionRow };
 
 /**
  * Resolves the session whose room everyone for this class should be in.
@@ -95,8 +96,10 @@ export type RoomResolution =
  * - `live`     — someone is already in there; join it, don't touch its state.
  * - `openable` — nobody yet, but it's within the join window; the caller marks
  *                it started and opens the room.
- * - `too-early` — outside the window entirely; the caller shows the lobby
- *                rather than opening a room for a class that isn't today.
+ * - `too-early` — ahead of the join window; the caller shows the lobby
+ *                until the room opens.
+ * - `expired`   — after the join window has passed; the class has already occurred
+ *                or elapsed without starting.
  */
 export async function resolveClassRoom(session: SessionRow): Promise<RoomResolution> {
   const now = Date.now();
@@ -143,8 +146,12 @@ export async function resolveClassRoom(session: SessionRow): Promise<RoomResolut
   // Precedence is unchanged: a live room still beats everything else.
   if (live) return { kind: "live", session: live };
 
-  if (!inJoinWindow) {
+  if (now < start - EARLY_JOIN_MS) {
     return { kind: "too-early", session };
+  }
+
+  if (now > start + LATE_JOIN_MS) {
+    return { kind: "expired", session };
   }
 
   // 3. Pick one row for the whole occurrence, the same way for everybody, so

@@ -155,3 +155,33 @@
   - Admin panel at `/admin/users` allows super admin (`syedamer130@gmail.com`) to assign `TEACHER` role by email.
   - User logging in with that email automatically receives teacher permissions and dashboard access.
 - **Verification**: Log in as super admin -> go to `/admin/users` -> promote user to Teacher -> user logs in and accesses teacher features.
+
+---
+
+## 🛠 Parity Remediation Phases (from `~/.commandcode/plans/full-product-parity-remediation.md`)
+
+| Phase | Title | Status | Completed | Evidence |
+|---|---|---|---|---|
+| 0 | Safe baseline (git, gates, test harness, script gating) | ✅ Complete | 2026-09-03 | See below |
+| 1 | P0 authorization & tenant isolation | ⬜ Pending | — | — |
+| 2 | Data model & migration | ⬜ Pending | — | — |
+| 3 | Canonical scheduling & meeting lifecycle | ⬜ Pending | — | — |
+| 4 | Secure realtime scheduling | ⬜ Pending | — | — |
+| 5 | Class action button & navigation responsiveness | ⬜ Pending | — | — |
+| 6 | Admin information architecture | ⬜ Pending | — | — |
+| 7 | Meeting control parity | ⬜ Pending | — | — |
+| 8 | Visual system & every active page | ⬜ Pending | — | — |
+| 9 | Native iOS & Android | ⬜ Pending | — | — |
+| 10 | Tests & CI | ⬜ Pending | — | — |
+| 11 | Docs & rollout | ⬜ Pending | — | — |
+
+### Phase 0 — Safe Baseline (2026-09-04)
+- **What was done**:
+  - Confirmed git baseline: existing uncommitted paths preserved, no overwrites.
+  - Recorded build gates: `npm run lint` (0 errors / 79 warnings), `npm run build` (3/3), `flutter analyze` (clean), `flutter test` (1/1), Android debug APK ✅; iOS ❌ blocked on machine setup (Xcode 26.6 has iOS 26.5 SDK but zero simulator runtimes — needs `xcodebuild -downloadPlatform iOS`).
+  - Added Playwright harness: `apps/web/playwright.config.ts` (api + e2e projects), two-org fixtures (`tests/fixtures/`), `test`/`test:api`/`test:e2e` scripts (web + root + turbo), real `analyze`/`test` scripts for `apps/mobile`.
+  - Fixed test flakiness: Local `playwright.config.ts` configured with `timeout: 60_000` and `workers: process.env.CI ? 2 : 1` to prevent cold Turbopack compilation timeouts on multi-core machines.
+  - Gated destructive scripts behind `scripts/lib/require-isolated-db.ts` (requires `ALLOW_LOCAL_DB_SCRIPTS=1` + non-shared host allowlist) — covers 9 scripts + `db:seed`.
+  - Fixed broken `next dev` (webpack edge `EvalError`): `dev` now uses Turbopack.
+- **Key files**: `apps/web/playwright.config.ts`, `apps/web/tests/**`, `apps/web/scripts/lib/require-isolated-db.ts`, `docs/testing.md` (full baseline findings + isolated-DB setup).
+- **Verification**: Root `npm run test` (turbo executing both `apps/mobile` and `apps/web`) passes cleanly 100%. Baseline findings (health-check DDL failure, webpack dev) documented in `docs/testing.md`. Two-org fixture scaffolded for Phase 1 isolation test integration.

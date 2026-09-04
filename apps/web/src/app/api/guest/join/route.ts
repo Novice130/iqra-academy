@@ -13,7 +13,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { and, count, desc, eq, gt, inArray, or } from "drizzle-orm";
 import { guestJoinRequests, sessions, users } from "@/db/schema";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
@@ -64,7 +64,7 @@ function normalizeJoinCode(code: string) {
 }
 
 export async function POST(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const body = await request.json().catch(() => ({}));
       const sessionIdRaw: string | undefined = body?.sessionId;
@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
  * inside ADMIT_GRACE_MS of that admission.
  */
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const requestId = new URL(request.url).searchParams.get("requestId");
       if (!requestId) throw new BusinessRuleError("requestId is required");

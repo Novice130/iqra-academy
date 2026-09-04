@@ -34,7 +34,9 @@ export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
     const now = new Date();
     setToday(
       rows.filter((r) => {
+        if (!r.scheduledStart) return false;
         const d = new Date(r.scheduledStart);
+        if (Number.isNaN(d.getTime())) return false;
         return (
           d.getFullYear() === now.getFullYear() &&
           d.getMonth() === now.getMonth() &&

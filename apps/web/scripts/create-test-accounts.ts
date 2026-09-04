@@ -16,6 +16,10 @@
  */
 
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("create-test-accounts");
+
 import { auth } from "../src/lib/auth";
 import { db, withDb } from "../src/lib/db";
 import { users, studentProfiles, teacherAvailability } from "../src/db/schema";

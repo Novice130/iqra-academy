@@ -14,6 +14,7 @@ per request.
 | 2026-08-05 23:00 | 15 | — |
 | 2026-08-06 14:00–15:00 | 128 | `/api/sessions/[id]/guests` (66) |
 | 2026-08-07 14:13–14:16 | 40 | `/api/sessions/[id]/guests` (40) |
+| 2026-08-31 23:13 | ~15 | `/api/guest/join` |
 
 Users saw Cloudflare **error 1102, "Worker exceeded resource limits"**. Both
 bursts began minutes after a class started, lasted about four minutes, and

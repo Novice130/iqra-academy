@@ -1,4 +1,7 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("test-e2e-auth-and-join");
 
 async function run() {
   console.log("=== 1. Testing Guest Join API Endpoint directly ===");

@@ -5,7 +5,7 @@
 
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { db, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { eq, and, gte, lte, asc, desc, sql, count, isNull, or } from "drizzle-orm";
 import { sessions, bookings, studentProfiles, teacherAvailability, users as usersTable } from "@/db/schema";
 import { redirect } from "next/navigation";
@@ -20,8 +20,30 @@ import LocalTime from "@/components/LocalTime";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import { getAttendanceReport } from "@/lib/attendance";
 
+function safeDistanceToNow(d: Date | string | null | undefined): string {
+  if (!d) return "recently";
+  try {
+    const date = typeof d === "string" ? new Date(d) : d;
+    if (Number.isNaN(date.getTime())) return "recently";
+    return `${formatDistanceToNow(date)} ago`;
+  } catch {
+    return "recently";
+  }
+}
+
+function safeIso(d: Date | string | null | undefined): string | null {
+  if (!d) return null;
+  try {
+    const date = typeof d === "string" ? new Date(d) : d;
+    if (Number.isNaN(date.getTime())) return null;
+    return date.toISOString();
+  } catch {
+    return null;
+  }
+}
+
 export default async function TeacherDashboard() {
-  return withDb(async () => {
+  return withHttpDb(async () => {
   const headersList = await headers();
   const session = await auth.api.getSession({ headers: headersList });
 
@@ -60,78 +82,83 @@ export default async function TeacherDashboard() {
   const weekStart = startOfWeek(new Date());
   const weekEnd = endOfWeek(new Date());
 
-  // 1. Fetch Today's Sessions
-  const todaySessions = await db.query.sessions.findMany({
-    where: and(
-      eq(sessions.teacherId, user.id),
-      gte(sessions.scheduledStart, todayStart),
-      lte(sessions.scheduledStart, todayEnd),
-      // Classes combined into another one are cancelled rows kept for their
-      // history (lib/class-merge.ts). Showing them here would put the same
-      // class on the schedule twice, once crossed out.
-      isNull(sessions.mergedIntoId)
-    ),
-    with: {
-      bookings: {
-        with: {
-          studentProfile: true,
-        },
-      },
-    },
-    orderBy: [asc(sessions.scheduledStart)],
-  });
-
-  // 2. Fetch Weekly Stats
-  const weekCountResult = await db
-    .select({ count: count() })
-    .from(sessions)
-    .where(
-      and(
+  // Run independent database reads concurrently
+  const [
+    todaySessions,
+    weekCountResult,
+    activeStudentsResult,
+    rawSessions,
+    attendanceReport,
+  ] = await Promise.all([
+    db.query.sessions.findMany({
+      where: and(
         eq(sessions.teacherId, user.id),
-        gte(sessions.scheduledStart, weekStart),
-        lte(sessions.scheduledStart, weekEnd),
+        gte(sessions.scheduledStart, todayStart),
+        lte(sessions.scheduledStart, todayEnd),
         isNull(sessions.mergedIntoId)
-      )
-    );
-
-  // 3. Fetch Active Students (Unique students taught by this teacher)
-  const activeStudentsResult = await db
-    .select({ studentId: bookings.studentProfileId })
-    .from(bookings)
-    .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-    .where(eq(sessions.teacherId, user.id))
-    .groupBy(bookings.studentProfileId);
-
-  // 4. Fetch School-wide Active Classes (for Admins)
-  let activeClasses: any[] = [];
-  if (isAdmin) {
-    const rawSessions = await db.query.sessions.findMany({
-      where: eq(sessions.status, "IN_PROGRESS"),
+      ),
       with: {
         bookings: {
-          with: { studentProfile: true },
+          with: {
+            studentProfile: true,
+          },
         },
       },
-      orderBy: [desc(sessions.actualStart)],
+      orderBy: [asc(sessions.scheduledStart)],
+    }),
+    db
+      .select({ count: count() })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.teacherId, user.id),
+          gte(sessions.scheduledStart, weekStart),
+          lte(sessions.scheduledStart, weekEnd),
+          isNull(sessions.mergedIntoId)
+        )
+      ),
+    db
+      .select({ studentId: bookings.studentProfileId })
+      .from(bookings)
+      .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+      .where(eq(sessions.teacherId, user.id))
+      .groupBy(bookings.studentProfileId),
+    isAdmin
+      ? db.query.sessions.findMany({
+          where: eq(sessions.status, "IN_PROGRESS"),
+          with: {
+            bookings: {
+              with: { studentProfile: true },
+            },
+          },
+          orderBy: [desc(sessions.actualStart)],
+        })
+      : Promise.resolve([]),
+    getAttendanceReport({
+      orgId: dbUser?.orgId ?? "",
+      ...(isAdmin ? {} : { teacherId: user.id }),
+      from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+      to: new Date(),
+    }).catch(() => []),
+  ]);
+
+  let activeClasses: any[] = [];
+  if (isAdmin && rawSessions.length > 0) {
+    const teacherIds = [...new Set(rawSessions.map((s) => s.teacherId))];
+    const teachers = await db.query.users.findMany({
+      where: (u, { inArray }) => inArray(u.id, teacherIds),
+      columns: { id: true, name: true }
     });
     
-    if (rawSessions.length > 0) {
-      const teacherIds = [...new Set(rawSessions.map((s) => s.teacherId))];
-      const teachers = await db.query.users.findMany({
-        where: (u, { inArray }) => inArray(u.id, teacherIds),
-        columns: { id: true, name: true }
-      });
-      
-      activeClasses = rawSessions.map((s) => {
-        const teacher = teachers.find(t => t.id === s.teacherId);
-        return { ...s, teacher };
-      });
-    }
+    activeClasses = rawSessions.map((s) => {
+      const teacher = teachers.find(t => t.id === s.teacherId);
+      return { ...s, teacher };
+    });
   }
 
   const scheduleRows: ScheduleRow[] = todaySessions.map((s) => ({
     id: s.id,
-    scheduledStart: s.scheduledStart.toISOString(),
+    scheduledStart: safeIso(s.scheduledStart) || new Date().toISOString(),
     status: s.status,
     title: s.title,
     track: s.track,
@@ -141,34 +168,11 @@ export default async function TeacherDashboard() {
 
   const upcomingCount = todaySessions.filter((s) => s.status === "SCHEDULED").length;
 
-  /**
-   * Attendance over the last 30 days: of the students booked into classes that
-   * have already happened, how many actually turned up.
-   *
-   * Deliberately computed through `getAttendanceReport` rather than with a
-   * quick COUNT pair. A class is several session rows — a group row plus one
-   * per student — and bookings sit on the individual rows while attendance is
-   * recorded against the canonical one, so counting the two tables directly
-   * against each other reads as half the students missing every class. The
-   * report already collapses occurrences properly, and going through it also
-   * guarantees this number agrees with the page it links to.
-   */
-  const attendanceReport = await getAttendanceReport({
-    orgId: dbUser?.orgId ?? "",
-    ...(isAdmin ? {} : { teacherId: user.id }),
-    from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
-    // Only classes that are already due — one scheduled for tomorrow is not a
-    // class everybody missed.
-    to: new Date(),
-  });
-
   const expected = attendanceReport.reduce((sum, occ) => sum + occ.students.length, 0);
   const attended = attendanceReport.reduce(
     (sum, occ) => sum + occ.students.filter((s) => s.status !== "ABSENT").length,
     0
   );
-  // Nothing recorded yet reads as "--" rather than 0%, which would look like
-  // every student had missed every class.
   const attendanceRate = expected > 0 && attended > 0 ? `${Math.round((attended / expected) * 100)}%` : "--";
 
   return (
@@ -225,8 +229,8 @@ export default async function TeacherDashboard() {
                         {studentNames}
                       </div>
                       <div className="text-xs mt-1" style={{ color: "var(--text-tertiary)" }}>
-                        Started {s.actualStart ? formatDistanceToNow(s.actualStart) + " ago" : "recently"}
-                        {s.actualStart ? <> · <LocalTime iso={s.actualStart.toISOString()} withZone /></> : null}
+                        Started {s.actualStart ? safeDistanceToNow(s.actualStart) : "recently"}
+                        {s.actualStart && safeIso(s.actualStart) ? <> · <LocalTime iso={safeIso(s.actualStart)!} withZone /></> : null}
                         {s.videoRoomName ? ` · room ${s.videoRoomName}` : ""}
                       </div>
                     </div>
@@ -276,18 +280,30 @@ export default async function TeacherDashboard() {
           </h2>
           <div className="space-y-3">
             <StartInstantMeetingButton />
+            {isAdmin && (
+              <>
+                <Link href="/admin" className="card p-4 block hover:opacity-80 transition-opacity border-emerald-500/30">
+                  <div className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">🏛️ Admin Management Panel</div>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Users, roles, and school overview</div>
+                </Link>
+                <Link href="/admin/assign-student" className="card p-4 block hover:opacity-80 transition-opacity">
+                  <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>📋 Schedule / Assign with Teachers</div>
+                  <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Schedule classes & assign students to teachers</div>
+                </Link>
+              </>
+            )}
             <CleanupInstantMeetingsButton />
             <Link href="/dashboard/teacher/students" className="card p-4 block hover:opacity-80 transition-opacity">
               <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>👨‍🎓 My Students</div>
               <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>View progress & add feedback</div>
             </Link>
-            <Link href="/dashboard/teacher/availability" className="card p-4 block hover:opacity-80 transition-opacity">
-              <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>📅 Availability</div>
-              <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Set your weekly schedule</div>
+            <Link href="/dashboard/schedule" className="card p-4 block hover:opacity-80 transition-opacity">
+              <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>📅 Schedule Matrix</div>
+              <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Weekly calendar & class matrix</div>
             </Link>
             <Link href="/dashboard/chat" className="card p-4 block hover:opacity-80 transition-opacity">
               <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>💬 Messages</div>
-              <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Chat with parents</div>
+              <div className="text-xs mt-0.5" style={{ color: "var(--text-tertiary)" }}>Chat with parents & students</div>
             </Link>
           </div>
         </div>

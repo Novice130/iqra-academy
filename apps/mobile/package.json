@@ -4,6 +4,8 @@
   "scripts": {
     "dev": "flutter run",
     "build": "echo 'Skipping flutter build inside automated CI'",
-    "lint": "echo 'Skipping flutter lint'"
+    "lint": "echo 'Skipping flutter lint'",
+    "analyze": "flutter analyze",
+    "test": "flutter test"
   }
 }

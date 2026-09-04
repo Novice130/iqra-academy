@@ -15,6 +15,17 @@ interface Waiting {
   scheduledStart: string | null;
 }
 
+interface ExpiredSession {
+  sessionTitle: string | null;
+  teacherName: string | null;
+  teacherIdentity: string | null;
+  scheduledStart: string | null;
+  scheduledEnd: string | null;
+  isTeacher: boolean;
+  isAdmin: boolean;
+  isTrial: boolean;
+}
+
 export default function SessionRoomPage() {
   const params = useParams();
   const router = useRouter();
@@ -36,6 +47,8 @@ export default function SessionRoomPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [waiting, setWaiting] = useState<Waiting | null>(null);
+  const [expired, setExpired] = useState<ExpiredSession | null>(null);
+  const [startingInstant, setStartingInstant] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const [serverUrl, setServerUrl] = useState<string | null>(null);
   const [userName, setUserName] = useState<string>('Participant');
@@ -77,6 +90,21 @@ export default function SessionRoomPage() {
         return false;
       }
 
+      // Class has already expired/passed
+      if (data.expired) {
+        setExpired({
+          sessionTitle: data.sessionTitle ?? null,
+          teacherName: data.teacherName ?? null,
+          teacherIdentity: data.teacherIdentity ?? null,
+          scheduledStart: data.scheduledStart ?? null,
+          scheduledEnd: data.scheduledEnd ?? null,
+          isTeacher: !!data.isTeacher,
+          isAdmin: !!data.isAdmin,
+          isTrial: !!data.isTrial,
+        });
+        return false;
+      }
+
       // Class hasn't started. No token by design, so there's no room to sit
       // alone in; the lobby keeps asking.
       if (data.waiting) {
@@ -90,6 +118,7 @@ export default function SessionRoomPage() {
 
       joinedRef.current = true;
       setWaiting(null);
+      setExpired(null);
       setToken(data.jwt || data.token); // accept either jwt or token
       setServerUrl(data.serverUrl || 'wss://meet.novicetutor.com');
       setIsModerator(!!data.isModerator);
@@ -139,6 +168,36 @@ export default function SessionRoomPage() {
     setChoices(picked);
   };
 
+  const handleStartInstantMeeting = async () => {
+    if (startingInstant) return;
+    setStartingInstant(true);
+    try {
+      const res = await fetch('/api/teachers/instant-meeting', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (res.ok && data.success && data.sessionId) {
+        window.location.href = `/dashboard/session/${data.sessionId}`;
+        return;
+      }
+      alert(data.error || 'Could not start instant meeting.');
+    } catch {
+      alert('Failed to reach the server.');
+    } finally {
+      setStartingInstant(false);
+    }
+  };
+
+  const handleBackToDashboard = () => {
+    try {
+      router.push('/dashboard');
+    } catch {
+      window.location.href = '/dashboard';
+    }
+  };
+
   if (loading || joining) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen font-sans" style={{ background: '#131417' }}>
@@ -168,11 +227,103 @@ export default function SessionRoomPage() {
           <h2 className="text-2xl font-bold mb-2">Failed to Join Class</h2>
           <p className="text-slate-400 text-sm mb-6">{error}</p>
           <button
-            onClick={() => router.push('/dashboard')}
+            onClick={handleBackToDashboard}
             className="w-full py-3 bg-slate-800 hover:bg-slate-700 text-white font-medium rounded-xl transition-all cursor-pointer"
           >
             Back to Dashboard
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (expired) {
+    const isStaff = expired.isTeacher || expired.isAdmin;
+    return (
+      <div className="flex items-center justify-center min-h-screen p-6 font-sans" style={{ background: '#131417' }}>
+        <div
+          className="w-full max-w-md rounded-2xl p-7 text-center shadow-2xl"
+          style={{ background: '#202124', border: '1px solid rgba(255,255,255,0.12)' }}
+        >
+          <div
+            className="mx-auto mb-4 w-12 h-12 rounded-full flex items-center justify-center text-xl"
+            style={{ background: 'rgba(239,68,68,0.15)', color: '#f87171' }}
+          >
+            ⏰
+          </div>
+          <h1 className="text-xl font-bold text-white tracking-tight">Class Session Has Expired</h1>
+          <p className="text-sm mt-2" style={{ color: 'rgba(255,255,255,0.7)' }}>
+            {expired.sessionTitle || (expired.isTrial ? 'Trial Class' : 'Quran Class')}
+            {expired.teacherName ? ` with ${expired.teacherName}` : ''}
+          </p>
+          {expired.scheduledStart && (
+            <div
+              className="mt-4 p-3 rounded-xl text-xs font-mono"
+              style={{ background: 'rgba(255,255,255,0.05)', color: '#93c5fd' }}
+            >
+              Scheduled for:{' '}
+              <LocalTime iso={expired.scheduledStart} mode="weekday-time" withZone />
+            </div>
+          )}
+          <p className="text-xs mt-3" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            The scheduled time window for this session has already passed and the classroom is closed.
+          </p>
+
+          <div className="mt-6 space-y-2.5">
+            {isStaff ? (
+              <>
+                <button
+                  onClick={handleStartInstantMeeting}
+                  disabled={startingInstant}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all cursor-pointer flex items-center justify-center gap-2"
+                  style={{ background: '#059669' }}
+                >
+                  {startingInstant ? 'Starting…' : '⚡ Start Instant Meeting Now'}
+                </button>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => router.push('/dashboard/schedule')}
+                    className="py-2.5 px-3 rounded-xl text-xs font-medium cursor-pointer transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#e5e7eb' }}
+                  >
+                    📅 View Schedule
+                  </button>
+                  <button
+                    onClick={() => router.push('/dashboard/chat')}
+                    className="py-2.5 px-3 rounded-xl text-xs font-medium cursor-pointer transition-colors"
+                    style={{ background: 'rgba(255,255,255,0.08)', color: '#e5e7eb' }}
+                  >
+                    💬 Chat & Messages
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => router.push('/dashboard/booking')}
+                  className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all cursor-pointer"
+                  style={{ background: 'var(--accent)' }}
+                >
+                  📅 Book a New Class
+                </button>
+                <button
+                  onClick={() => router.push('/dashboard/chat')}
+                  className="w-full py-2.5 rounded-xl text-xs font-medium cursor-pointer transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.08)', color: '#e5e7eb' }}
+                >
+                  💬 Message Support
+                </button>
+              </>
+            )}
+
+            <button
+              onClick={handleBackToDashboard}
+              className="w-full py-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+              style={{ background: 'transparent', color: '#9ca3af', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              ← Back to Dashboard
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -207,7 +358,7 @@ export default function SessionRoomPage() {
             </p>
           )}
           <button
-            onClick={() => router.push('/dashboard')}
+            onClick={handleBackToDashboard}
             className="mt-6 w-full py-3 rounded-full text-sm font-semibold cursor-pointer"
             style={{ background: 'rgba(255,255,255,0.1)', color: '#e8eaed' }}
           >

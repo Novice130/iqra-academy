@@ -8,6 +8,18 @@
     "lint": {
       "dependsOn": ["^lint"]
     },
+    "test": {
+      "cache": false
+    },
+    "test:api": {
+      "cache": false
+    },
+    "test:e2e": {
+      "cache": false
+    },
+    "analyze": {
+      "cache": false
+    },
     "dev": {
       "cache": false,
       "persistent": true

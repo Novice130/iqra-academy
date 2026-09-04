@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "predev": "node scripts/copy-mediapipe.mjs",
-    "dev": "next dev",
+    "dev": "next dev --turbopack",
     "prebuild": "node scripts/copy-mediapipe.mjs",
     "build": "next build",
     "postbuild": "node scripts/patch-styled-jsx.cjs",
@@ -12,6 +12,9 @@
     "deploy:cf": "node scripts/cf-build.cjs",
     "preview:cf": "npx @opennextjs/cloudflare build && npx wrangler dev",
     "lint": "eslint",
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:e2e": "playwright test --project=e2e",
     "db:push": "npx drizzle-kit push",
     "db:generate": "npx drizzle-kit generate",
     "db:migrate": "npx drizzle-kit migrate",

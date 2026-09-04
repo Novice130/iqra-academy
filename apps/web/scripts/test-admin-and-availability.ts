@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("test-admin-and-availability");
+
 import { db, withDb } from "../src/lib/db";
 import { users, teacherAvailability } from "../src/db/schema";
 import { eq, inArray } from "drizzle-orm";

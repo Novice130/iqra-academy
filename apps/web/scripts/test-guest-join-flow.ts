@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("test-guest-join-flow");
+
 import { db, withDb } from "../src/lib/db";
 import { sessions, users, guestJoinRequests } from "../src/db/schema";
 import { eq, desc, or } from "drizzle-orm";

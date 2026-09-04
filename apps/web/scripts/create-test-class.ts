@@ -15,6 +15,10 @@
  */
 
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("create-test-class");
+
 import { db, withDb } from "../src/lib/db";
 import { bookings, sessions, studentProfiles, users } from "../src/db/schema";
 import { deleteSessionCascade } from "../src/lib/session-cleanup";

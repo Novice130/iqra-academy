@@ -79,7 +79,7 @@ export default async function SchedulePage({ searchParams }: Props) {
     studentId: b.studentId,
     track: b.track,
     title: b.title,
-    start: b.start.toISOString(),
+    start: b.start ? (typeof b.start === "string" ? b.start : b.start.toISOString()) : new Date().toISOString(),
   }));
 
   return (

@@ -24,7 +24,10 @@
  * @module db/seed
  */
 
-import "dotenv/config";  // Load .env before anything else
+import "dotenv/config"; // Load .env before anything else
+import { requireIsolatedDb } from "../../scripts/lib/require-isolated-db";
+
+requireIsolatedDb("db:seed");
 import { db, withDb } from "../lib/db";
 import {
   organizations,

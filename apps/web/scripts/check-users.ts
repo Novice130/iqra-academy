@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("check-users");
+
 import { db } from "../src/lib/db";
 import { users, accounts } from "../src/db/schema";
 import { eq } from "drizzle-orm";

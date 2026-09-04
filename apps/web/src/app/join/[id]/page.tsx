@@ -16,7 +16,7 @@ import type { JoinChoices } from '@/components/video/PreJoinScreen';
 import LiveKitRoom from '@/components/video/LiveKitRoom';
 import { authClient } from '@/lib/auth-client';
 
-const POLL_INTERVAL_MS = 2500;
+const POLL_INTERVAL_MS = 4000;
 /** Matches the server's knock window — past this the request is EXPIRED anyway. */
 const WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
@@ -103,6 +103,7 @@ export default function GuestJoinPage() {
 
     const poll = async () => {
       if (!requestIdRef.current || settledRef.current) return;
+      if (typeof document !== 'undefined' && document.hidden) return;
       try {
         const res = await fetch(`/api/guest/join?requestId=${requestIdRef.current}`);
         if (res.status === 404 || res.status === 410) {
@@ -147,9 +148,11 @@ export default function GuestJoinPage() {
 
     poll();
     const interval = setInterval(poll, POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', poll);
     return () => {
       cancelled = true;
       clearInterval(interval);
+      document.removeEventListener('visibilitychange', poll);
     };
   }, [stage, name, sessionId]);
 

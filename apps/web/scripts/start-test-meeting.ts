@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("start-test-meeting");
+
 import { db, withDb } from "../src/lib/db";
 import { sessions } from "../src/db/schema";
 import { eq } from "drizzle-orm";

@@ -7,7 +7,7 @@
 
 import { useEffect, useState, useRef } from 'react';
 
-const POLL_INTERVAL_MS = 2500;
+const POLL_INTERVAL_MS = 4000;
 
 interface WaitingGuest {
   id: string;

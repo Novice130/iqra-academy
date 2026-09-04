@@ -1,4 +1,8 @@
 import "dotenv/config";
+import { requireIsolatedDb } from "./lib/require-isolated-db";
+
+requireIsolatedDb("test-auth-check");
+
 import { auth } from "../src/lib/auth";
 import { withDb } from "../src/lib/db";
 

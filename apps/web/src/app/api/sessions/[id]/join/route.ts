@@ -182,6 +182,24 @@ export async function GET(
         );
       }
 
+      if (resolution.kind === "expired") {
+        // The scheduled window has elapsed and the class is not running.
+        return withTimings(
+          NextResponse.json({
+            expired: true,
+            sessionTitle: session.title,
+            teacherName: sessionTeacher?.name || null,
+            teacherIdentity: sessionTeacher?.email || null,
+            scheduledStart: session.scheduledStart?.toISOString() ?? null,
+            scheduledEnd: session.scheduledEnd?.toISOString() ?? null,
+            isTeacher: !!isTeacher,
+            isAdmin: !!isAdmin,
+            isTrial: !!session.isTrial,
+          }),
+          timings
+        );
+      }
+
       const roomName = generateRoomName(sessionId);
 
       // Default the room's spotlight to the CLASS TEACHER so students land on
