@@ -89,14 +89,14 @@ export default function LiveClassRibbon() {
           className="inline-block w-2 h-2 rounded-full animate-pulse"
           style={{ background: '#fff' }}
         />
-        {live.teacherName} has started the class
+        Classroom is open — {live.teacherName} is live
       </span>
       <Link
         href={`/dashboard/session/${live.sessionId}`}
-        className="shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold"
+        className="shrink-0 px-4 py-1.5 rounded-lg text-xs font-bold transition hover:bg-white/30"
         style={{ background: 'rgba(255,255,255,0.22)' }}
       >
-        Join Meeting
+        Join Live Class
       </Link>
     </div>
   );

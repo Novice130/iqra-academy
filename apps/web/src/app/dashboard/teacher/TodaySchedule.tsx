@@ -80,11 +80,22 @@ export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
           {s.status === 'SCHEDULED' ? (
             <Link
               href={`/dashboard/session/${s.id}`}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
               style={{ background: 'var(--accent)' }}
             >
               Start Class
             </Link>
+          ) : s.status === 'IN_PROGRESS' ? (
+            <div className="flex items-center gap-2">
+              <Link
+                href={`/dashboard/session/${s.id}`}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition hover:opacity-90"
+                style={{ background: '#0a8967' }}
+              >
+                Rejoin Class
+              </Link>
+              <SessionRowActions sessionId={s.id} showEnd={true} />
+            </div>
           ) : (
             <div className="flex items-center gap-2">
               <span
@@ -93,7 +104,7 @@ export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
               >
                 {s.status.toLowerCase()}
               </span>
-              <SessionRowActions sessionId={s.id} showEnd={s.status === 'IN_PROGRESS'} />
+              <SessionRowActions sessionId={s.id} showEnd={false} />
             </div>
           )}
         </div>

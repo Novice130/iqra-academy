@@ -14,25 +14,19 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
-import { bookings, notifications, sessions, studentProfiles, users } from "@/db/schema";
+import { withDb } from "@/lib/db";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
+import {
+  resolveStartTarget,
+  startScheduledOccurrence,
+  createInstantMeeting,
+} from "@/lib/meeting-service";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
-import { sendPushToUsers } from "@/lib/fcm";
-import { and, asc, desc, eq, gt, inArray, lt } from "drizzle-orm";
+import { db } from "@/lib/db";
+import { users, bookings, studentProfiles } from "@/db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
-
-/** A class already running belongs to today, not to yesterday's ghost. */
-const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
-
-/**
- * How far around "now" a scheduled class counts as the one being started.
- * Generous on both sides on purpose: teachers open the room before the hour,
- * and a class that started late is still that class.
- */
-const SCHEDULED_BEFORE_MS = 60 * 60 * 1000;
-const SCHEDULED_AFTER_MS = 2 * 60 * 60 * 1000;
 
 export async function POST(request: NextRequest) {
   return withDb(async () => {
@@ -49,153 +43,95 @@ export async function POST(request: NextRequest) {
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, ctx.userId),
       });
-
       if (!teacher) {
         throw new Error("Teacher not found");
       }
 
-      const now = new Date();
-      const end = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour default
+      const target = await resolveStartTarget(ctx.userId, ctx.orgId);
 
-      // 1. Already teaching? That's the room.
-      const running = await db.query.sessions.findFirst({
-        where: and(
-          eq(sessions.teacherId, ctx.userId),
-          eq(sessions.status, "IN_PROGRESS"),
-          gt(sessions.actualStart, new Date(now.getTime() - LIVE_WINDOW_MS))
-        ),
-        orderBy: [desc(sessions.actualStart)],
-      });
+      if (target.kind === "running" || target.kind === "scheduled") {
+        const existing = target.session;
+        const sessionId = existing.id;
+        const roomName = existing.videoRoomName || generateRoomName(sessionId);
 
-      // 2. Otherwise the class on the calendar around now, so the students'
-      //    own links land in the same room. Earliest first: if two are due,
-      //    the one that should already have begun is the one being started.
-      const scheduled =
-        running ??
-        (await db.query.sessions.findFirst({
-          where: and(
-            eq(sessions.teacherId, ctx.userId),
-            eq(sessions.status, "SCHEDULED"),
-            gt(sessions.scheduledStart, new Date(now.getTime() - SCHEDULED_AFTER_MS)),
-            lt(sessions.scheduledStart, new Date(now.getTime() + SCHEDULED_BEFORE_MS))
-          ),
-          orderBy: [asc(sessions.scheduledStart)],
-        }));
-
-      const existing = running ?? scheduled;
-      const sessionId = existing?.id ?? createId();
-      const roomName = existing?.videoRoomName || generateRoomName(sessionId);
-
-      if (existing) {
-        // Starting a scheduled class is what makes it live; a running one is
-        // left exactly as it is so re-entering doesn't reset actualStart.
-        if (existing.status !== "IN_PROGRESS") {
-          await db
-            .update(sessions)
-            .set({ status: "IN_PROGRESS", actualStart: existing.actualStart ?? now, videoRoomName: roomName })
-            .where(eq(sessions.id, existing.id));
-        }
-      } else {
-        // 3. Nothing on the calendar — a genuine ad-hoc meeting.
-        await db.insert(sessions).values({
-          id: sessionId,
-          orgId: ctx.orgId || "seed_org_iqra_academy", // Fallback for safety
-          teacherId: ctx.userId,
-          type: "INDIVIDUAL", // Instant meetings are handled dynamically, INDIVIDUAL is fine as a placeholder
-          origin: "INSTANT",
-          status: "IN_PROGRESS",
-          title: `Instant Meeting with ${teacher.name}`,
-          scheduledStart: now,
-          scheduledEnd: end,
-          actualStart: now,
-          consumesQuota: false, // Ad-hoc meetings don't consume quota automatically
-          videoRoomName: roomName,
-        });
-      }
-
-      // Whoever is already booked on this session (the normal case now that
-      // starting a meeting resumes the scheduled class) plus anyone named
-      // explicitly by a caller that still passes ids.
-      const alreadyBooked = await db.query.bookings.findMany({
-        where: eq(bookings.sessionId, sessionId),
-        columns: { userId: true },
-      });
-      const bookedUserIds = new Set(alreadyBooked.map((b) => b.userId));
-
-      let addedStudents: { studentProfileId: string; userId: string; name: string }[] = [];
-      if (studentProfileIds.length > 0) {
-        const profiles = await db.query.studentProfiles.findMany({
-          where: and(
-            inArray(studentProfiles.id, studentProfileIds),
-            eq(studentProfiles.orgId, ctx.orgId)
-          ),
-        });
-        // Resuming a class means the bookings are already there — inserting
-        // them again would double-book everyone on the roster.
-        const fresh = profiles.filter((p) => !bookedUserIds.has(p.userId));
-
-        if (fresh.length > 0) {
-          await db.insert(bookings).values(
-            fresh.map((p) => ({
-              id: createId(),
-              orgId: ctx.orgId,
-              userId: p.userId,
-              studentProfileId: p.id,
-              sessionId,
-              status: "CONFIRMED" as const,
-            }))
-          );
-          fresh.forEach((p) => bookedUserIds.add(p.userId));
-          addedStudents = fresh.map((p) => ({ studentProfileId: p.id, userId: p.userId, name: p.name }));
-        }
-      }
-
-      // Tell everyone on the session it has begun. Students sitting in the
-      // lobby join on their own poll, but the ones who haven't opened the page
-      // need to hear about it — this is what "the teacher started" looks like
-      // from the dashboard.
-      if (bookedUserIds.size > 0 && running?.id !== sessionId) {
-        const message = `${teacher.name} started the class. Join now.`;
-        await db.insert(notifications).values(
-          [...bookedUserIds].map((userId) => ({
-            id: createId(),
-            orgId: ctx.orgId || "seed_org_iqra_academy",
-            userId,
-            type: "MEETING_STARTED" as const,
+        if (target.kind === "scheduled") {
+          await startScheduledOccurrence({
             sessionId,
-            message,
-          }))
-        );
+            teacherId: ctx.userId,
+            orgId: ctx.orgId,
+          });
+        }
 
-        // The row above only reaches a student with the site open. This reaches
-        // the phone in their pocket. No-op unless FCM is configured and the
-        // student has the Android app installed.
-        await sendPushToUsers([...bookedUserIds], {
-          title: "Your class has started",
-          body: message,
-          path: `/dashboard/session/${sessionId}`,
+        // Add any explicit students requested who are not yet booked
+        let addedStudents: { studentProfileId: string; userId: string; name: string }[] = [];
+        if (studentProfileIds.length > 0) {
+          const alreadyBooked = await db.query.bookings.findMany({
+            where: eq(bookings.sessionId, sessionId),
+            columns: { userId: true },
+          });
+          const bookedUserIds = new Set(alreadyBooked.map((b) => b.userId));
+
+          const profiles = await db.query.studentProfiles.findMany({
+            where: and(
+              inArray(studentProfiles.id, studentProfileIds),
+              eq(studentProfiles.orgId, ctx.orgId)
+            ),
+          });
+          const fresh = profiles.filter((p) => !bookedUserIds.has(p.userId));
+          if (fresh.length > 0) {
+            await db.insert(bookings).values(
+              fresh.map((p) => ({
+                id: createId(),
+                orgId: ctx.orgId,
+                userId: p.userId,
+                studentProfileId: p.id,
+                sessionId,
+                status: "CONFIRMED" as const,
+              }))
+            );
+            addedStudents = fresh.map((p) => ({
+              studentProfileId: p.id,
+              userId: p.userId,
+              name: p.name,
+            }));
+          }
+        }
+
+        const token = await generateLiveKitToken({
+          roomName,
+          userName: teacher.name,
+          userEmail: teacher.email,
+          isModerator: true,
+        });
+
+        return NextResponse.json({
+          success: true,
           sessionId,
+          roomName,
+          token,
+          joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
+          addedStudents,
+          resumed: target.kind,
+          title: existing.title,
         });
       }
 
-      // Generate token for the teacher
-      const token = await generateLiveKitToken({
-        roomName,
-        userName: teacher.name,
-        userEmail: teacher.email,
-        isModerator: true,
+      // Ad-hoc instant meeting
+      const instant = await createInstantMeeting({
+        orgId: ctx.orgId,
+        teacherId: ctx.userId,
+        studentProfileIds,
       });
 
       return NextResponse.json({
         success: true,
-        sessionId,
-        roomName,
-        token,
-        joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
-        addedStudents,
-        // What the caller actually got: the class it resumed, or a new room.
-        resumed: existing ? (running ? "running" : "scheduled") : null,
-        title: existing?.title ?? `Instant Meeting with ${teacher.name}`,
+        sessionId: instant.sessionId,
+        roomName: instant.roomName,
+        token: instant.token,
+        joinUrl: instant.joinUrl,
+        addedStudents: instant.addedStudents,
+        resumed: null,
+        title: instant.title,
       });
     } catch (error) {
       return handleApiError(error);

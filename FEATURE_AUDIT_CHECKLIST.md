@@ -165,7 +165,7 @@
 | 0 | Safe baseline (git, gates, test harness, script gating) | ✅ Complete | 2026-09-03 | See below |
 | 1 | P0 authorization & tenant isolation | ✅ Complete | 2026-09-04 | See below |
 | 2 | Data model & migration | ✅ Complete | 2026-09-04 | See below |
-| 3 | Canonical scheduling & meeting lifecycle | ⬜ Pending | — | — |
+| 3 | Canonical scheduling & meeting lifecycle | ✅ Complete | 2026-09-04 | See below |
 | 4 | Secure realtime scheduling | ⬜ Pending | — | — |
 | 5 | Class action button & navigation responsiveness | ⬜ Pending | — | — |
 | 6 | Admin information architecture | ⬜ Pending | — | — |
@@ -215,5 +215,27 @@
   - Added automated test suite `tests/api/data-model.spec.ts`.
 - **Key files**: `apps/web/src/db/schema.ts`, `apps/web/src/app/api/teachers/instant-meeting/cleanup/route.ts`, `apps/web/src/app/api/teachers/instant-meeting/route.ts`, `apps/web/src/app/api/calls/route.ts`, `apps/web/src/app/api/trials/route.ts`, `apps/web/src/app/api/admin/assign-student/route.ts`, `apps/web/src/app/api/webhooks/calcom/route.ts`, `apps/web/src/app/api/teachers/availability/route.ts`, `apps/web/drizzle/0007_data_model_parity.sql`, `apps/web/drizzle/rollback/0007_data_model_parity_rollback.sql`, `apps/web/tests/api/data-model.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (18 passed, exit 0).
+
+### Phase 3 — Canonical Scheduling & Meeting Lifecycle (2026-09-04)
+- **What was done**:
+  - Implemented `meeting-service.ts` (`apps/web/src/lib/meeting-service.ts`) establishing single-source lifecycle resolution based on `class-room.ts` constants.
+  - Defined canonical lifecycle states: `UPCOMING` (>60m before start), `READY` (T-60 to T+180m), `LIVE` (during session), `EXPIRED`, `COMPLETED`, `CANCELLED`.
+  - Implemented `getClassActionState()` with canonical role actions:
+    - Global ad-hoc: **Instant Meeting**
+    - Due scheduled teacher: **Start Class**
+    - Booked student: **Join Class**
+    - Running class: **Rejoin Class** (teacher) / **Join Live Class** (student)
+    - Observer: **Observe Live**
+  - Enforced perimeter rule: only assigned teacher arrival marks scheduled class `IN_PROGRESS` and stamps `actualStart`. Students arriving early wait in the lobby (`waitingForTeacher: true`) until the teacher connects.
+  - Hardened direct-call (`/api/calls`) to converge onto active or due scheduled classes via `ringParticipantIntoCanonicalRoom()`, preventing competing rogue room generation.
+  - Updated `/api/teachers/call-now` to start canonical occurrences via `startScheduledOccurrence()`.
+  - Updated `/api/teachers/instant-meeting` to use `createInstantMeeting()`.
+  - Cleaned up `/api/students/live-class`: removed database mutations from GET polling, filtered by `actualStart` (with `scheduledStart` fallback) rather than `createdAt`.
+  - Updated student lobby UI copy to distinguish "Waiting for your teacher" from unopened class.
+  - Updated `LiveClassRibbon.tsx` to display `"Classroom is open — [Teacher] is live"` with action `"Join Live Class"`.
+  - Updated `TodaySchedule.tsx` to show `"Rejoin Class"` for in-progress classes.
+  - Added automated test suite `apps/web/tests/api/lifecycle.spec.ts` covering exact T-60 boundary, lifecycle states, action states, and canonical convergence.
+- **Key files**: `apps/web/src/lib/meeting-service.ts`, `apps/web/src/app/api/sessions/[id]/join/route.ts`, `apps/web/src/app/api/calls/route.ts`, `apps/web/src/app/api/teachers/call-now/route.ts`, `apps/web/src/app/api/teachers/instant-meeting/route.ts`, `apps/web/src/app/api/students/live-class/route.ts`, `apps/web/src/app/dashboard/session/[id]/page.tsx`, `apps/web/src/app/dashboard/LiveClassRibbon.tsx`, `apps/web/src/app/dashboard/teacher/TodaySchedule.tsx`, `apps/web/tests/api/lifecycle.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (24 passed, exit 0).
 
 

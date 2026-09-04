@@ -22,14 +22,8 @@ import { bookings, sessions, studentProfiles, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { FALLBACK_CADENCE, pollCadenceFor } from "@/lib/poll-cadence";
-import { and, desc, eq, gt, inArray, lt, or } from "drizzle-orm";
-
-/**
- * Sessions are only surfaced for a few hours after they start. Rooms are
- * left IN_PROGRESS when a teacher closes the tab instead of pressing End, and
- * a day-old ghost class must not nag students to join it.
- */
-const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
+import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
+import { LIVE_WINDOW_MS } from "@/lib/meeting-service";
 
 /**
  * Never cached, anywhere. This answer is "is a class happening right now", and
@@ -67,22 +61,6 @@ export async function GET(request: NextRequest) {
 
       const cutoff = new Date(Date.now() - LIVE_WINDOW_MS);
 
-      // Auto-expire zombie sessions that were abandoned in IN_PROGRESS state older than cutoff
-      try {
-        await db
-          .update(sessions)
-          .set({ status: "COMPLETED" })
-          .where(
-            and(
-              eq(sessions.orgId, ctx.orgId),
-              eq(sessions.status, "IN_PROGRESS"),
-              lt(sessions.createdAt, cutoff)
-            )
-          );
-      } catch (err) {
-        console.warn("[live-class] Zombie cleanup non-fatal error:", err);
-      }
-
       // Check student's profiles
       const studentProfilesList = await db
         .select({ id: studentProfiles.id })
@@ -103,7 +81,6 @@ export async function GET(request: NextRequest) {
           teacherId: sessions.teacherId,
           actualStart: sessions.actualStart,
           scheduledStart: sessions.scheduledStart,
-          createdAt: sessions.createdAt,
         })
         .from(bookings)
         .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
@@ -111,10 +88,13 @@ export async function GET(request: NextRequest) {
           and(
             or(...bookingConditions),
             eq(sessions.status, "IN_PROGRESS"),
-            or(gt(sessions.actualStart, cutoff), gt(sessions.createdAt, cutoff))
+            or(
+              gt(sessions.actualStart, cutoff),
+              and(isNull(sessions.actualStart), gt(sessions.scheduledStart, cutoff))
+            )
           )
         )
-        .orderBy(desc(sessions.actualStart), desc(sessions.createdAt))
+        .orderBy(desc(sessions.actualStart), desc(sessions.scheduledStart))
         .limit(1);
 
       let liveSession: {
@@ -127,7 +107,7 @@ export async function GET(request: NextRequest) {
             id: directBookedSession[0].id,
             title: directBookedSession[0].title,
             teacherId: directBookedSession[0].teacherId,
-            actualStart: directBookedSession[0].actualStart || directBookedSession[0].createdAt,
+            actualStart: directBookedSession[0].actualStart || directBookedSession[0].scheduledStart,
           }
         : null;
 
@@ -138,16 +118,19 @@ export async function GET(request: NextRequest) {
             eq(sessions.orgId, ctx.orgId),
             eq(sessions.type, "WEBINAR"),
             eq(sessions.status, "IN_PROGRESS"),
-            or(gt(sessions.actualStart, cutoff), gt(sessions.createdAt, cutoff))
+            or(
+              gt(sessions.actualStart, cutoff),
+              and(isNull(sessions.actualStart), gt(sessions.scheduledStart, cutoff))
+            )
           ),
-          orderBy: [desc(sessions.actualStart), desc(sessions.createdAt)],
+          orderBy: [desc(sessions.actualStart), desc(sessions.scheduledStart)],
         });
         if (webinarFound) {
           liveSession = {
             id: webinarFound.id,
             title: webinarFound.title,
             teacherId: webinarFound.teacherId,
-            actualStart: webinarFound.actualStart || webinarFound.createdAt,
+            actualStart: webinarFound.actualStart || webinarFound.scheduledStart,
           };
         }
       }

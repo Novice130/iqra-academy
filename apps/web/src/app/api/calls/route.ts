@@ -14,15 +14,10 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { db, withDb } from "@/lib/db";
-import { bookings, callInvites, sessions, studentProfiles, users } from "@/db/schema";
+import { withDb } from "@/lib/db";
 import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
-import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
-import { sendCallPush } from "@/lib/fcm";
-import { sendWebPushToUsers } from "@/lib/webpush";
-import { and, eq } from "drizzle-orm";
-import { createId } from "@paralleldrive/cuid2";
+import { handleApiError, ForbiddenError } from "@/lib/errors";
+import { ringParticipantIntoCanonicalRoom } from "@/lib/meeting-service";
 
 export async function POST(request: NextRequest) {
   return withDb(async () => {
@@ -38,113 +33,15 @@ export async function POST(request: NextRequest) {
         throw new ForbiddenError("studentProfileId is required");
       }
 
-      const [teacher, studentProfile] = await Promise.all([
-        db.query.users.findFirst({ where: eq(users.id, ctx.userId) }),
-        db.query.studentProfiles.findFirst({ where: eq(studentProfiles.id, studentProfileId) }),
-      ]);
-      if (!teacher) throw new NotFoundError("Teacher");
-      if (!studentProfile) throw new NotFoundError("Student");
-
-      // The student's org is where the session must live, and a caller can
-      // only ring their own org's students — SUPER_ADMIN spans orgs.
-      if (ctx.role !== "SUPER_ADMIN" && studentProfile.orgId !== ctx.orgId) {
-        throw new ForbiddenError("You can only call students in your own organization.");
-      }
-      const sessionOrgId = studentProfile.orgId;
-
-      let sessionId: string;
-      let roomName: string;
-      let token: string | null = null;
-
-      if (existingSessionId) {
-        const existingSession = await db.query.sessions.findFirst({
-          where: eq(sessions.id, existingSessionId),
-        });
-        if (!existingSession) throw new NotFoundError("Session");
-        if (existingSession.teacherId !== ctx.userId && !(ctx.role === "SUPER_ADMIN" || (ctx.role === "ORG_ADMIN" && ctx.orgId === existingSession.orgId))) {
-          throw new ForbiddenError("Not your session.");
-        }
-        if (!existingSession.videoRoomName) throw new ForbiddenError("Session has no active room.");
-
-        sessionId = existingSession.id;
-        roomName = existingSession.videoRoomName;
-
-        // Ring-ins can target a student who never had a booking for this
-        // exact session (e.g. a substitute or an ad-hoc addition) — make
-        // sure one exists so their join isn't rejected by RBAC.
-        const existingBooking = await db.query.bookings.findFirst({
-          where: and(eq(bookings.sessionId, sessionId), eq(bookings.studentProfileId, studentProfile.id)),
-        });
-        if (!existingBooking) {
-          await db.insert(bookings).values({
-            id: createId(),
-            orgId: existingSession.orgId,
-            userId: studentProfile.userId,
-            studentProfileId: studentProfile.id,
-            sessionId,
-            status: "CONFIRMED",
-          });
-        }
-      } else {
-        sessionId = createId();
-        roomName = generateRoomName(sessionId);
-        const now = new Date();
-        const end = new Date(now.getTime() + 60 * 60 * 1000);
-
-        await db.insert(sessions).values({
-          id: sessionId,
-          orgId: sessionOrgId,
-          teacherId: ctx.userId,
-          type: "INDIVIDUAL",
-          origin: "INSTANT",
-          status: "IN_PROGRESS",
-          title: `Instant Meeting with ${teacher.name}`,
-          scheduledStart: now,
-          scheduledEnd: end,
-          actualStart: now,
-          consumesQuota: false,
-          videoRoomName: roomName,
-        });
-
-        token = await generateLiveKitToken({
-          roomName,
-          userName: teacher.name,
-          userEmail: teacher.email,
-          isModerator: true,
-        });
-      }
-
-      const callId = createId();
-      await db.insert(callInvites).values({
-        id: callId,
-        orgId: sessionOrgId,
-        sessionId,
-        callerId: ctx.userId,
-        calleeId: studentProfile.userId,
-        status: "RINGING",
+      const result = await ringParticipantIntoCanonicalRoom({
+        orgId: ctx.orgId,
+        teacherId: ctx.userId,
+        studentProfileId,
+        existingSessionId,
+        isSuperAdmin: ctx.role === "SUPER_ADMIN",
       });
 
-      // The dashboard poll only rings a student who has the site open. This
-      // rings the phone itself — no-op unless they have the app and push is
-      // configured.
-      await sendCallPush([studentProfile.userId], {
-        callId,
-        sessionId,
-        callerName: teacher.name,
-      });
-
-      // ...and the same student's laptop, whose tab may be closed. The
-      // service worker asks who is calling; nothing about the call travels
-      // through the push service itself.
-      await sendWebPushToUsers([studentProfile.userId]);
-
-      return NextResponse.json({
-        callId,
-        sessionId,
-        roomName,
-        token,
-        joinUrl: `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`,
-      });
+      return NextResponse.json(result);
     } catch (error) {
       return handleApiError(error);
     }

@@ -127,6 +127,23 @@ export async function GET(
         );
       }
 
+      // Only assigned teacher arrival marks scheduled class IN_PROGRESS.
+      // Students and observers entering before the assigned teacher see the lobby until the teacher arrives.
+      const isOwningTeacher = session.teacherId === ctx.userId;
+      const isAttending = isOwningTeacher || isStudent;
+      if (!isOwningTeacher && session.status === "SCHEDULED") {
+        return withTimings(
+          NextResponse.json({
+            waiting: true,
+            waitingForTeacher: true,
+            sessionTitle: session.title,
+            teacherName: sessionTeacher?.name || null,
+            scheduledStart: session.scheduledStart?.toISOString() ?? null,
+          }),
+          timings
+        );
+      }
+
       if (resolution.kind === "expired") {
         // The scheduled window has elapsed and the class is not running.
         return withTimings(
@@ -193,20 +210,8 @@ export async function GET(
         }
       };
 
-      // Whoever walks in first opens the class — a student half an hour early
-      // included, because being early should put you *in* the room where the
-      // others will find you. Nothing else in the app ever flipped SCHEDULED
-      // to IN_PROGRESS, so a regular class used to stay "SCHEDULED" for its
-      // whole duration, invisible to the admins' live-classes panel and to
-      // the students' ribbon, both of which key off IN_PROGRESS.
-      //
-      // An admin dropping in to observe is the one exception: they are
-      // neither teaching nor attending, and their visit must not mark a class
-      // as having begun.
-      const isOwningTeacher = session.teacherId === ctx.userId;
-      const isAttending = isOwningTeacher || isStudent;
       const isConnecting = request.nextUrl.searchParams.get("connecting") === "1";
-      const shouldMarkStarted = isAttending && session.status === "SCHEDULED";
+      const shouldMarkStarted = isOwningTeacher && session.status === "SCHEDULED";
 
       /**
        * Close this person's previous connection before handing out a new one.

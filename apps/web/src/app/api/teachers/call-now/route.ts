@@ -14,6 +14,7 @@ import { requireRole } from "@/lib/rbac";
 import { handleApiError, NotFoundError } from "@/lib/errors";
 import { sendCallNowNotification } from "@/lib/push";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { startScheduledOccurrence } from "@/lib/meeting-service";
 
 const callNowSchema = z.object({
   sessionId: z.string().min(1),
@@ -44,8 +45,14 @@ export async function POST(request: NextRequest) {
       });
       if (!student) throw new NotFoundError("Student");
 
+      // Start scheduled occurrence via meeting service (sets IN_PROGRESS, actualStart, videoRoomName, and notifies students)
+      const { roomName } = await startScheduledOccurrence({
+        sessionId,
+        teacherId: ctx.userId,
+        orgId: session.orgId,
+      });
+
       // Generate LiveKit room token for the session
-      const roomName = generateRoomName(sessionId);
       const studentToken = await generateLiveKitToken({
         roomName,
         userName: student.name,
@@ -54,18 +61,9 @@ export async function POST(request: NextRequest) {
       });
       const joinUrl = `${process.env.NEXT_PUBLIC_APP_URL || "https://novicetutor.com"}/dashboard/session/${sessionId}`;
 
-      // Update session with room info and set to IN_PROGRESS
       const teacher = await db.query.users.findFirst({
         where: eq(users.id, ctx.userId),
       });
-      await db
-        .update(sessions)
-        .set({
-          videoRoomName: roomName,
-          status: "IN_PROGRESS",
-          actualStart: new Date(),
-        })
-        .where(eq(sessions.id, sessionId));
 
       // Send push notifications to all student devices
       const delivered = await sendCallNowNotification(

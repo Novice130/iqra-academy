@@ -13,6 +13,7 @@ interface Waiting {
   sessionTitle: string | null;
   teacherName: string | null;
   scheduledStart: string | null;
+  waitingForTeacher?: boolean;
 }
 
 interface ExpiredSession {
@@ -112,6 +113,7 @@ export default function SessionRoomPage() {
           sessionTitle: data.sessionTitle ?? null,
           teacherName: data.teacherName ?? null,
           scheduledStart: data.scheduledStart ?? null,
+          waitingForTeacher: !!data.waitingForTeacher,
         });
         return false;
       }
@@ -329,9 +331,8 @@ export default function SessionRoomPage() {
     );
   }
 
-  // Only for a class that isn't due yet. Once the room opens — an hour before
-  // the slot — anyone attending walks straight in, first arrival included.
   if (waiting) {
+    const isWaitingForTeacher = waiting.waitingForTeacher;
     return (
       <div className="flex items-center justify-center min-h-screen p-6" style={{ background: '#131417' }}>
         <div
@@ -346,11 +347,13 @@ export default function SessionRoomPage() {
               animation: 'lk-spin 900ms linear infinite',
             }}
           />
-          <h1 className="text-lg font-semibold text-white">This class isn&apos;t open yet</h1>
+          <h1 className="text-lg font-semibold text-white">
+            {isWaitingForTeacher ? 'Waiting for your teacher' : "This class isn't open yet"}
+          </h1>
           <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.55)' }}>
-            {waiting.sessionTitle || 'Your class'}
-            {waiting.teacherName ? ` with ${waiting.teacherName}` : ''} opens an hour before it starts. Keep
-            this page open and you&apos;ll go straight in — whether or not anyone else is there yet.
+            {isWaitingForTeacher
+              ? `${waiting.teacherName || 'Your teacher'} will start the class shortly. Keep this page open and you'll enter automatically.`
+              : `${waiting.sessionTitle || 'Your class'}${waiting.teacherName ? ` with ${waiting.teacherName}` : ''} opens an hour before it starts. Keep this page open and you'll go straight in.`}
           </p>
           {waiting.scheduledStart && (
             <p className="text-sm mt-4" style={{ color: '#8ab4f8' }}>
