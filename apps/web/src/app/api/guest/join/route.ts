@@ -121,37 +121,48 @@ export async function POST(request: NextRequest) {
 
       const admittedSince = new Date(Date.now() - ADMIT_GRACE_MS);
 
-      // 1. If this guest was ALREADY ADMITTED by the host, grant instant direct entry!
-      const alreadyAdmitted = await db.query.guestJoinRequests.findFirst({
-        where: and(
-          inArray(guestJoinRequests.sessionId, targetSessionIds),
-          eq(guestJoinRequests.name, name),
-          eq(guestJoinRequests.status, "ADMITTED"),
-          gt(guestJoinRequests.createdAt, admittedSince)
-        ),
-        orderBy: [desc(guestJoinRequests.respondedAt)],
-      });
+      // 1. Re-admission requires the requestId secret from the original knock.
+      // A name alone is not a credential ("Ali" is guessable): without the
+      // secret this falls through to the PENDING path below, and the guest
+      // polls GET ?requestId=... like everyone else.
+      const presentedRequestId: string | undefined =
+        typeof (body as Record<string, unknown>)?.requestId === "string"
+          ? (body as Record<string, unknown>).requestId as string
+          : undefined;
 
-      if (alreadyAdmitted) {
-        const { generateLiveKitToken, generateRoomName } = await import("@/lib/livekit");
-        const roomName = generateRoomName(session.id);
-        const token = await generateLiveKitToken({
-          roomName,
-          userName: name,
-          userEmail: `guest-${alreadyAdmitted.id}`,
-          isModerator: false,
+      if (presentedRequestId) {
+        const alreadyAdmitted = await db.query.guestJoinRequests.findFirst({
+          where: and(
+            eq(guestJoinRequests.id, presentedRequestId),
+            inArray(guestJoinRequests.sessionId, targetSessionIds),
+            eq(guestJoinRequests.name, name),
+            eq(guestJoinRequests.status, "ADMITTED"),
+            gt(guestJoinRequests.createdAt, admittedSince)
+          ),
+          orderBy: [desc(guestJoinRequests.respondedAt)],
         });
 
-        return NextResponse.json({
-          status: "ADMITTED",
-          requestId: alreadyAdmitted.id,
-          token,
-          serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
-          userName: name,
-          sessionTitle: session.title,
-          teacherName: teacher?.name ?? null,
-          teacherIdentity: teacher?.email ?? null,
-        });
+        if (alreadyAdmitted) {
+          const { generateLiveKitToken, generateRoomName } = await import("@/lib/livekit");
+          const roomName = generateRoomName(session.id);
+          const token = await generateLiveKitToken({
+            roomName,
+            userName: name,
+            userEmail: `guest-${alreadyAdmitted.id}`,
+            isModerator: false,
+          });
+
+          return NextResponse.json({
+            status: "ADMITTED",
+            requestId: alreadyAdmitted.id,
+            token,
+            serverUrl: process.env.LIVEKIT_URL || "wss://meet.novicetutor.com",
+            userName: name,
+            sessionTitle: session.title,
+            teacherName: teacher?.name ?? null,
+            teacherIdentity: teacher?.email ?? null,
+          });
+        }
       }
 
       // Check if room is locked by the host

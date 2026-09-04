@@ -134,6 +134,7 @@ export async function GET(request: NextRequest) {
 
       return NextResponse.json({
         teacherId,
+        teacherName: teacher.name || teacher.email,
         timezone,
         slotMinutes: rows[0]?.slotMinutes ?? 30,
         slots: rows.map((r) => ({
@@ -264,6 +265,18 @@ export async function DELETE(request: NextRequest) {
       const isSuper = ctx.role === "SUPER_ADMIN";
 
       const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
+      const isExternalEdit = ctx.userId !== teacherId;
+
+      // A full wipe is the most extreme edit: capture before-state so the
+      // teacher's notification can show what vanished, same as POST.
+      const previousSlots = isExternalEdit
+        ? await db.query.teacherAvailability.findMany({
+            where: and(
+              eq(teacherAvailability.teacherId, teacherId),
+              eq(teacherAvailability.orgId, teacher.orgId)
+            ),
+          })
+        : [];
 
       await db.transaction(async (tx) => {
         await tx
@@ -274,6 +287,33 @@ export async function DELETE(request: NextRequest) {
               eq(teacherAvailability.orgId, teacher.orgId)
             )
           );
+
+        if (isExternalEdit) {
+          let actorName = "An administrator";
+          const actor = await tx.query.users.findFirst({
+            where: eq(users.id, ctx.userId),
+            columns: { name: true },
+          });
+          if (actor?.name) actorName = actor.name;
+          await tx.insert(notifications).values({
+            orgId: teacher.orgId,
+            userId: teacherId,
+            type: "AVAILABILITY_CHANGED",
+            message: `${actorName} cleared your weekly availability schedule.`,
+            payload: {
+              actorName,
+              teacherId,
+              before: previousSlots.map((r) => ({
+                dayOfWeek: r.dayOfWeek,
+                startTime: toHHMM(r.startTime),
+                endTime: toHHMM(r.endTime),
+                timezone: r.timezone,
+              })),
+              after: [],
+              changedAt: new Date().toISOString(),
+            },
+          });
+        }
 
         await insertSchedulingEvent(tx, {
           orgId: teacher.orgId,

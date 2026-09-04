@@ -28,16 +28,34 @@ export default function PrivacyPage() {
         </div>
       </nav>
 
-      <main className="max-w-4xl mx-auto px-6 py-16">
+      <main className="max-w-[720px] mx-auto px-6 py-16">
         <h1 className="text-3xl lg:text-4xl font-bold text-[var(--color-charcoal)] mb-2">
           Privacy Policy
         </h1>
-        <p className="text-[var(--color-gray)] mb-10">
-          Last updated: March 10, 2026
+        <p className="text-sm text-[var(--color-gray)] mb-8 flex items-center gap-2">
+          <span>Last updated: March 10, 2026</span>
+          <span>•</span>
+          <span>Effective date: March 10, 2026</span>
         </p>
 
+        {/* Table of Contents */}
+        <nav aria-label="Table of contents" className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] mb-10">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
+            Table of Contents
+          </div>
+          <ol className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <li><a href="#privacy-1" className="text-[var(--accent)] hover:underline">1. Information We Collect</a></li>
+            <li><a href="#privacy-2" className="text-[var(--accent)] hover:underline">2. How We Use Your Information</a></li>
+            <li><a href="#privacy-3" className="text-[var(--accent)] hover:underline">3. Children&apos;s Privacy (COPPA)</a></li>
+            <li><a href="#privacy-4" className="text-[var(--accent)] hover:underline">4. Data Sharing</a></li>
+            <li><a href="#privacy-5" className="text-[var(--accent)] hover:underline">5. Data Security</a></li>
+            <li><a href="#privacy-6" className="text-[var(--accent)] hover:underline">6. Your Rights</a></li>
+            <li><a href="#privacy-7" className="text-[var(--accent)] hover:underline">7. Contact Us</a></li>
+          </ol>
+        </nav>
+
         <div className="prose-style space-y-8">
-          <Section title="1. Information We Collect">
+          <Section id="privacy-1" title="1. Information We Collect">
             <p>
               We collect information you provide directly to us when you create
               an account, enroll a student, book a class, or contact us. This
@@ -52,7 +70,7 @@ export default function PrivacyPage() {
             </ul>
           </Section>
 
-          <Section title="2. How We Use Your Information">
+          <Section id="privacy-2" title="2. How We Use Your Information">
             <p>We use the information we collect to:</p>
             <ul>
               <li>Provide and maintain our educational services</li>
@@ -64,7 +82,7 @@ export default function PrivacyPage() {
             </ul>
           </Section>
 
-          <Section title="3. Children's Privacy (COPPA Compliance)">
+          <Section id="privacy-3" title="3. Children's Privacy (COPPA Compliance)">
             <p>
               We are committed to protecting children&apos;s privacy. We comply
               with the Children&apos;s Online Privacy Protection Act (COPPA):
@@ -89,7 +107,7 @@ export default function PrivacyPage() {
             </ul>
           </Section>
 
-          <Section title="4. Data Sharing">
+          <Section id="privacy-4" title="4. Data Sharing">
             <p>
               We do not sell your personal information. We share data only with:
             </p>
@@ -107,7 +125,7 @@ export default function PrivacyPage() {
             </ul>
           </Section>
 
-          <Section title="5. Data Security">
+          <Section id="privacy-5" title="5. Data Security">
             <p>
               We implement industry-standard security measures including
               encrypted connections (HTTPS/TLS), secure authentication, and
@@ -116,7 +134,7 @@ export default function PrivacyPage() {
             </p>
           </Section>
 
-          <Section title="6. Your Rights">
+          <Section id="privacy-6" title="6. Your Rights">
             <p>You have the right to:</p>
             <ul>
               <li>Access the personal data we hold about you</li>
@@ -136,7 +154,7 @@ export default function PrivacyPage() {
             </p>
           </Section>
 
-          <Section title="7. Contact Us">
+          <Section id="privacy-7" title="7. Contact Us">
             <p>
               If you have questions about this Privacy Policy, please reach out:
             </p>
@@ -166,14 +184,16 @@ export default function PrivacyPage() {
 }
 
 function Section({
+  id,
   title,
   children,
 }: {
+  id?: string;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section id={id} className="scroll-mt-24">
       <h2 className="text-xl font-bold text-[var(--color-charcoal)] mb-3">
         {title}
       </h2>

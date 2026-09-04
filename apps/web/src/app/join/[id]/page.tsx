@@ -20,7 +20,7 @@ const POLL_INTERVAL_MS = 4000;
 /** Matches the server's knock window — past this the request is EXPIRED anyway. */
 const WAIT_TIMEOUT_MS = 10 * 60 * 1000;
 
-type Stage = 'form' | 'waiting' | 'denied' | 'admitted' | 'error';
+type Stage = 'form' | 'waiting' | 'denied' | 'expired' | 'admitted' | 'error';
 
 export default function GuestJoinPage() {
   const params = useParams();
@@ -129,15 +129,17 @@ export default function GuestJoinPage() {
           try {
             localStorage.setItem(
               `guest_session_${sessionId}`,
-              JSON.stringify({ name: data.userName || name, admittedAt: Date.now() })
+              JSON.stringify({ name: data.userName || name, admittedAt: Date.now(), requestId: requestIdRef.current })
             );
           } catch {}
         } else if (data.status === 'DENIED') {
           giveUp('The host didn’t admit you to this class.');
         } else if (data.status === 'EXPIRED') {
-          giveUp('Nobody answered. The host may have stepped away — try again.');
+          settledRef.current = true;
+          setStage('expired');
         } else if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
-          giveUp('Nobody answered. The host may have stepped away — try again.');
+          settledRef.current = true;
+          setStage('expired');
         }
       } catch {
         if (Date.now() - startedAt > WAIT_TIMEOUT_MS) {
@@ -164,10 +166,29 @@ export default function GuestJoinPage() {
     settledRef.current = false;
     setKnocking(true);
     try {
+      const savedRaw = (() => {
+        try {
+          return localStorage.getItem(`guest_session_${sessionId}`);
+        } catch {
+          return null;
+        }
+      })();
+      const savedRequestId = (() => {
+        try {
+          const parsed = savedRaw ? JSON.parse(savedRaw) : null;
+          return typeof parsed?.requestId === 'string' ? parsed.requestId : undefined;
+        } catch {
+          return undefined;
+        }
+      })();
       const res = await fetch('/api/guest/join', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, name: candidateName }),
+        body: JSON.stringify(
+          savedRequestId
+            ? { sessionId, name: candidateName, requestId: savedRequestId }
+            : { sessionId, name: candidateName }
+        ),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -189,7 +210,7 @@ export default function GuestJoinPage() {
         try {
           localStorage.setItem(
             `guest_session_${sessionId}`,
-            JSON.stringify({ name: candidateName, admittedAt: Date.now() })
+            JSON.stringify({ name: candidateName, admittedAt: Date.now(), requestId: data.requestId ?? null })
           );
         } catch {}
         return;
@@ -266,6 +287,32 @@ export default function GuestJoinPage() {
             <p className="text-sm mt-2 text-white/60">
               {message}
             </p>
+          </>
+        ) : stage === 'expired' ? (
+          <>
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-400 flex items-center justify-center text-2xl mx-auto mb-3">
+              ⏳
+            </div>
+            <h1 className="text-lg font-bold text-white tracking-tight">Request Expired</h1>
+            <p className="text-sm mt-1 text-white/60">
+              The request timed out. The teacher may have stepped away or class ended.
+            </p>
+            <button
+              onClick={() => {
+                settledRef.current = false;
+                requestIdRef.current = null;
+                setDeniedReason(null);
+                setStage('form');
+              }}
+              className="mt-6 w-full py-3 rounded-2xl text-sm font-semibold cursor-pointer transition active:scale-95 bg-blue-600 text-white hover:bg-blue-500 shadow-md"
+            >
+              Try Again
+            </button>
+            <div className="mt-4">
+              <Link href="/join" className="text-xs text-white/50 hover:text-white/80 transition-colors">
+                Enter a different meeting ID →
+              </Link>
+            </div>
           </>
         ) : stage === 'denied' ? (
           <>

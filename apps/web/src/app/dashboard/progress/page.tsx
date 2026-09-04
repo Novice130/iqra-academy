@@ -104,9 +104,9 @@ export default async function ProgressPage() {
                         </div>
                         <div className="text-right">
                           <div className="text-lg font-bold" style={{ color: "var(--accent)" }}>
-                            -- 🔥
+                            {completedCount} / {totalInTrack}
                           </div>
-                          <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>week streak</div>
+                          <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>lessons completed</div>
                         </div>
                       </div>
                     </div>

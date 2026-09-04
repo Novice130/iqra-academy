@@ -58,6 +58,7 @@ export default function WeekGrid({
   weekOffset: number;
 }) {
   const tz = useViewerTimeZone();
+  const [viewMode, setViewMode] = useState<'week' | 'list'>('week');
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -90,7 +91,137 @@ export default function WeekGrid({
 
   return (
     <>
-      <div className="card overflow-x-auto">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-xs text-[var(--text-tertiary)]">
+          {inWeek.length} {inWeek.length === 1 ? 'class' : 'classes'} this week
+        </div>
+        <div className="flex items-center rounded-xl bg-[var(--bg-secondary)] p-1 border border-[var(--border)]">
+          <button
+            type="button"
+            onClick={() => setViewMode('week')}
+            className={`px-3 py-1 text-xs font-semibold rounded-lg transition ${
+              viewMode === 'week'
+                ? 'bg-[var(--bg-card)] text-[var(--text-primary)] shadow-xs'
+                : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            Week Grid
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`px-3 py-1 text-xs font-semibold rounded-lg transition ${
+              viewMode === 'list'
+                ? 'bg-[var(--bg-card)] text-[var(--text-primary)] shadow-xs'
+                : 'text-[var(--text-tertiary)] hover:text-[var(--text-primary)]'
+            }`}
+          >
+            List View
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'list' ? (
+        <div className="space-y-3">
+          {inWeek.length === 0 ? (
+            <div className="card p-8 text-center text-sm text-[var(--text-tertiary)]">
+              No classes scheduled for this week.
+            </div>
+          ) : (
+            inWeek.map((b) => {
+              const lifecycle = getMeetingLifecycleState({ status: 'SCHEDULED', scheduledStart: b.start });
+              const isPast = lifecycle === 'COMPLETED' || lifecycle === 'EXPIRED';
+              const isLive = lifecycle === 'LIVE';
+              const isReady = lifecycle === 'READY';
+
+              const dateStr = new Date(b.start).toLocaleDateString('en-US', {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+              });
+              const timeStr = new Date(b.start).toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+              });
+
+              return (
+                <div
+                  key={b.id}
+                  className="card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-white text-xs font-bold shrink-0"
+                      style={{ background: getStudentColor(b.studentId) }}
+                    >
+                      {(b.studentName || 'C')[0]}
+                    </div>
+                    <div>
+                      <div className="text-sm font-semibold text-[var(--text-primary)]">
+                        {b.studentName || 'Student'} • {b.title || 'Class Session'}
+                      </div>
+                      <div className="text-xs text-[var(--text-tertiary)] mt-0.5">
+                        {dateStr} at {timeStr}
+                        {b.track ? ` · ${b.track.toLowerCase()}` : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 self-end sm:self-auto">
+                    {/* Status chip */}
+                    <span
+                      className="text-[11px] font-bold px-2.5 py-0.5 rounded-full uppercase tracking-wider flex items-center gap-1.5"
+                      style={{
+                        background: isLive
+                          ? '#fee2e2'
+                          : isReady
+                          ? '#dbeafe'
+                          : isPast
+                          ? '#f1f5f9'
+                          : '#e0e7ff',
+                        color: isLive
+                          ? '#dc2626'
+                          : isReady
+                          ? '#1d4ed8'
+                          : isPast
+                          ? '#64748b'
+                          : '#4338ca',
+                      }}
+                    >
+                      {isLive && (
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                        </span>
+                      )}
+                      {lifecycle}
+                    </span>
+
+                    {/* Action */}
+                    {isPast ? (
+                      <span className="text-xs px-3 py-1.5 rounded-xl text-[var(--text-tertiary)] bg-[var(--bg-secondary)]">
+                        Ended
+                      </span>
+                    ) : (
+                      <Link
+                        href={`/dashboard/session/${b.sessionId}`}
+                        className={`text-xs font-semibold px-4 py-1.5 rounded-xl transition ${
+                          isLive || isReady
+                            ? 'bg-[var(--accent)] text-white shadow-xs hover:opacity-90'
+                            : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] hover:bg-[var(--border)]'
+                        }`}
+                      >
+                        {isLive ? 'Join Live' : isReady ? 'Join Class' : 'View Class'}
+                      </Link>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      ) : (
+        <div className="card overflow-x-auto">
         <div className="min-w-[640px]">
           {/* Header row */}
           <div className="grid grid-cols-8" style={{ borderBottom: '1px solid var(--border)' }}>
@@ -187,6 +318,7 @@ export default function WeekGrid({
           ))}
         </div>
       </div>
+      )}
 
       <p className="text-xs mt-3" style={{ color: 'var(--text-tertiary)' }}>
         All times shown in your local timezone{tz ? ` (${tz})` : ''}.

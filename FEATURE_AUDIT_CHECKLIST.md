@@ -170,7 +170,7 @@
 | 5 | Class action button & navigation responsiveness | ✅ Complete | 2026-09-04 | See below |
 | 6 | Admin information architecture | ✅ Complete | 2026-09-04 | See below |
 | 7 | Meeting control parity | ✅ Complete | 2026-09-04 | See below |
-| 8 | Visual system & every active page | ⬜ Pending | — | — |
+| 8 | Visual system & every active page | ✅ Complete | 2026-09-04 | See below |
 | 9 | Native iOS & Android | ⬜ Pending | — | — |
 | 10 | Tests & CI | ⬜ Pending | — | — |
 | 11 | Docs & rollout | ⬜ Pending | — | — |
@@ -369,6 +369,44 @@
     - Created `tests/api/meeting-controls.spec.ts` covering host tools RBAC, room locking enforcement rejecting guest knocks with 423, volume control limits, spotlight state transitions, and room metadata parsing.
 - **Key files**: `apps/web/src/components/video/CallControlBar.tsx`, `apps/web/src/components/video/VideoTile.tsx`, `apps/web/src/components/video/CustomVideoConference.tsx`, `apps/web/src/components/video/PeoplePanel.tsx`, `apps/web/src/components/video/HostToolsModal.tsx`, `apps/web/src/components/video/CallSettingsModal.tsx`, `apps/web/src/components/video/WhiteboardOverlay.tsx`, `apps/web/src/components/video/CallIcons.tsx`, `apps/web/src/components/video/hostControls.ts`, `apps/web/src/lib/room-metadata.ts`, `apps/web/src/app/api/sessions/[id]/host-tools/route.ts`, `apps/web/src/app/api/guest/join/route.ts`, `apps/web/tests/api/meeting-controls.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (58 passed, 2 skipped, 1 expected fail, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+### Phase 8 — Visual System & Every Active Page (2026-09-04)
+- **What was done**:
+  - **CSS Design Tokens & Apple Glass System (`globals.css`)**:
+    - Centralized design tokens: Light app background `#F5F7FA`, primary text `#17202A`, accent blue `#0A84FF`, success green `#30D158`, warning orange `#FF9F0A`, danger red `#FF453A`, meeting dark background `#090B0F`.
+    - Apple glass material specifications: translucent layered surface `rgba(28, 32, 40, 0.72)`, glass border `rgba(255, 255, 255, 0.16)`, blur `24px`, saturation `160%`, depth elevation shadow `0 18px 60px rgba(0, 0, 0, 0.32)`.
+    - Corner radii tokens: controls `12px`, cards `16px`, dialogs/docks `22px`.
+    - Grid & spacing scale: `4px` base grid, standard page spacing `8/12/16/24/32`, max desktop content `1440px`.
+    - Interactive target minimums: `44x44px` touch target, `48px` primary class action button.
+    - Accessibility fallbacks: `@media (prefers-reduced-transparency: reduce)` falling back to opaque surfaces (`#1c2028`); `@media (prefers-reduced-motion: reduce)` disabling travel/scale animations; WCAG 2.2 AA contrast compliance.
+  - **Responsive Dashboard Chrome (`DashboardChrome.tsx`)**:
+    - Desktop sidebar: exact `264px` width (`w-[264px]`).
+    - Tablet compact navigation rail (`640–1023px`, `w-16`): centered icon buttons, active indicators, and tooltips.
+    - Native mobile bottom navigation bar (`<640px`): 4 primary role tabs + More menu.
+    - Complete page title mappings for all student, teacher, and admin sub-routes (e.g. `/dashboard/teacher/students/*` -> "Student Details", `/join` -> "Join Class").
+    - Preserved zero-chrome fullscreen layout for active meeting routes (`/dashboard/session/*`).
+  - **Notification Banner Route Correction (`MeetingNotificationBanner.tsx`)**:
+    - Fixed `INVOICE_ISSUED` navigation link from `/dashboard/invoices` (which 404s for students) to canonical `/dashboard/billing`.
+  - **Active Page Hardening & Elimination of Fake Placeholders**:
+    - **Student Home (`dashboard/page.tsx`)**: Removed placeholder streak card (`StatCard label="Streak" value="--"`) and weekly placeholder (`weekly="--"`); computed real lessons completed in track directly from `progressRecords` and `lessonContent`; calculated real profile progress percentages based on `completed / total * 100`.
+    - **Student Progress (`dashboard/progress/page.tsx`)**: Replaced fake `-- 🔥 week streak` with real `completed / total` lessons completed in track; rendered accurate progress metrics.
+    - **Chat (`dashboard/chat/page.tsx`)**: Removed fake pulsing green dot and fake `Online` badge; rendered genuine conversation status ("Direct Conversation").
+    - **Teacher Home (`dashboard/teacher/page.tsx`)**: Renamed ad-hoc button to "⚡ Instant Meeting" (`StartInstantMeetingButton.tsx`); removed dead/mixed-in admin live class matrix from teacher overview.
+    - **Teacher Availability (`dashboard/teacher/availability/page.tsx`)**: "Save & Finish" / onboarding redirects to `/dashboard/teacher`; added admin editing banner with target teacher name (`targetTeacherName` populated via API).
+    - **Teacher Students List (`dashboard/teacher/students/page.tsx`)**: Fixed operator precedence bug in progress calculation: `Math.min(100, Math.round(((completed[0]?.count || 0) / totalInTrack) * 100))` (previously `completed[0]?.count || 0 / totalInTrack * 100` evaluated to 500%).
+    - **Teacher Student Detail (`dashboard/teacher/students/[id]/page.tsx`)**: Replaced server UTC `format()` timestamps with `<LocalTime>` components for client-local timezone rendering.
+    - **Schedule (`dashboard/schedule/WeekGrid.tsx`)**: Added role-scoped Week/List view toggle with status chips (`LIVE`, `READY`, `UPCOMING`, `COMPLETED`, `EXPIRED`) and direct action states.
+    - **Auth Pages (`login/page.tsx` & `register/page.tsx`)**: Centered 420px max glass auth cards (`max-w-[420px]`); password visibility eye toggle; pending states and error summaries.
+    - **Join Pages (`join/page.tsx` & `join/[id]/page.tsx`)**: 12-digit meeting code auto-formatting; explicit `waiting`, `admitted`, `denied`, and `expired` states with retry button.
+    - **Legal Pages (`terms/page.tsx` & `privacy/page.tsx`)**: Readable 720px measure (`max-w-[720px]`); sticky Table of Contents navigation with section anchor jumping; last-updated and effective date metadata.
+    - **Debug Route Lockdown (`debug/layout.tsx`)**: Created layout calling `notFound()` in production (`process.env.NODE_ENV === "production"`).
+    - **Canonical Scheduling & Meeting Constants Alignment**:
+      - Unified `SCHEDULED_AFTER_MS = 3 * 60 * 60 * 1000` (T+180) to match `LATE_JOIN_MS` in `meeting-service.ts`.
+      - Enforced strict teacher identity in `getClassActionState`: requiring `session.teacherId === viewer.userId` when `session.teacherId` is present, preventing unrelated teachers from receiving host action labels.
+  - **Automated Test Suite**:
+    - Created `apps/web/tests/api/visual-system.spec.ts` (9 tests) verifying tokens, responsive chrome geometry, placeholder absence, math precision, route protections, legal measures, and auth toggles.
+- **Key files**: `apps/web/src/app/globals.css`, `apps/web/src/app/dashboard/DashboardChrome.tsx`, `apps/web/src/app/dashboard/MeetingNotificationBanner.tsx`, `apps/web/src/app/dashboard/page.tsx`, `apps/web/src/app/dashboard/progress/page.tsx`, `apps/web/src/app/dashboard/chat/page.tsx`, `apps/web/src/app/dashboard/teacher/page.tsx`, `apps/web/src/app/dashboard/teacher/StartInstantMeetingButton.tsx`, `apps/web/src/app/dashboard/teacher/availability/page.tsx`, `apps/web/src/app/dashboard/teacher/students/page.tsx`, `apps/web/src/app/dashboard/teacher/students/[id]/page.tsx`, `apps/web/src/app/dashboard/schedule/WeekGrid.tsx`, `apps/web/src/app/login/page.tsx`, `apps/web/src/app/register/page.tsx`, `apps/web/src/app/join/[id]/page.tsx`, `apps/web/src/app/terms/page.tsx`, `apps/web/src/app/privacy/page.tsx`, `apps/web/src/app/debug/layout.tsx`, `apps/web/src/lib/class-action.ts`, `apps/web/src/lib/meeting-service.ts`, `apps/web/tests/api/visual-system.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (70 passed, 2 skipped, 1 expected fail, exit 0), `npm run test` (root turbo 73 passed, exit 0), `npm run build` (exit 0, all 67 routes compiled).
 
 
 

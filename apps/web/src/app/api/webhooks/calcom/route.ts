@@ -68,6 +68,18 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
 
   const sessionType = mapCalcomEventType(payload.eventTypeId) || "INDIVIDUAL";
 
+  // Webhook retries re-deliver the same booking id: without this check every
+  // retry mints a duplicate session. Booking id is the dedup key (unique
+  // index bookings_calcom_booking_id_unique); event ids are Cal.com's
+  // internal routing key and carry no uniqueness promise, so they stay
+  // plain columns by design (see AI2-reviews Phase 2, hole 3 waiver).
+  const calcomBookingId = String(payload.id);
+  const already = await db.query.bookings.findFirst({
+    where: eq(bookings.calcomBookingId, calcomBookingId),
+    columns: { id: true },
+  });
+  if (already) return;
+
   // Find teacher by email
   const teacher = await db.query.users.findFirst({
     where: and(

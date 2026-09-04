@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * "Start Class" — one tap, straight into the room.
+ * "Instant Meeting" — one tap, straight into the room.
  *
  * This used to open a student picker first, then a card with a copy-link and
  * an "Enter Meeting" button: three steps to begin a lesson that was already on
@@ -52,10 +52,10 @@ export default function StartInstantMeetingButton() {
       className="card p-4 w-full text-left hover:opacity-80 transition-opacity disabled:opacity-60"
     >
       <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-        {isLoading ? "Starting…" : "⚡ Start Class"}
+        {isLoading ? "Starting…" : "⚡ Instant Meeting"}
       </div>
       <div className="text-xs mt-0.5" style={{ color: error ? "#c5221f" : "var(--text-tertiary)" }}>
-        {error || "Opens your class now — students on the roster are let in and notified"}
+        {error || "Starts an instant meeting or resumes due scheduled class"}
       </div>
     </button>
   );

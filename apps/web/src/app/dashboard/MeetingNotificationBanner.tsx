@@ -106,7 +106,7 @@ export default function MeetingNotificationBanner() {
       if (sessionId) router.push(`/dashboard/session/${sessionId}`);
       else router.push("/dashboard");
     } else if (type === "INVOICE_ISSUED") {
-      router.push("/dashboard/invoices");
+      router.push("/dashboard/billing");
     } else if (sessionId) {
       router.push(`/dashboard/session/${sessionId}`);
     }

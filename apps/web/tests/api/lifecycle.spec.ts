@@ -315,6 +315,61 @@ test.describe("Phase 3: Database & Meeting Service Integration", () => {
     expect(convergedSession?.status).toBe("IN_PROGRESS");
   });
 
+  test("resolver and button agree at T+130 (single due window)", async ({
+    orgA,
+  }) => {
+    const { db } = getTestDb();
+    const { SCHEDULED_AFTER_MS } = await import("../../src/lib/meeting-service");
+    const { LATE_JOIN_MS } = await import("../../src/lib/class-room");
+    // The competing-room bug: if these disagree, the button invites the
+    // student in while the resolver refuses to converge the teacher there.
+    expect(SCHEDULED_AFTER_MS).toBe(LATE_JOIN_MS);
+
+    // Class started 130 min ago (inside T+180, outside old T+120): both
+    // sides must still call it due/READY.
+    const now = new Date();
+    const start130 = new Date(now.getTime() - 130 * 60 * 1000);
+    const sid = createId();
+    await db.insert(sessions).values({
+      id: sid,
+      orgId: orgA.orgId,
+      teacherId: orgA.teacher.id,
+      type: "INDIVIDUAL",
+      origin: "SCHEDULED",
+      status: "SCHEDULED",
+      title: "T+130 Agreement Class",
+      scheduledStart: start130,
+      scheduledEnd: new Date(start130.getTime() + 30 * 60 * 1000),
+    });
+    const target = await resolveStartTarget(orgA.teacher.id, orgA.orgId, now);
+    expect(target.kind).toBe("scheduled");
+    if (target.kind === "scheduled") expect(target.session.id).toBe(sid);
+
+    const button = getClassActionState(
+      { id: sid, status: "SCHEDULED", scheduledStart: start130 } as any,
+      { userId: orgA.student.id, role: "STUDENT", orgId: orgA.orgId },
+      now
+    );
+    expect(button.state).toBe("READY");
+  });
+
+  test("unrelated teacher viewer gets non-host labels", () => {
+    const baseNow = new Date("2026-09-04T12:00:00Z");
+    const otherTeacher = { userId: "teacher-other", role: "TEACHER", orgId: "org-1" };
+    const liveSession = {
+      id: "session-1",
+      orgId: "org-1",
+      teacherId: "teacher-123",
+      status: "IN_PROGRESS",
+      scheduledStart: new Date(baseNow.getTime() - 10 * 60 * 1000),
+      scheduledEnd: new Date(baseNow.getTime() + 20 * 60 * 1000),
+      actualStart: new Date(baseNow.getTime() - 10 * 60 * 1000),
+    } as any;
+    const action = getClassActionState(liveSession, otherTeacher, baseNow);
+    expect(action.isHost).toBe(false);
+    expect(action.label).not.toMatch(/Start Class|Rejoin Class/);
+  });
+
   test("resolveStartTarget identifies running, scheduled, or instant correctly", async ({
     orgA,
   }) => {

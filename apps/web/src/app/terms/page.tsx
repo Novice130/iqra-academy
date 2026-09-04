@@ -24,16 +24,38 @@ export default function TermsPage() {
         </div>
       </nav>
 
-      <main className="max-w-4xl mx-auto px-6 py-16">
+      <main className="max-w-[720px] mx-auto px-6 py-16">
         <h1 className="text-3xl lg:text-4xl font-bold text-[var(--color-charcoal)] mb-2">
           Terms of Service
         </h1>
-        <p className="text-[var(--color-gray)] mb-10">
-          Last updated: March 10, 2026
+        <p className="text-sm text-[var(--color-gray)] mb-8 flex items-center gap-2">
+          <span>Last updated: March 10, 2026</span>
+          <span>•</span>
+          <span>Effective date: March 10, 2026</span>
         </p>
 
+        {/* Table of Contents */}
+        <nav aria-label="Table of contents" className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] mb-10">
+          <div className="text-xs font-bold uppercase tracking-wider text-[var(--text-tertiary)] mb-3">
+            Table of Contents
+          </div>
+          <ol className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <li><a href="#section-1" className="text-[var(--accent)] hover:underline">1. Acceptance of Terms</a></li>
+            <li><a href="#section-2" className="text-[var(--accent)] hover:underline">2. Services</a></li>
+            <li><a href="#section-3" className="text-[var(--accent)] hover:underline">3. Accounts</a></li>
+            <li><a href="#section-4" className="text-[var(--accent)] hover:underline">4. Class Policies</a></li>
+            <li><a href="#section-5" className="text-[var(--accent)] hover:underline">5. Payment & Billing</a></li>
+            <li><a href="#section-6" className="text-[var(--accent)] hover:underline">6. Refund Policy</a></li>
+            <li><a href="#section-7" className="text-[var(--accent)] hover:underline">7. Code of Conduct</a></li>
+            <li><a href="#section-8" className="text-[var(--accent)] hover:underline">8. Intellectual Property</a></li>
+            <li><a href="#section-9" className="text-[var(--accent)] hover:underline">9. Limitation of Liability</a></li>
+            <li><a href="#section-10" className="text-[var(--accent)] hover:underline">10. Changes to Terms</a></li>
+            <li><a href="#section-11" className="text-[var(--accent)] hover:underline">11. Contact</a></li>
+          </ol>
+        </nav>
+
         <div className="space-y-8">
-          <Section title="1. Acceptance of Terms">
+          <Section id="section-1" title="1. Acceptance of Terms">
             <p>
               By accessing or using Novice Tutor&apos;s services, you agree to
               be bound by these Terms of Service. If you do not agree with any
@@ -41,7 +63,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="2. Services">
+          <Section id="section-2" title="2. Services">
             <p>
               Novice Tutor provides live online Quran tutoring services including
               Noorani Qaida, Quran reading with Tajweed, and Hifz (Quran
@@ -50,7 +72,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="3. Accounts">
+          <Section id="section-3" title="3. Accounts">
             <ul>
               <li>
                 You must be at least 18 years old or have parental/guardian
@@ -70,7 +92,7 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="4. Class Policies">
+          <Section id="section-4" title="4. Class Policies">
             <ul>
               <li>
                 <strong>Duration:</strong> Each class is 30 minutes unless
@@ -96,7 +118,7 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="5. Payment & Billing">
+          <Section id="section-5" title="5. Payment & Billing">
             <ul>
               <li>
                 Payments are processed securely through Stripe
@@ -116,7 +138,7 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="6. Refund Policy">
+          <Section id="section-6" title="6. Refund Policy">
             <ul>
               <li>
                 <strong>Free trial:</strong> No charge during the trial period.
@@ -133,7 +155,7 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="7. Code of Conduct">
+          <Section id="section-7" title="7. Code of Conduct">
             <p>All users (parents, students, and teachers) must:</p>
             <ul>
               <li>
@@ -154,7 +176,7 @@ export default function TermsPage() {
             </ul>
           </Section>
 
-          <Section title="8. Intellectual Property">
+          <Section id="section-8" title="8. Intellectual Property">
             <p>
               All course materials, curriculum content, and platform features are
               the intellectual property of Novice Tutor. You may not reproduce,
@@ -162,7 +184,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="9. Limitation of Liability">
+          <Section id="section-9" title="9. Limitation of Liability">
             <p>
               Novice Tutor provides educational services on an &quot;as
               is&quot; basis. We are not liable for any indirect, incidental, or
@@ -172,7 +194,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="10. Changes to Terms">
+          <Section id="section-10" title="10. Changes to Terms">
             <p>
               We may update these Terms of Service from time to time. Continued
               use of our services after changes constitutes acceptance of the
@@ -180,7 +202,7 @@ export default function TermsPage() {
             </p>
           </Section>
 
-          <Section title="11. Contact">
+          <Section id="section-11" title="11. Contact">
             <p>
               For questions about these Terms, contact us at{" "}
               <a
@@ -208,14 +230,16 @@ export default function TermsPage() {
 }
 
 function Section({
+  id,
   title,
   children,
 }: {
+  id?: string;
   title: string;
   children: React.ReactNode;
 }) {
   return (
-    <section>
+    <section id={id} className="scroll-mt-24">
       <h2 className="text-xl font-bold text-[var(--color-charcoal)] mb-3">
         {title}
       </h2>

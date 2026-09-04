@@ -188,10 +188,9 @@ export function getClassActionState(
   now: Date = new Date()
 ): ClassActionState {
   const state = getMeetingLifecycleState(session, now);
-  const isTeacher =
-    Boolean(session.teacherId && viewer.userId && session.teacherId === viewer.userId) ||
-    viewer.role === "TEACHER" ||
-    viewer.isTeacher === true;
+  const isTeacher = session.teacherId
+    ? Boolean(viewer.userId && session.teacherId === viewer.userId)
+    : viewer.role === "TEACHER" || viewer.isTeacher === true;
   const isAdmin =
     viewer.role === "ORG_ADMIN" ||
     viewer.role === "SUPER_ADMIN" ||

@@ -54,6 +54,22 @@ enforced through `requireAuth` / `requireRole` in `src/lib/rbac.ts`.
 Migrations are hand-written scripts run against Neon, not `drizzle-kit push` —
 see the deploy notes for why that tool misbehaves against this database.
 
+How to apply (the journal is intentionally NOT the source of truth —
+`meta/_journal.json` tracks only the original `0000` snapshot, so
+`drizzle-kit migrate` would silently skip `0001+`; do NOT rely on it):
+
+```bash
+# In order, against the target Neon branch:
+psql $DATABASE_URL -f apps/web/drizzle/0001_session_attendance.sql
+# ... 0002 ... 0008 in numeric order, then:
+psql $DATABASE_URL -f apps/web/drizzle/0009_drop_users_org_default.sql
+```
+
+Rollback scripts live beside them in `apps/web/drizzle/rollback/` and are
+lossy where noted (enum values cannot be removed; dropped columns lose data).
+A rollback is only "tested" once it has run forward+back+forward on an
+isolated branch with the output pasted into the review record.
+
 ## What is aspirational, not live
 
 Worth knowing before you trust a file:

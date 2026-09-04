@@ -18,6 +18,7 @@ import {
   lessonContent,
 } from "@/db/schema";
 import CallStudentButton from "../CallStudentButton";
+import LocalTime from "@/components/LocalTime";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -240,7 +241,7 @@ export default async function StudentDetailPage({ params }: PageProps) {
                         {record.score !== null && record.score !== undefined ? `Score: ${record.score}%` : "No score recorded"}
                       </span>
                       <span>
-                        {format(new Date(record.createdAt), "MMM d, yyyy · h:mm a")}
+                        <LocalTime iso={new Date(record.createdAt).toISOString()} mode="date-time" />
                       </span>
                     </div>
                   </div>
@@ -276,10 +277,10 @@ export default async function StudentDetailPage({ params }: PageProps) {
                       <div className="flex items-center justify-between gap-2">
                         <div>
                           <div className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
-                            {format(new Date(s.scheduledStart), "EEEE, MMM d, yyyy")}
+                            <LocalTime iso={new Date(s.scheduledStart).toISOString()} mode="full-date" />
                           </div>
                           <div className="text-[11px] mt-0.5" style={{ color: "var(--text-tertiary)" }}>
-                            {format(new Date(s.scheduledStart), "h:mm a")} – {format(new Date(s.scheduledEnd), "h:mm a")}
+                            <LocalTime iso={new Date(s.scheduledStart).toISOString()} mode="time" /> – <LocalTime iso={new Date(s.scheduledEnd).toISOString()} mode="time" />
                             {s.teacher ? ` · Teacher: ${s.teacher.name}` : ""}
                           </div>
                         </div>

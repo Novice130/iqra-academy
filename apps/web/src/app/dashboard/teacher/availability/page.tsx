@@ -13,7 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { ZONES, isValidZone } from "@/lib/zones";
 
 const DAYS = [
@@ -60,10 +60,12 @@ interface ApiSlot {
 }
 
 export default function AvailabilityPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const teacherId = searchParams.get("teacherId");
   const onboarding = searchParams.get("onboarding") === "1";
 
+  const [targetTeacherName, setTargetTeacherName] = useState<string | null>(null);
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   const [zone, setZone] = useState<string>("");
   const [zoneConfirmed, setZoneConfirmed] = useState(false);
@@ -87,10 +89,14 @@ export default function AvailabilityPage() {
         const res = await fetch(`/api/teachers/availability${qs}`);
         if (!res.ok) throw new Error("Could not load availability hours.");
         const data = (await res.json()) as {
+          teacherName?: string | null;
           timezone: string | null;
           slots: ApiSlot[];
         };
         if (cancelled) return;
+        if (data.teacherName) {
+          setTargetTeacherName(data.teacherName);
+        }
 
         const map: Record<string, Set<string>> = {};
         for (const s of data.slots) {
@@ -255,6 +261,12 @@ export default function AvailabilityPage() {
       setZoneConfirmed(true);
       setNote({ text: "✓ Availability saved! Students will see these hours in their local timezone.", bad: false });
 
+      if (onboarding) {
+        setTimeout(() => {
+          router.push("/dashboard/teacher");
+        }, 800);
+      }
+
       // Broadcast live availability update signal for open student views/tabs
       try {
         if (typeof window !== "undefined") {
@@ -284,6 +296,20 @@ export default function AvailabilityPage() {
       onMouseUp={() => setDragging(null)}
       onMouseLeave={() => setDragging(null)}
     >
+      {/* Target Teacher Admin Banner */}
+      {teacherId && (
+        <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-800 dark:text-blue-300 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2.5">
+            <span className="text-base">👤</span>
+            <span className="text-sm font-semibold">
+              Admin Editing Mode: Managing calendar for <span className="underline font-bold">{targetTeacherName || "Teacher"}</span>
+            </span>
+          </div>
+          <span className="text-xs px-2.5 py-1 rounded-full bg-blue-500/20 font-medium">
+            Teacher ID: {teacherId.slice(0, 8)}…
+          </span>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[var(--border)]">
         <div>

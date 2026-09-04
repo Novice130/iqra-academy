@@ -67,6 +67,27 @@ export default function DashboardChrome({
   const isStudentRole = !isAdminRole && !isTeacherOnly;
   const isTeachingRole = isTeacherOnly || isAdminRole;
 
+  const tabs = isAdminRole
+    ? [
+        { href: "/admin", label: "Admin", icon: HomeIcon },
+        { href: "/admin/assign-student", label: "Assign", icon: CalendarIcon },
+        { href: "/dashboard/attendance", label: "Attendance", icon: ChartIcon },
+        { href: "/admin/users", label: "Users", icon: PeopleIcon },
+      ]
+    : isTeacherOnly
+    ? [
+        { href: "/dashboard/teacher", label: "Home", icon: HomeIcon },
+        { href: "/dashboard/schedule", label: "Schedule", icon: CalendarIcon },
+        { href: "/dashboard/teacher/students", label: "Students", icon: PeopleIcon },
+        { href: "/dashboard/teacher/messages", label: "Messages", icon: ChatIcon },
+      ]
+    : [
+        { href: "/dashboard", label: "Home", icon: HomeIcon },
+        { href: "/dashboard/booking", label: "Book", icon: CalendarIcon },
+        { href: "/dashboard/progress", label: "Progress", icon: ChartIcon },
+        { href: "/dashboard/chat", label: "Messages", icon: ChatIcon },
+      ];
+
   return (
     <div
       className="min-h-screen flex"
@@ -76,9 +97,9 @@ export default function DashboardChrome({
       <IncomingCallOverlay />
       <PushRegistrar />
 
-      {/* Sidebar */}
+      {/* Desktop Sidebar (264px) */}
       <aside
-        className="hidden lg:flex flex-col w-60 shrink-0"
+        className="hidden lg:flex flex-col w-[264px] shrink-0"
         style={{
           background: "var(--bg-elevated)",
           borderRight: "1px solid var(--border)",
@@ -226,6 +247,49 @@ export default function DashboardChrome({
             Sign Out
           </button>
         </div>
+      </aside>
+
+      {/* Tablet Compact Rail (640px - 1023px) */}
+      <aside
+        className="hidden sm:flex lg:hidden flex-col w-16 shrink-0 items-center py-3"
+        style={{
+          background: "var(--bg-elevated)",
+          borderRight: "1px solid var(--border)",
+        }}
+      >
+        <div className="p-2 mb-2">
+          <img src="/logo.png?v=3" alt="Novice Tutor" className="w-8 h-8 object-contain" />
+        </div>
+        <nav className="flex-1 flex flex-col items-center gap-2 w-full px-1">
+          {tabs.map((tab) => {
+            const active =
+              tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
+                ? pathname === tab.href
+                : (pathname?.startsWith(tab.href) ?? false);
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                title={tab.label}
+                className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
+                  active
+                    ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                    : "text-[var(--text-tertiary)] hover:bg-white/5 hover:text-[var(--text-primary)]"
+                }`}
+              >
+                <tab.icon filled={active} />
+              </Link>
+            );
+          })}
+        </nav>
+        <button
+          type="button"
+          onClick={() => setMobileMenuOpen(true)}
+          title="More options"
+          className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--text-tertiary)] hover:bg-white/5 cursor-pointer"
+        >
+          <MoreIcon />
+        </button>
       </aside>
 
       {/* Main */}
@@ -380,6 +444,37 @@ export default function DashboardChrome({
         <MeetingNotificationBanner />
         <TeacherAvailabilityModal />
         <div className="flex-1 overflow-auto">{children}</div>
+
+        {/* Native mobile bottom bar (< 640px) */}
+        <nav
+          className="sm:hidden flex-none grid grid-flow-col auto-cols-fr bg-[var(--bg-elevated)] border-t border-[var(--border)] pb-[env(safe-area-inset-bottom,0px)]"
+          aria-label="Mobile Navigation"
+        >
+          {tabs.map((tab) => {
+            const active =
+              tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
+                ? pathname === tab.href
+                : (pathname?.startsWith(tab.href) ?? false);
+            return (
+              <Link
+                key={tab.href}
+                href={tab.href}
+                className={`app-tab${active ? " is-active text-[var(--accent)] font-semibold" : ""}`}
+              >
+                <tab.icon filled={active} />
+                <span>{tab.label}</span>
+              </Link>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="app-tab cursor-pointer"
+          >
+            <MoreIcon />
+            <span>More</span>
+          </button>
+        </nav>
       </main>
     </div>
   );
@@ -523,6 +618,12 @@ function AppChrome({
 }
 
 function titleFor(pathname: string, isTeachingRole: boolean): string {
+  if (pathname.startsWith("/dashboard/teacher/students/")) {
+    return "Student Details";
+  }
+  if (pathname === "/join" || pathname.startsWith("/join/")) {
+    return "Join Class";
+  }
   const map: Record<string, string> = {
     "/admin": "Admin Overview",
     "/admin/live-classes": "Live Classes Monitor",

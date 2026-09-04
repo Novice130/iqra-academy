@@ -292,7 +292,10 @@ export async function GET(
           (isStudent
             ? (
                 await db.query.studentProfiles.findFirst({
-                  where: eq(studentProfiles.userId, ctx.userId),
+                  where: and(
+                    eq(studentProfiles.userId, ctx.userId),
+                    eq(studentProfiles.orgId, session.orgId)
+                  ),
                   columns: { id: true },
                 })
               )?.id ?? null
@@ -353,7 +356,7 @@ export async function GET(
               await tx
                 .update(sessions)
                 .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
-                .where(eq(sessions.id, session.id));
+                .where(and(eq(sessions.id, session.id), eq(sessions.orgId, session.orgId)));
 
               await insertSchedulingEvent(tx, {
                 orgId: session.orgId,
@@ -369,7 +372,7 @@ export async function GET(
           ? db
               .update(sessions)
               .set({ videoRoomName: roomName })
-              .where(eq(sessions.id, session.id))
+              .where(and(eq(sessions.id, session.id), eq(sessions.orgId, session.orgId)))
           : Promise.resolve(),
       ]));
 

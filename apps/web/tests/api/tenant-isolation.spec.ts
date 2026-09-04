@@ -27,19 +27,21 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
       })
       .returning();
 
-    // 1. Student B (Org B) tries to join session A
+    // 1. Student B (Org B) tries to join session A.
+    // loadOrgSession fails closed with 404 so a foreign id is
+    // indistinguishable from a missing one (no org oracle).
     const tokenStudentB = await createTestSession(orgB.student.id);
     const joinResStudentB = await request.get(`/api/sessions/${sessionA.id}/join`, {
       headers: { Cookie: `better-auth.session_token=${tokenStudentB}` },
     });
-    expect(joinResStudentB.status()).toBe(403);
+    expect([403, 404]).toContain(joinResStudentB.status());
 
     // 2. Teacher B (Org B) tries to join session A
     const tokenTeacherB = await createTestSession(orgB.teacher.id);
     const joinResTeacherB = await request.get(`/api/sessions/${sessionA.id}/join`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacherB}` },
     });
-    expect(joinResTeacherB.status()).toBe(403);
+    expect([403, 404]).toContain(joinResTeacherB.status());
 
     // 3. Teacher B (Org B) tries host control: end session A
     const endRes = await request.post(`/api/sessions/${sessionA.id}/end`, {
@@ -251,6 +253,35 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
       },
     });
     expect(crossTeacherRes.status()).toBe(403);
+  });
+
+  test("Stranger re-POSTing an admitted guest name does not get a token", async ({
+    request,
+    orgA,
+  }) => {
+    const { db } = getTestDb();
+    const now = new Date();
+    const [sessionA] = await db
+      .insert(sessions)
+      .values({
+        orgId: orgA.orgId,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "SCHEDULED",
+        title: "Guest Impersonation Class",
+        scheduledStart: new Date(now.getTime() - 5 * 60 * 1000),
+        scheduledEnd: new Date(now.getTime() + 25 * 60 * 1000),
+      })
+      .returning();
+
+    // Stranger guesses a common name with no requestId secret: must NOT be
+    // admitted (name alone is not a credential).
+    const spoof = await request.post("/api/guest/join", {
+      data: { sessionId: sessionA.id, name: "Ali" },
+    });
+    const spoofBody = await spoof.json();
+    expect(spoofBody.status).not.toBe("ADMITTED");
+    expect(spoofBody.token).toBeUndefined();
   });
 });
 

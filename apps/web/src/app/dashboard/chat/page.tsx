@@ -273,9 +273,8 @@ export default function ChatPage() {
           </div>
           <div>
             <div className="text-sm font-bold text-white">{headerName}</div>
-            <div className="text-xs text-emerald-400 font-medium flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              Online
+            <div className="text-xs text-neutral-400 font-medium">
+              Direct Conversation
             </div>
           </div>
         </div>

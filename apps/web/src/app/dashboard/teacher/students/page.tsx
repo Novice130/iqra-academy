@@ -139,7 +139,7 @@ export default async function TeacherStudentsPage() {
             });
 
             const totalInTrack = totalLessonsMap[student.track] || 1;
-            const progress = Math.round((completed[0]?.count || 0 / totalInTrack) * 100);
+            const progress = Math.min(100, Math.round(((completed[0]?.count || 0) / totalInTrack) * 100));
             const age = student.dateOfBirth
               ? new Date().getFullYear() - new Date(student.dateOfBirth).getFullYear()
               : "N/A";

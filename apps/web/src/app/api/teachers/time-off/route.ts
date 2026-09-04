@@ -125,14 +125,18 @@ export async function DELETE(request: NextRequest) {
       if (!id) throw new BusinessRuleError("An id is required.");
 
       const res = await withRLS(ctx, async (tx) => {
+        // Org in the WHERE itself, not checked in JS after the fact: a
+        // foreign id must match zero rows, not one row plus an error.
         const existing = await tx.query.teacherTimeOff.findFirst({
-          where: eq(teacherTimeOff.id, id),
+          where: and(eq(teacherTimeOff.id, id), eq(teacherTimeOff.orgId, ctx.orgId)),
         });
-        if (!existing || existing.orgId !== ctx.orgId) throw new NotFoundError("Time off");
+        if (!existing) throw new NotFoundError("Time off");
         // Re-uses the same rule as the writes: your own, unless you're an admin.
         targetTeacherId(ctx, existing.teacherId);
 
-        await tx.delete(teacherTimeOff).where(eq(teacherTimeOff.id, id));
+        await tx
+          .delete(teacherTimeOff)
+          .where(and(eq(teacherTimeOff.id, id), eq(teacherTimeOff.orgId, ctx.orgId)));
 
         await insertSchedulingEvent(tx, {
           orgId: ctx.orgId,

@@ -1,7 +1,7 @@
 /**
  * @fileoverview Session Extension API
  *
- * RBAC: TEACHER role
+ * RBAC: session host (assigned teacher, same-org ORG_ADMIN, SUPER_ADMIN)
  * POST /api/sessions/[id]/extend — Extend a session beyond 30 min
  *
  * Business Rule: Teacher can extend ONLY if no next class is scheduled.
@@ -12,8 +12,9 @@ import { z } from "zod";
 import { db, withDb } from "@/lib/db";
 import { eq, and, ne, lt, gt } from "drizzle-orm";
 import { sessions } from "@/db/schema";
-import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
+import { requireAuth } from "@/lib/rbac";
+import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
+import { handleApiError, BusinessRuleError } from "@/lib/errors";
 
 const extendSchema = z.object({
   additionalMinutes: z.number().int().min(5).max(30),
@@ -25,7 +26,7 @@ export async function POST(
 ) {
   return withDb(async () => {
     try {
-      const authResult = await requireRole(request, ["TEACHER"]);
+      const authResult = await requireAuth(request);
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
       const { id: sessionId } = await params;
@@ -33,10 +34,10 @@ export async function POST(
       const body = await request.json();
       const { additionalMinutes } = extendSchema.parse(body);
 
-      const session = await db.query.sessions.findFirst({
-        where: and(eq(sessions.id, sessionId), eq(sessions.teacherId, ctx.userId)),
-      });
-      if (!session) throw new NotFoundError("Session");
+      // Single host definition shared with every other session-object route:
+      // assigned teacher, same-org ORG_ADMIN, or SUPER_ADMIN.
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      assertSessionHost(session, ctx);
       if (session.status !== "IN_PROGRESS") {
         throw new BusinessRuleError("Can only extend sessions that are in progress.");
       }
@@ -45,7 +46,8 @@ export async function POST(
       const extendedEnd = new Date(session.scheduledEnd.getTime() + additionalMinutes * 60000);
       const nextSession = await db.query.sessions.findFirst({
         where: and(
-          eq(sessions.teacherId, ctx.userId),
+          eq(sessions.teacherId, session.teacherId),
+          eq(sessions.orgId, session.orgId),
           ne(sessions.id, sessionId),
           lt(sessions.scheduledStart, extendedEnd),
           gt(sessions.scheduledEnd, session.scheduledEnd),
@@ -66,7 +68,7 @@ export async function POST(
           isExtended: true,
           extensionMin: session.extensionMin + additionalMinutes,
         })
-        .where(eq(sessions.id, sessionId))
+        .where(and(eq(sessions.id, sessionId), eq(sessions.orgId, session.orgId)))
         .returning();
 
       return NextResponse.json({ session: updated });

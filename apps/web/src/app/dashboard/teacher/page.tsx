@@ -88,7 +88,6 @@ export default async function TeacherDashboard() {
     todaySessions,
     weekCountResult,
     activeStudentsResult,
-    rawSessions,
     attendanceReport,
   ] = await Promise.all([
     db.query.sessions.findMany({
@@ -124,17 +123,6 @@ export default async function TeacherDashboard() {
       .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
       .where(eq(sessions.teacherId, user.id))
       .groupBy(bookings.studentProfileId),
-    isAdmin
-      ? db.query.sessions.findMany({
-          where: eq(sessions.status, "IN_PROGRESS"),
-          with: {
-            bookings: {
-              with: { studentProfile: true },
-            },
-          },
-          orderBy: [desc(sessions.actualStart)],
-        })
-      : Promise.resolve([]),
     getAttendanceReport({
       orgId: dbUser?.orgId ?? "",
       ...(isAdmin ? {} : { teacherId: user.id }),
@@ -142,20 +130,6 @@ export default async function TeacherDashboard() {
       to: new Date(),
     }).catch(() => []),
   ]);
-
-  let activeClasses: any[] = [];
-  if (isAdmin && rawSessions.length > 0) {
-    const teacherIds = [...new Set(rawSessions.map((s) => s.teacherId))];
-    const teachers = await db.query.users.findMany({
-      where: (u, { inArray }) => inArray(u.id, teacherIds),
-      columns: { id: true, name: true }
-    });
-    
-    activeClasses = rawSessions.map((s) => {
-      const teacher = teachers.find(t => t.id === s.teacherId);
-      return { ...s, teacher };
-    });
-  }
 
   const scheduleRows: ScheduleRow[] = todaySessions.map((s) => ({
     id: s.id,
@@ -201,65 +175,6 @@ export default async function TeacherDashboard() {
           />
         </Link>
       </div>
-
-      {/* Admin oversight — every class running anywhere in the school, with
-          its join link. Full width and above the fold: an admin's own
-          "today's schedule" is usually empty, so burying this in the right
-          rail made live classes effectively invisible. */}
-      {isAdmin && (
-        <div className="mb-8">
-          <h2 className="text-sm font-semibold uppercase tracking-widest mb-4 flex items-center gap-2" style={{ color: "var(--text-tertiary)" }}>
-            <span className="inline-block w-2 h-2 rounded-full" style={{ background: activeClasses.length > 0 ? "#dc2626" : "var(--border)" }} />
-            Live Classes — School-wide ({activeClasses.length})
-          </h2>
-          <div className="card">
-            {activeClasses.length > 0 ? (
-              activeClasses.map((s, i) => {
-                const studentNames = s.bookings.map((b: any) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student joined yet";
-                return (
-                  <div
-                    key={s.id}
-                    className="flex items-center justify-between gap-4 flex-wrap p-4"
-                    style={{ borderBottom: i < activeClasses.length - 1 ? "1px solid var(--border)" : undefined }}
-                  >
-                    <div className="min-w-0">
-                      <div className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                        {s.teacher?.name || "Unknown Teacher"} — {s.title || "Class"}
-                      </div>
-                      <div className="text-xs mt-0.5" style={{ color: "var(--text-secondary)" }}>
-                        {studentNames}
-                      </div>
-                      <div className="text-xs mt-1" style={{ color: "var(--text-tertiary)" }}>
-                        Started {s.actualStart ? safeDistanceToNow(s.actualStart) : "recently"}
-                        {s.actualStart && safeIso(s.actualStart) ? <> · <LocalTime iso={safeIso(s.actualStart)!} withZone /></> : null}
-                        {s.videoRoomName ? ` · room ${s.videoRoomName}` : ""}
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <ClassActionButton
-                        session={{
-                          id: s.id,
-                          status: 'IN_PROGRESS',
-                          actualStart: s.actualStart,
-                          title: s.title,
-                        }}
-                        viewer={{ role: 'ORG_ADMIN', isAdmin: true }}
-                        variant="compact"
-                      />
-                      <CopyLinkButton path={`/dashboard/session/${s.id}`} />
-                      <SessionRowActions sessionId={s.id} showEnd={true} />
-                    </div>
-                  </div>
-                );
-              })
-            ) : (
-              <div className="p-6 text-center">
-                <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>No classes in progress right now.</p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 
       {/* Two classes back to back, with one student each, are one class the
           teacher has not been asked about yet. Hidden entirely when there is

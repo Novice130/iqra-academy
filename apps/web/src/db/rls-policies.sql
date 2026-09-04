@@ -90,6 +90,21 @@ ALTER TABLE device_tokens FORCE ROW LEVEL SECURITY;
 ALTER TABLE push_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE push_subscriptions FORCE ROW LEVEL SECURITY;
 
+ALTER TABLE guest_join_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE guest_join_requests FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE chat_rooms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_rooms FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE scheduling_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE scheduling_events FORCE ROW LEVEL SECURITY;
+
+ALTER TABLE lesson_content ENABLE ROW LEVEL SECURITY;
+ALTER TABLE lesson_content FORCE ROW LEVEL SECURITY;
+
 -- ============================================================================
 -- DROP EXISTING POLICIES (Idempotent replay support)
 -- ============================================================================
@@ -118,6 +133,15 @@ DROP POLICY IF EXISTS tenant_isolation_attendance ON session_attendance;
 DROP POLICY IF EXISTS tenant_isolation_call_invites ON call_invites;
 DROP POLICY IF EXISTS user_device_tokens ON device_tokens;
 DROP POLICY IF EXISTS user_push_subscriptions ON push_subscriptions;
+DROP POLICY IF EXISTS tenant_isolation_feedback ON teacher_feedback;
+DROP POLICY IF EXISTS tenant_isolation_progress ON progress_records;
+DROP POLICY IF EXISTS tenant_isolation_guests ON guest_join_requests;
+DROP POLICY IF EXISTS tenant_isolation_notifications ON notifications;
+DROP POLICY IF EXISTS tenant_isolation_rooms ON chat_rooms;
+DROP POLICY IF EXISTS tenant_isolation_events ON scheduling_events;
+DROP POLICY IF EXISTS tenant_isolation_attendance2 ON session_attendance;
+DROP POLICY IF EXISTS tenant_isolation_lessons ON lesson_content;
+DROP POLICY IF EXISTS user_progress ON progress_records;
 DROP POLICY IF EXISTS user_feedback ON teacher_feedback;
 DROP POLICY IF EXISTS user_progress ON progress_records;
 
@@ -221,6 +245,80 @@ CREATE POLICY tenant_isolation_call_invites ON call_invites
     OR org_id = current_setting('app.current_org_id', true)
   );
 
+-- Teacher feedback: no org_id of its own — tenant scope comes from the parent
+-- session row. A feedback row whose session is invisible is invisible.
+CREATE POLICY tenant_isolation_feedback ON teacher_feedback
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR EXISTS (
+      SELECT 1 FROM sessions s
+      WHERE s.id = teacher_feedback.session_id
+        AND s.org_id = current_setting('app.current_org_id', true)
+    )
+  );
+
+-- Progress records: no org_id of its own — tenant scope comes from the parent
+-- student profile. Replaces the old permissive USING(true) policy below.
+CREATE POLICY tenant_isolation_progress ON progress_records
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR EXISTS (
+      SELECT 1 FROM student_profiles sp
+      WHERE sp.id = progress_records.student_profile_id
+        AND sp.org_id = current_setting('app.current_org_id', true)
+    )
+  );
+
+-- Guest join requests: org-scoped
+CREATE POLICY tenant_isolation_guests ON guest_join_requests
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
+-- Notifications: org-scoped
+CREATE POLICY tenant_isolation_notifications ON notifications
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
+-- Chat rooms: org-scoped
+CREATE POLICY tenant_isolation_rooms ON chat_rooms
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
+-- Scheduling events: org-scoped
+CREATE POLICY tenant_isolation_events ON scheduling_events
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
+-- Session attendance: org-scoped (already had one under a different name)
+CREATE POLICY tenant_isolation_attendance2 ON session_attendance
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
+-- Lesson content: org-scoped
+CREATE POLICY tenant_isolation_lessons ON lesson_content
+  AS RESTRICTIVE
+  USING (
+    current_setting('app.current_role', true) = 'SUPER_ADMIN'
+    OR org_id = current_setting('app.current_org_id', true)
+  );
+
 -- Audit logs: org-scoped (null org_id is system-level, visible to SUPER_ADMIN)
 CREATE POLICY tenant_isolation_audit ON audit_logs
   AS RESTRICTIVE
@@ -273,10 +371,8 @@ CREATE POLICY user_feedback ON teacher_feedback
     OR current_setting('app.current_role', true) IN ('ORG_ADMIN', 'SUPER_ADMIN')
   );
 
--- Progress records: visible within app layer joins
-CREATE POLICY user_progress ON progress_records
-  FOR SELECT
-  USING (true);
+-- Progress records: object-level rule only (teacher/admin/self). Tenant
+-- isolation comes from tenant_isolation_progress above (RESTRICTIVE + AND).
 
 -- Device tokens: strictly user-scoped
 CREATE POLICY user_device_tokens ON device_tokens

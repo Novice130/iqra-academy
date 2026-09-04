@@ -10,7 +10,7 @@ import { auth } from "@/lib/auth";
 import Link from "next/link";
 import { db, withRLS, withDb } from "@/lib/db";
 import { eq, and, gte, asc, sql } from "drizzle-orm";
-import { studentProfiles, bookings, subscriptions, sessions, users } from "@/db/schema";
+import { studentProfiles, bookings, subscriptions, sessions, users, progressRecords, lessonContent } from "@/db/schema";
 import { getQuotaStatus } from "@/lib/quota";
 import { format } from "date-fns";
 import { redirect } from "next/navigation";
@@ -96,6 +96,44 @@ export default async function DashboardPage() {
 
     const totalCompleted = sessionCount?.count ?? 0;
 
+    // 5. Track counts and student profile progress
+    let totalLessonsMap: Record<string, number> = {};
+    let totalLessonsCompleted = 0;
+    const completedMap: Record<string, number> = {};
+
+    try {
+      const trackCounts = await tx
+        .select({
+          track: lessonContent.track,
+          total: sql<number>`count(*)::int`,
+        })
+        .from(lessonContent)
+        .groupBy(lessonContent.track);
+
+      totalLessonsMap = Object.fromEntries(
+        trackCounts.map((tc) => [tc.track, Number(tc.total) || 1])
+      );
+
+      const profileCompletedCounts = await tx
+        .select({
+          studentProfileId: progressRecords.studentProfileId,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(progressRecords)
+        .innerJoin(studentProfiles, eq(progressRecords.studentProfileId, studentProfiles.id))
+        .where(and(eq(studentProfiles.userId, user.id), eq(progressRecords.isCompleted, true)))
+        .groupBy(progressRecords.studentProfileId);
+
+      for (const row of profileCompletedCounts) {
+        if (row.studentProfileId) {
+          completedMap[row.studentProfileId] = Number(row.count) || 0;
+          totalLessonsCompleted += Number(row.count) || 0;
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to compute lesson progress:", e);
+    }
+
     // Role, not email: the old allowlist only covered three test accounts.
     const hidePricing = shouldHidePricing(role);
 
@@ -148,7 +186,7 @@ export default async function DashboardPage() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-10">
           <StatCard label="This week" value={`${quota.used} of ${quota.totalAllowed}`} sub="classes used" />
           <StatCard label="Completed" value={String(totalCompleted)} sub="total sessions" />
-          <StatCard label="Streak" value="--" sub="coming soon" />
+          <StatCard label="Lessons" value={String(totalLessonsCompleted)} sub="completed in track" />
           {/* Families get a state, not a figure — "--" under a "Next bill"
               label reads as something broken rather than something withheld. */}
           {hidePricing ? (
@@ -188,14 +226,17 @@ export default async function DashboardPage() {
             <div className="grid lg:grid-cols-2 gap-4">
               {profiles.map((profile) => {
                 const latestRecord = profile.progressRecords[0];
+                const totalInTrack = Number(totalLessonsMap[profile.track] ?? 1) || 1;
+                const completedCount = completedMap[profile.id] ?? 0;
+                const progressPct = Math.min(100, Math.round((completedCount / totalInTrack) * 100));
+
                 return (
                   <ProfileCard
                     key={profile.id}
                     name={profile.name}
                     track={profile.track.charAt(0) + profile.track.slice(1).toLowerCase()}
                     lesson={latestRecord?.lesson?.title || "Beginning track..."}
-                    progress={latestRecord ? 50 : 0} // Placeholder for real % calculation
-                    weekly="--"
+                    progress={progressPct}
                   />
                 );
               })}
@@ -236,8 +277,10 @@ function ActionCard({ href, title, desc }: { href: string; title: string; desc: 
   );
 }
 
-function ProfileCard({ name, track, lesson, progress, weekly }: {
-  name: string; track: string; lesson: string; progress: number; weekly: string;
+function ProfileCard({
+  name, track, lesson, progress, weekly,
+}: {
+  name: string; track: string; lesson: string; progress: number; weekly?: string;
 }) {
   return (
     <div className="card p-5">
@@ -251,10 +294,12 @@ function ProfileCard({ name, track, lesson, progress, weekly }: {
             <div className="badge badge-accent mt-1" style={{ fontSize: "10px", padding: "2px 8px" }}>{track}</div>
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-sm font-bold" style={{ color: "var(--accent)" }}>{weekly}</div>
-          <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>classes/wk</div>
-        </div>
+        {weekly ? (
+          <div className="text-right">
+            <div className="text-sm font-bold" style={{ color: "var(--accent)" }}>{weekly}</div>
+            <div className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>classes/wk</div>
+          </div>
+        ) : null}
       </div>
 
       <div className="text-sm mb-3" style={{ color: "var(--text-secondary)" }}>{lesson}</div>

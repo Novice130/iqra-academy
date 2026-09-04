@@ -17,23 +17,86 @@
   --color-gray: #636e72;
 }
 
-/* ── Design-system CSS variables ──────────────────────────────────────── */
+/* ── Phase 8 Design-system Tokens & Apple Glass Materials ─────────────────── */
 
 :root {
-  --bg-primary: #fdfbf7;
-  --bg-secondary: #f5f0e8;
+  /* Color system */
+  --app-bg: #F5F7FA;
+  --bg-primary: #F5F7FA;
+  --bg-secondary: #EBF0F5;
   --bg-elevated: #ffffff;
-  --text-primary: #2d3436;
-  --text-secondary: #636e72;
-  --text-tertiary: #9ca3af;
-  --accent: #5c7c6f;
-  --accent-hover: #3d5a4c;
-  --accent-light: rgba(92, 124, 111, 0.1);
-  --border: #e2ddd5;
-  --border-focus: #5c7c6f;
-  --radius: 10px;
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
+  --text-primary: #17202A;
+  --text-secondary: #5A6578;
+  --text-tertiary: #8E9CAE;
+  --accent-blue: #0A84FF;
+  --accent: #0A84FF;
+  --accent-hover: #0070E0;
+  --accent-light: rgba(10, 132, 255, 0.12);
+  --color-success: #30D158;
+  --color-warning: #FF9F0A;
+  --color-danger: #FF453A;
+  --border: rgba(0, 0, 0, 0.08);
+  --border-focus: #0A84FF;
+
+  /* Meeting / Apple Glass Tokens */
+  --meeting-bg: #090B0F;
+  --glass-surface: rgba(28, 32, 40, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.16);
+  --glass-blur: 24px;
+  --glass-saturate: 160%;
+  --glass-shadow: 0 18px 60px rgba(0, 0, 0, 0.32);
+
+  /* Radius Tokens */
+  --radius: 12px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-dialog: 22px;
+  --radius-dock: 22px;
+
+  /* Target & Dimensions */
+  --touch-target-min: 44px;
+  --class-action-min: 48px;
+  --content-max-width: 1440px;
+
+  /* Grid & Spacing */
+  --grid-base: 4px;
+  --spacing-8: 8px;
+  --spacing-12: 12px;
+  --spacing-16: 16px;
+  --spacing-24: 24px;
+  --spacing-32: 32px;
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+/* Reduced transparency fallback */
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --glass-surface: #1c2028;
+    --glass-border: #2e3440;
+  }
+  .glass-surface,
+  .lk-chat,
+  .app-sheet {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: #1c2028 !important;
+  }
+}
+
+/* Reduced motion disables scale/parallax/reaction travel */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .animate-float-reaction,
+  .animate-youtube-like {
+    animation: none !important;
+  }
 }
 
 html {

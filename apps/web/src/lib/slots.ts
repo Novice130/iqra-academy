@@ -300,6 +300,7 @@ export async function generateSlots(opts: GenerateSlotsOptions): Promise<Slot[]>
     .from(sessions)
     .where(
       and(
+        eq(sessions.orgId, opts.orgId),
         inArray(sessions.teacherId, teacherIds),
         inArray(sessions.status, ["SCHEDULED", "IN_PROGRESS"]),
         lt(sessions.scheduledStart, to),
@@ -316,6 +317,7 @@ export async function generateSlots(opts: GenerateSlotsOptions): Promise<Slot[]>
     .from(teacherTimeOff)
     .where(
       and(
+        eq(teacherTimeOff.orgId, opts.orgId),
         inArray(teacherTimeOff.teacherId, teacherIds),
         lt(teacherTimeOff.startsAt, to),
         gte(teacherTimeOff.endsAt, from)
