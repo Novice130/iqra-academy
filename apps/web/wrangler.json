@@ -19,6 +19,20 @@
       "bucket_name": "novicetutor-app"
     }
   ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "AVAILABILITY_HUB",
+        "class_name": "AvailabilityHub"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["AvailabilityHub"]
+    }
+  ],
   // Workers Logs. Without this an "exceeded resource limits" (1102) burst
   // leaves nothing behind but request counts in analytics — the August 6/7
   // outages had to be traced by guessing at paths. Sampling stays at 1 so a

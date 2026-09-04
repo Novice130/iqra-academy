@@ -15,6 +15,8 @@ import { and, eq, desc } from "drizzle-orm";
 import { getQuotaStatus, consumeQuota } from "@/lib/quota";
 import { handleApiError, NotFoundError, BusinessRuleError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 
 const bookingSchema = z.object({
   sessionId: z.string().min(1),
@@ -135,6 +137,8 @@ export async function POST(request: NextRequest) {
           target: `session:${sessionId}`,
           ipAddress: getClientIp(request.headers),
         });
+
+        afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
 
         return NextResponse.json({ success: true, message: "Class booked successfully!" }, { status: 201 });
       });

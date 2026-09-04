@@ -28,6 +28,9 @@ const createSchema = z.object({
 });
 
 import { assertTeacherInOrg } from "@/lib/session-access";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 
 function targetTeacherId(ctx: AuthContext, requested?: string | null): string {
   if (!requested || requested === ctx.userId) return ctx.userId;
@@ -84,13 +87,27 @@ export async function POST(request: NextRequest) {
         throw new BusinessRuleError("Time off must end after it starts.");
       }
 
-      return await withRLS(ctx, async (tx) => {
+      const res = await withRLS(ctx, async (tx) => {
         const [row] = await tx
           .insert(teacherTimeOff)
           .values({ orgId: teacher.orgId, teacherId, startsAt, endsAt, reason: data.reason })
           .returning();
+
+        await insertSchedulingEvent(tx, {
+          orgId: teacher.orgId,
+          teacherId,
+          actorId: ctx.userId,
+          type: "time_off.changed",
+          aggregateType: "teacher_time_off",
+          aggregateId: row.id,
+        });
+
         return NextResponse.json({ timeOff: row }, { status: 201 });
       });
+
+      afterResponse(drainOutbox({ orgId: teacher.orgId }).catch(() => {}));
+
+      return res;
     } catch (error) {
       return handleApiError(error);
     }
@@ -107,7 +124,7 @@ export async function DELETE(request: NextRequest) {
       const id = new URL(request.url).searchParams.get("id");
       if (!id) throw new BusinessRuleError("An id is required.");
 
-      return await withRLS(ctx, async (tx) => {
+      const res = await withRLS(ctx, async (tx) => {
         const existing = await tx.query.teacherTimeOff.findFirst({
           where: eq(teacherTimeOff.id, id),
         });
@@ -116,8 +133,22 @@ export async function DELETE(request: NextRequest) {
         targetTeacherId(ctx, existing.teacherId);
 
         await tx.delete(teacherTimeOff).where(eq(teacherTimeOff.id, id));
+
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: existing.teacherId,
+          actorId: ctx.userId,
+          type: "time_off.changed",
+          aggregateType: "teacher_time_off",
+          aggregateId: id,
+        });
+
         return NextResponse.json({ success: true });
       });
+
+      afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
+
+      return res;
     } catch (error) {
       return handleApiError(error);
     }

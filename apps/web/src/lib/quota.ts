@@ -48,6 +48,7 @@ import {
   studentProfiles,
 } from "@/db/schema";
 import { startOfWeek, endOfWeek } from "date-fns";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 
 /**
  * Does this tier hand each child their own weekly allowance?
@@ -288,6 +289,18 @@ export async function consumeQuota(
         sessionId,
         status: "CONFIRMED",
       });
+
+      if (session.teacherId) {
+        await insertSchedulingEvent(tx, {
+          orgId,
+          teacherId: session.teacherId,
+          actorId: userId,
+          type: "booking.created",
+          aggregateType: "booking",
+          aggregateId: sessionId,
+        });
+      }
+
       return true;
     }
 
@@ -330,6 +343,17 @@ export async function consumeQuota(
       sessionId,
       status: "CONFIRMED",
     });
+
+    if (session.teacherId) {
+      await insertSchedulingEvent(tx, {
+        orgId,
+        teacherId: session.teacherId,
+        actorId: userId,
+        type: "booking.created",
+        aggregateType: "booking",
+        aggregateId: sessionId,
+      });
+    }
 
     // Update the entitlement cache
     await tx

@@ -28,7 +28,10 @@ import { sendCallPush, sendPushToUsers } from "@/lib/fcm";
 import { sendWebPushToUsers } from "@/lib/webpush";
 import { createId } from "@paralleldrive/cuid2";
 import { and, asc, desc, eq, gt, inArray, lt, ne, or } from "drizzle-orm";
-import { NotFoundError, ForbiddenError } from "@/lib/errors";
+import { ForbiddenError, NotFoundError } from "@/lib/errors";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 
 export { EARLY_JOIN_MS, LATE_JOIN_MS, LIVE_WINDOW_MS, SIBLING_WINDOW_MS };
 
@@ -222,14 +225,27 @@ export async function startScheduledOccurrence(params: {
   const roomName = session.videoRoomName || generateRoomName(sessionId);
 
   if (session.status !== "IN_PROGRESS") {
-    await db
-      .update(sessions)
-      .set({
-        status: "IN_PROGRESS",
-        actualStart: session.actualStart ?? now,
-        videoRoomName: roomName,
-      })
-      .where(eq(sessions.id, sessionId));
+    await db.transaction(async (tx) => {
+      await tx
+        .update(sessions)
+        .set({
+          status: "IN_PROGRESS",
+          actualStart: session.actualStart ?? now,
+          videoRoomName: roomName,
+        })
+        .where(eq(sessions.id, sessionId));
+
+      await insertSchedulingEvent(tx, {
+        orgId,
+        teacherId,
+        actorId: teacherId,
+        type: "class.live",
+        aggregateType: "session",
+        aggregateId: sessionId,
+      });
+    });
+
+    afterResponse(drainOutbox({ orgId }).catch(() => {}));
   }
 
   // Notify booked students who are not yet in the room
@@ -293,32 +309,44 @@ export async function createInstantMeeting(params: {
   const roomName = generateRoomName(sessionId);
   const sessionTitle = title || `Instant Meeting with ${teacher.name}`;
 
-  await db.insert(sessions).values({
-    id: sessionId,
-    orgId,
-    teacherId,
-    type: "INDIVIDUAL",
-    origin: "INSTANT",
-    status: "IN_PROGRESS",
-    title: sessionTitle,
-    scheduledStart: now,
-    scheduledEnd: end,
-    actualStart: now,
-    consumesQuota: false,
-    videoRoomName: roomName,
-  });
-
   let addedStudents: { studentProfileId: string; userId: string; name: string }[] = [];
+  let profiles: any[] = [];
   if (studentProfileIds.length > 0) {
-    const profiles = await db.query.studentProfiles.findMany({
+    profiles = await db.query.studentProfiles.findMany({
       where: and(
         inArray(studentProfiles.id, studentProfileIds),
         eq(studentProfiles.orgId, orgId)
       ),
     });
+  }
+
+  await db.transaction(async (tx) => {
+    await tx.insert(sessions).values({
+      id: sessionId,
+      orgId,
+      teacherId,
+      type: "INDIVIDUAL",
+      origin: "INSTANT",
+      status: "IN_PROGRESS",
+      title: sessionTitle,
+      scheduledStart: now,
+      scheduledEnd: end,
+      actualStart: now,
+      consumesQuota: false,
+      videoRoomName: roomName,
+    });
+
+    await insertSchedulingEvent(tx, {
+      orgId,
+      teacherId,
+      actorId: teacherId,
+      type: "class.live",
+      aggregateType: "session",
+      aggregateId: sessionId,
+    });
 
     if (profiles.length > 0) {
-      await db.insert(bookings).values(
+      await tx.insert(bookings).values(
         profiles.map((p) => ({
           id: createId(),
           orgId,
@@ -328,11 +356,27 @@ export async function createInstantMeeting(params: {
           status: "CONFIRMED" as const,
         }))
       );
-      addedStudents = profiles.map((p) => ({
-        studentProfileId: p.id,
-        userId: p.userId,
-        name: p.name,
-      }));
+      for (const p of profiles) {
+        await insertSchedulingEvent(tx, {
+          orgId,
+          teacherId,
+          actorId: teacherId,
+          type: "booking.created",
+          aggregateType: "booking",
+          aggregateId: p.id,
+        });
+      }
+    }
+  });
+
+  afterResponse(drainOutbox({ orgId }).catch(() => {}));
+
+  if (profiles.length > 0) {
+    addedStudents = profiles.map((p) => ({
+      studentProfileId: p.id,
+      userId: p.userId,
+      name: p.name,
+    }));
 
       const message = `${teacher.name} started the class. Join now.`;
       const studentUserIds = [...new Set(profiles.map((p) => p.userId))];
@@ -355,7 +399,6 @@ export async function createInstantMeeting(params: {
         sessionId,
       });
     }
-  }
 
   const token = await generateLiveKitToken({
     roomName,

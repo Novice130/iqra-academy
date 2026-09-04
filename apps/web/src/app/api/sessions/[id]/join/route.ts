@@ -28,11 +28,13 @@ import { and, eq, or } from "drizzle-orm";
 import { sessions, bookings, studentProfiles, sessionAttendance } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { generateLiveKitToken, generateRoomName, getRoomServiceClient, makeIdentity } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { resolveClassRoom } from "@/lib/class-room";
 import { ringClassStudents } from "@/lib/class-ring";
-import { afterResponse } from "@/lib/after-response";
 import { createTimings, withTimings } from "@/lib/server-timing";
 import { loadOrgSession, assertSessionViewer } from "@/lib/session-access";
 
@@ -347,10 +349,21 @@ export async function GET(
         }),
         isConnecting ? recordJoin().catch(() => {}) : Promise.resolve(),
         shouldMarkStarted
-          ? db
-              .update(sessions)
-              .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
-              .where(eq(sessions.id, session.id))
+          ? db.transaction(async (tx) => {
+              await tx
+                .update(sessions)
+                .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
+                .where(eq(sessions.id, session.id));
+
+              await insertSchedulingEvent(tx, {
+                orgId: session.orgId,
+                teacherId: session.teacherId,
+                actorId: ctx.userId,
+                type: "class.live",
+                aggregateType: "session",
+                aggregateId: session.id,
+              });
+            })
           : Promise.resolve(),
         !session.videoRoomName
           ? db
@@ -359,6 +372,10 @@ export async function GET(
               .where(eq(sessions.id, session.id))
           : Promise.resolve(),
       ]));
+
+      if (shouldMarkStarted) {
+        afterResponse(drainOutbox({ orgId: session.orgId }).catch(() => {}));
+      }
 
       return withTimings(NextResponse.json({
         roomName,

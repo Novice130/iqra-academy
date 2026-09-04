@@ -664,6 +664,7 @@ export const schedulingEvents = pgTable(
     createdAt: timestamp("created_at").notNull().defaultNow(),
     publishedAt: timestamp("published_at"),
     attempts: smallint("attempts").notNull().default(0),
+    version: integer("version").notNull().default(1),
   },
   (t) => [
     index("scheduling_events_unpublished_idx").on(t.publishedAt, t.createdAt),

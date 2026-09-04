@@ -5,14 +5,19 @@ export type SchedulingEventType =
   | 'time_off.changed'
   | 'booking.created'
   | 'booking.cancelled'
-  | 'session.changed';
+  | 'session.changed'
+  | 'class.live'
+  | 'class.ended';
 
 export interface SchedulingEventMessage {
-  type: SchedulingEventType;
   eventId: string;
+  orgId: string;
   teacherId: string;
+  actorId: string;
+  type: SchedulingEventType;
   aggregateId: string | null;
   committedAt: string;
+  version: number;
 }
 
 export interface RealtimeClaims {
@@ -25,11 +30,13 @@ export interface RealtimeClaims {
 export type ClientRealtimeMessage =
   | { type: 'subscribe'; teacherId: string | null }
   | { type: 'presence'; foreground: boolean }
-  | { type: 'heartbeat' };
+  | { type: 'heartbeat' }
+  | { type: 'resync' };
 
 export type ServerRealtimeMessage =
   | { type: 'ready' }
   | SchedulingEventMessage
   | { type: 'presence.snapshot'; teachers: Record<string, boolean> }
   | { type: 'presence.changed'; teacherId: string; online: boolean }
-  | { type: 'resync.required' };
+  | { type: 'resync.required' }
+  | { type: 'error'; message: string };

@@ -21,6 +21,8 @@ import { classRosterUserIds } from "@/lib/class-ring";
 import { sendClassEndedPush } from "@/lib/fcm";
 import { afterResponse } from "@/lib/after-response";
 import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 
 export async function POST(
   request: NextRequest,
@@ -38,11 +40,26 @@ export async function POST(
 
       const endedAt = new Date();
 
-      if (session.status === "IN_PROGRESS") {
-        await db
-          .update(sessions)
-          .set({ status: "COMPLETED", actualEnd: endedAt })
-          .where(eq(sessions.id, sessionId));
+      if (session.status === "IN_PROGRESS" || session.status === "SCHEDULED") {
+        await db.transaction(async (tx) => {
+          await tx
+            .update(sessions)
+            .set({ status: "COMPLETED", actualEnd: endedAt })
+            .where(eq(sessions.id, sessionId));
+
+          if (session.teacherId) {
+            await insertSchedulingEvent(tx, {
+              orgId: session.orgId,
+              teacherId: session.teacherId,
+              actorId: ctx.userId,
+              type: "class.ended",
+              aggregateType: "session",
+              aggregateId: sessionId,
+            });
+          }
+        });
+
+        afterResponse(drainOutbox({ orgId: session.orgId }).catch(() => {}));
       }
 
       // The class is over, so nobody is still in it. Anyone whose own leave

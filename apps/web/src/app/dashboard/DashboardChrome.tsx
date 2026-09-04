@@ -15,6 +15,7 @@ import MeetingNotificationBanner from "./MeetingNotificationBanner";
 import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
 import PushRegistrar from "./PushRegistrar";
+import TeacherAvailabilityModal from "@/components/TeacherAvailabilityModal";
 import { authClient } from "@/lib/auth-client";
 
 interface DashboardUser {
@@ -371,6 +372,7 @@ export default function DashboardChrome({
 
         {!isTeachingRole && <LiveClassRibbon />}
         <MeetingNotificationBanner />
+        <TeacherAvailabilityModal />
         <div className="flex-1 overflow-auto">{children}</div>
       </main>
     </div>
@@ -437,6 +439,7 @@ function AppChrome({
 
       {!isTeachingRole && <LiveClassRibbon />}
       <MeetingNotificationBanner />
+      <TeacherAvailabilityModal />
 
       <main className={`app-scroll${isHome ? " is-home" : ""}`}>{children}</main>
 

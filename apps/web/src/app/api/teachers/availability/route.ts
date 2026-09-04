@@ -39,6 +39,9 @@ import { requireRole, ROLE_HIERARCHY, type AuthContext } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { isValidZone } from "@/lib/zones";
 import { assertTeacherInOrg } from "@/lib/session-access";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { z } from "zod";
 
 /** "08:00:00", "08:00", and "24:00" (end of day) */
@@ -229,7 +232,18 @@ export async function POST(req: NextRequest) {
             },
           });
         }
+
+        await insertSchedulingEvent(tx, {
+          orgId: targetOrgId,
+          teacherId,
+          actorId: ctx.userId,
+          type: "availability.changed",
+          aggregateType: "teacher_availability",
+          aggregateId: teacherId,
+        });
       });
+
+      afterResponse(drainOutbox({ orgId: targetOrgId }).catch(() => {}));
 
       return NextResponse.json({ success: true, teacherId, timezone: data.timezone });
     } catch (error) {
@@ -251,14 +265,27 @@ export async function DELETE(request: NextRequest) {
 
       const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
 
-      await db
-        .delete(teacherAvailability)
-        .where(
-          and(
-            eq(teacherAvailability.teacherId, teacherId),
-            eq(teacherAvailability.orgId, teacher.orgId)
-          )
-        );
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(teacherAvailability)
+          .where(
+            and(
+              eq(teacherAvailability.teacherId, teacherId),
+              eq(teacherAvailability.orgId, teacher.orgId)
+            )
+          );
+
+        await insertSchedulingEvent(tx, {
+          orgId: teacher.orgId,
+          teacherId,
+          actorId: ctx.userId,
+          type: "availability.changed",
+          aggregateType: "teacher_availability",
+          aggregateId: teacherId,
+        });
+      });
+
+      afterResponse(drainOutbox({ orgId: teacher.orgId }).catch(() => {}));
 
       return NextResponse.json({ success: true, teacherId });
     } catch (error) {

@@ -66,10 +66,13 @@ export default function MeetingNotificationBanner() {
           }
         }
 
-        // Live classes are surfaced by LiveClassRibbon. Exclude MEETING_STARTED here
-        // so two duplicate "join class" banners are never shown stacked on top of each other.
+        // Live classes are surfaced by LiveClassRibbon and schedule changes by TeacherAvailabilityModal.
+        // Exclude MEETING_STARTED and AVAILABILITY_CHANGED here to avoid duplicate or conflicting banners.
         const next = notifs.find(
-          (n) => n.type !== "MEETING_STARTED" && !dismissedIds.current.has(n.id)
+          (n) =>
+            n.type !== "MEETING_STARTED" &&
+            n.type !== "AVAILABILITY_CHANGED" &&
+            !dismissedIds.current.has(n.id)
         );
         setNotification(next || null);
       } catch {

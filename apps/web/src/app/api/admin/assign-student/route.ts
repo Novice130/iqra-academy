@@ -14,6 +14,9 @@ import { createId } from "@paralleldrive/cuid2";
 import { and, eq, inArray, lt, gt } from "drizzle-orm";
 import { assertTeacherInOrg, assertProfileInOrg } from "@/lib/session-access";
 import { getClientIp } from "@/lib/audit";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { z } from "zod";
 
 const assignStudentSchema = z.object({
@@ -109,15 +112,23 @@ export async function POST(request: NextRequest) {
           status: "CONFIRMED",
         });
 
-        // Insert scheduling outbox event
-        await tx.insert(schedulingEvents).values({
-          id: createId(),
+        // Insert scheduling outbox events
+        await insertSchedulingEvent(tx, {
           orgId: targetOrgId,
           teacherId: teacher.id,
           actorId: ctx.userId,
-          type: "session.scheduled",
+          type: "session.changed",
           aggregateType: "session",
           aggregateId: sessionId,
+        });
+
+        await insertSchedulingEvent(tx, {
+          orgId: targetOrgId,
+          teacherId: teacher.id,
+          actorId: ctx.userId,
+          type: "booking.created",
+          aggregateType: "booking",
+          aggregateId: bookingId,
         });
 
         // Insert audit log
@@ -137,6 +148,8 @@ export async function POST(request: NextRequest) {
           ipAddress: getClientIp(request.headers),
         });
       });
+
+      afterResponse(drainOutbox({ orgId: targetOrgId }).catch(() => {}));
 
       return NextResponse.json({
         success: true,

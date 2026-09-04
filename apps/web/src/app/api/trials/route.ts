@@ -36,6 +36,9 @@ import { logAudit, getClientIp } from "@/lib/audit";
 import { findOfferedSlot } from "@/lib/slots";
 import { notify, getAdminRecipients } from "@/lib/notify";
 import { sendTrialRequestEmail } from "@/lib/email";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 
 const createSchema = z.object({
   teacherId: z.string().min(1),
@@ -147,6 +150,24 @@ export async function POST(request: NextRequest) {
           })
           .returning();
 
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: data.teacherId,
+          actorId: ctx.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: session.id,
+        });
+
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: data.teacherId,
+          actorId: ctx.userId,
+          type: "booking.created",
+          aggregateType: "booking",
+          aggregateId: booking.id,
+        });
+
         const teacher = await tx.query.users.findFirst({
           where: eq(users.id, data.teacherId),
           columns: { id: true, name: true, email: true },
@@ -154,6 +175,8 @@ export async function POST(request: NextRequest) {
 
         return { session, booking, student, teacher };
       });
+
+      afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
 
       await logAudit({
         orgId: ctx.orgId,

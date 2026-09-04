@@ -11,8 +11,9 @@
  * was started and stays up for as long as the class is running.
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSchedulingRealtime } from '@/lib/useSchedulingRealtime';
 
 /**
  * Used until the server has answered once, and by nothing else.
@@ -33,6 +34,33 @@ interface LiveClass {
 
 export default function LiveClassRibbon() {
   const [live, setLive] = useState<LiveClass | null>(null);
+
+  const checkLive = useCallback(async () => {
+    try {
+      const res = await fetch('/api/students/live-class');
+      if (res.ok) {
+        const data = await res.json();
+        setLive(data.live || null);
+      }
+    } catch {
+      // Best-effort
+    }
+  }, []);
+
+  useSchedulingRealtime({
+    onClassLive: () => {
+      checkLive();
+    },
+    onClassEnded: () => {
+      checkLive();
+    },
+    onSessionChanged: () => {
+      checkLive();
+    },
+    onResyncRequired: () => {
+      checkLive();
+    },
+  });
 
   useEffect(() => {
     let cancelled = false;

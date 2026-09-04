@@ -238,4 +238,38 @@
 - **Key files**: `apps/web/src/lib/meeting-service.ts`, `apps/web/src/app/api/sessions/[id]/join/route.ts`, `apps/web/src/app/api/calls/route.ts`, `apps/web/src/app/api/teachers/call-now/route.ts`, `apps/web/src/app/api/teachers/instant-meeting/route.ts`, `apps/web/src/app/api/students/live-class/route.ts`, `apps/web/src/app/dashboard/session/[id]/page.tsx`, `apps/web/src/app/dashboard/LiveClassRibbon.tsx`, `apps/web/src/app/dashboard/teacher/TodaySchedule.tsx`, `apps/web/tests/api/lifecycle.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (24 passed, exit 0).
 
+### Phase 4 — Secure Realtime Scheduling (2026-09-04)
+- **What was done**:
+  - **Protocol Hardening**: Hardened `src/realtime/protocol.ts` to include all 8 required message fields (`eventId`, `orgId`, `teacherId`, `actorId`, `type`, `aggregateId`, `committedAt`, `version`) and all 7 canonical event types (`availability.changed`, `time_off.changed`, `booking.created`, `booking.cancelled`, `session.changed`, `class.live`, `class.ended`).
+  - **Database Outbox Schema & Migration**: Added `version: integer("version").notNull().default(1)` to `scheduling_events` table in `src/db/schema.ts`. Generated reversible migration `drizzle/0008_scheduling_events_version.sql` and rollback script `drizzle/rollback/0008_scheduling_events_version_rollback.sql`.
+  - **Transactional Outbox Write Path**: Wired `insertSchedulingEvent` inside the primary database transaction across all state-mutating paths prior to commit:
+    - Teacher availability create/delete (`/api/teachers/availability`)
+    - Teacher time-off create/delete (`/api/teachers/time-off`)
+    - Student booking creation & cancellation (`quota.ts` & `/api/students/bookings`)
+    - Admin assign student (`/api/admin/assign-student`)
+    - Trial bookings (`/api/trials`)
+    - Instant meeting creation & scheduled class start (`meeting-service.ts`)
+    - Session join & end (`/api/sessions/[id]/join` & `/api/sessions/[id]/end`)
+    - Enforced invariant: zero events published before transaction commit.
+  - **Durable Object AvailabilityHub Security**:
+    - Partitioned strictly by `orgId` (`idFromName(orgId)`), preventing cross-tenant leakage.
+    - Verifies cryptographic JWT ticket itself using `verifyRealtimeTicket` (HS256, 2-minute expiration, claims: `userId, orgId, role, teacherId`); completely rejects raw `X-Realtime-Claims`.
+    - Protected `/publish` with `Authorization: Bearer <secret>` and rejected cross-org payloads (`403`).
+    - Validated socket subscriptions (teachers cannot subscribe to other teachers' streams).
+    - Scoped presence snapshots and heartbeat updates strictly to tenant-local sockets.
+  - **Outbox Publisher & Delivery**:
+    - Created `drainOutbox` in `src/lib/realtime/outbox-publisher.ts` with retry counter and dead-letter handling (stops after 5 attempts).
+    - Exposed authenticated trigger route `POST /api/realtime/drain-outbox` with Bearer token authentication.
+    - Configured non-blocking execution via `afterResponse()` for Cloudflare Workers and in-memory local hub fallback for tests and development.
+    - Updated `wrangler.json` with DO namespace and migration bindings; patched `scripts/cf-build.cjs` to export `AvailabilityHub`.
+  - **Client Hook & UI Integration**:
+    - Implemented `useSchedulingRealtime.ts` client hook with ticket fetching, exponential backoff (1s–30s), visibility-aware heartbeats (30s), event deduplication (`eventId`/`version`), slot/schedule query invalidation, and reconnect resync.
+    - Implemented safety polling fallback that suspends during active socket connection and never polls while hidden.
+    - Integrated hook into student booking page (`/dashboard/booking/page.tsx`) and `LiveClassRibbon.tsx`.
+    - Built `TeacherAvailabilityModal.tsx` for informational display of before/after availability diffs with single "Acknowledge" button (marking notification as read); excluded `AVAILABILITY_CHANGED` from generic banner.
+  - **Automated Test Suite**:
+    - Created `tests/api/realtime.spec.ts` covering JWT ticket issuance and claims, Hub DO partitioning and subscription authorization, protocol message structure, transactional outbox insertion, publisher retry and dead-letter limits, and informational modal acknowledgement.
+- **Key files**: `apps/web/src/realtime/protocol.ts`, `apps/web/src/realtime/AvailabilityHub.ts`, `apps/web/src/lib/realtime/ticket.ts`, `apps/web/src/lib/realtime/outbox.ts`, `apps/web/src/lib/realtime/outbox-publisher.ts`, `apps/web/src/lib/useSchedulingRealtime.ts`, `apps/web/src/components/TeacherAvailabilityModal.tsx`, `apps/web/src/app/api/realtime/**`, `apps/web/drizzle/0008_scheduling_events_version.sql`, `apps/web/tests/api/realtime.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test:api` (38 passed, 2 skipped, exit 0).
+
 

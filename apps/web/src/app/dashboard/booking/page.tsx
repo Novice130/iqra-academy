@@ -21,6 +21,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import LocalTime, { formatInZone, useViewerTimeZone } from "@/components/LocalTime";
+import { useSchedulingRealtime } from "@/lib/useSchedulingRealtime";
 
 interface Teacher {
   id: string;
@@ -181,6 +182,22 @@ export default function BookingPage() {
       if (bc) bc.close();
     };
   }, [teacherId, fetchSlots]);
+
+  useSchedulingRealtime({
+    teacherId: teacherId || null,
+    onAvailabilityChanged: () => {
+      fetchSlots(true);
+    },
+    onTimeOffChanged: () => {
+      fetchSlots(true);
+    },
+    onBookingChanged: () => {
+      fetchSlots(true);
+    },
+    onResyncRequired: () => {
+      fetchSlots(true);
+    },
+  });
 
   /**
    * Group by the viewer's calendar day, not by UTC's. A 7:30 PM Chicago class

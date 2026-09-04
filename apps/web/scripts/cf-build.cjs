@@ -147,6 +147,34 @@ if (buildResult.status === 0) {
   }
 }
 
+// Ensure AvailabilityHub Durable Object is exported from .open-next/worker.js
+function patchWorkerExports() {
+  const workerFile = path.join(root, ".open-next", "worker.js");
+  if (fs.existsSync(workerFile)) {
+    const hubDistDir = path.join(root, ".open-next", "cloudflare-templates");
+    fs.mkdirSync(hubDistDir, { recursive: true });
+    const hubBundlePath = path.join(hubDistDir, "AvailabilityHub.js");
+    
+    console.log("🔨 Bundling AvailabilityHub Durable Object for Cloudflare worker...");
+    spawnSync("npx", [
+      "esbuild",
+      path.join(root, "src/realtime/AvailabilityHub.ts"),
+      "--bundle",
+      "--format=esm",
+      "--platform=node",
+      `--outfile=${hubBundlePath}`,
+    ], { stdio: "inherit", shell: true });
+
+    let content = fs.readFileSync(workerFile, "utf8");
+    if (!content.includes("export { AvailabilityHub }")) {
+      content += '\nexport { AvailabilityHub } from "./cloudflare-templates/AvailabilityHub.js";\n';
+      fs.writeFileSync(workerFile, content, "utf8");
+      console.log("✅ Successfully patched .open-next/worker.js to export AvailabilityHub!");
+    }
+  }
+}
+patchWorkerExports();
+
 // Step 4: Deploy with wrangler (Skip if inside Cloudflare's automated Git CI, which runs wrangler deploy itself)
 if (process.env.CF_PAGES || process.env.CI || process.env.CLOUDFLARE_BUILD_ENVIRONMENT) {
   console.log("ℹ️ Running inside Cloudflare CI — skipping internal wrangler deploy (Cloudflare will deploy automatically).");
