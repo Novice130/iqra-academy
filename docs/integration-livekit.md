@@ -43,21 +43,21 @@ and slot, identically for every caller, and everyone joins the room named after
 3. Otherwise it isn't due — the session page shows a lobby rather than opening
    a room for a class that isn't today.
 
-**Whoever arrives first opens the room, students included.** A student half an
-hour early is *in* the room, so the next student finds them there and the
-teacher joins them on arrival. Opening it marks the class `IN_PROGRESS`, which
-is what the admin live-classes panel and the students' ribbon key off. An
-admin dropping in to observe is excluded — they are neither teaching nor
-attending, and their visit must not mark a class as begun.
+**Perimeter Security: Only the assigned teacher's arrival opens the room.**
+Students arriving early wait in the lobby (`waitingForTeacher: true`) until the
+assigned teacher connects. Only teacher arrival marks the session `IN_PROGRESS`
+and stamps `actualStart`. This ensures that the admin live-classes monitor and
+students' live ribbons reflect genuine, occupied classes. An admin dropping in to
+observe is an observer — their visit never marks a class as begun.
 
-A student redirected onto a row they were never booked on is auto-booked there
-(roster-checked: the teacher must have taught them before). Without that they
-hit a 403 and bounce back to their own empty room, which is the bug itself.
+**No link-possession auto-booking.** A student must hold a confirmed booking on
+the class occurrence (`assertSessionViewer`). Possession of a session URL no longer
+auto-books unassigned visitors or auto-mints LiveKit tokens; unbooked visitors
+receive 403 Forbidden.
 
-`POST /api/teachers/instant-meeting` follows the same rule: it resumes a class
-already running, else starts the one scheduled around now, else creates an
-ad-hoc session. "Instant" does not mean "new" — minting a fresh row is what
-put the students somewhere else. It takes no arguments and the UI is one tap.
+`POST /api/teachers/instant-meeting` converges onto any active or due scheduled
+occurrence via `meeting-service.ts`, else creates an ad-hoc session with origin
+`INSTANT`. "Instant" does not mean "new" — minting duplicate rooms is prevented.
 
 ## Joining, and the two kinds of "host"
 

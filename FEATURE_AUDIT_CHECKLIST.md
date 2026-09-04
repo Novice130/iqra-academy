@@ -172,9 +172,9 @@
 | 6 | Admin information architecture | ✅ Complete | 2026-09-04 | See below |
 | 7 | Meeting control parity | ✅ Complete | 2026-09-04 | See below |
 | 8 | Visual system & every active page | ✅ Complete | 2026-09-04 | See below |
-| 9 | Native iOS & Android | ⬜ Pending | — | — |
-| 10 | Tests & CI | ⬜ Pending | — | — |
-| 11 | Docs & rollout | ⬜ Pending | — | — |
+| 9 | Native iOS & Android | ✅ Complete | 2026-09-05 | See below |
+| 10 | Tests & CI | ✅ Complete | 2026-09-05 | See below |
+| 11 | Docs & rollout | ✅ Complete | 2026-09-05 | See below |
 
 ### Phase 0 — Safe Baseline (2026-09-04)
 - **What was done**:
@@ -437,6 +437,76 @@
     - Created web API test suite in `apps/web/tests/api/mobile-parity.spec.ts` (7 tests): verifying assetlinks, apple-app-site-association, next.config headers, release signing enforcement, entitlements, and UA regex rules.
 - **Key files**: `apps/mobile/lib/shell/web_shell.dart`, `apps/mobile/lib/main.dart`, `apps/mobile/android/app/src/main/kotlin/com/novicetutor/app/MainActivity.kt`, `apps/mobile/android/app/build.gradle.kts`, `apps/mobile/ios/Runner/Runner.entitlements`, `apps/mobile/ios/Runner.xcodeproj/project.pbxproj`, `apps/mobile/ios/Runner/Info.plist`, `apps/mobile/ios/Runner/GoogleService-Info.plist.example`, `apps/web/src/components/video/CallControlBar.tsx`, `apps/web/public/.well-known/assetlinks.json`, `apps/web/public/.well-known/apple-app-site-association`, `apps/web/next.config.ts`, `apps/mobile/test/shell_test.dart`, `apps/web/tests/api/mobile-parity.spec.ts`.
 - **Verification**: `flutter analyze` (0 issues), `flutter test` (7 passed in `shell_test.dart`, 1 passed in `widget_test.dart`), `npm run test:api` (77 passed, 2 skipped, 1 expected mock fail, exit 0), `npm run test` (root turbo 80 passed, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+### Phase 10 — Tests and CI (2026-09-05)
+- **What was done**:
+  - **API/RBAC Automated Test Suite (`apps/web/tests/api/rbac-deep.spec.ts`)**:
+    - Automated cross-org denial for every admin route (`/api/admin/users`), teacher availability (`/api/teachers/availability`), teacher time-off (`/api/teachers/time-off`), slots (`/api/availability/slots`), assign student (`/api/admin/assign-student`), and meeting host tools (`/api/sessions/[id]/host-tools`).
+    - Automated protected root super admin account safeguards (`syedamer130@gmail.com`): verifying that demotion attempts via PATCH, deletion attempts via DELETE, and impostor creation attempts via POST are strictly rejected with 403 Forbidden.
+    - Automated assignment validation, conflict detection, and transactional rollback:
+      - Validates rejection of start times in the past (400).
+      - Validates detection and rejection of overlapping teacher scheduled sessions (400) without orphaned rows.
+      - Validates detection and rejection of teacher time-off conflicts (400).
+      - Validates cross-org student profile and teacher mismatches (403).
+      - Verifies atomic transaction boundaries across sessions, bookings, schedulingEvents, and auditLogs.
+    - Automated room-wide volume authorization: verified assigned teacher can set global volume while unassigned students receive 403.
+    - Automated meeting collaboration models: validated relational integrity and tenant isolation for breakout sets, breakout rooms, breakout assignments, and whiteboards.
+    - Automated perimeter rejection: verified that all 12 mutating API routes reject unauthenticated requests with 401 or 403.
+  - **End-to-End Playwright Journeys (`apps/web/tests/e2e/`)**:
+    - `student-journey.spec.ts`: Unauthenticated redirection across 7 protected student routes (`/dashboard`, `/progress`, `/booking`, `/schedule`, `/chat`, `/billing`, `/settings`); 420px max glass auth card and password eye visibility toggle on `/login`; registration form; 12-digit code auto-formatting on `/join`; structured lobby states on `/join/[id]`; T-60 ClassActionButton lifecycle transitions (UPCOMING disabled at T-65 vs READY "Join Class" at T-55 vs LIVE "Join Live Class").
+    - `teacher-journey.spec.ts`: Unauthenticated redirection across all teacher sub-routes; teacher identity differentiation in `ClassActionButton` (assigned teacher gets "Start Class" / "Rejoin Class" while unassigned teachers receive observer/join states); strict enforcement that ad-hoc actions use "Instant Meeting" semantics, never "Start Class".
+    - `admin-journey.spec.ts`: Unauthenticated redirection across all 7 admin sub-routes; verified that unknown `/admin/*` paths render the dedicated `not-found.tsx` 404 page rather than the dashboard; verified admin information architecture enforcing live classes ONLY on overview with scheduled classes and teacher schedules on dedicated routes.
+    - `meeting-experience.spec.ts`: Enforces fullscreen canvas layout without dashboard chrome on `/dashboard/session/[id]`; asserts 9 canonical desktop dock positions ($\ge 768$px) and 5 visible compact mobile dock positions (<768px); asserts host tools action boundaries (mute_all, lock_meeting, end_class_for_everyone).
+    - `responsive-a11y.spec.ts`: Verified responsive geometry and zero horizontal overflow across 4 standard viewports (mobile 390x844, tablet 768x1024, desktop 1280x800, wide 1440x900); verified interactive buttons satisfy minimum touch target guidelines ($\ge 44$px / 40px); verified keyboard Tab navigation lands on accessible interactive elements.
+  - **Continuous Integration Pipeline (`.github/workflows/ci.yml`)**:
+    - Triggered on `master` branch pushes and pull requests.
+    - `web-quality-and-tests` job (Ubuntu): Node.js 20, npm ci, `npx tsc --noEmit` typecheck, `npm run lint`, database migration drift check (`drizzle-kit check`), Next.js production build (`npm run build`), Playwright Chromium install, automated test execution (`npm run test:api` and `npm run test:e2e`), and failure artifact upload.
+    - `mobile-android` job (Ubuntu): Java 17, Flutter stable, `flutter pub get`, `flutter analyze`, `flutter test`, and Android debug APK build (`flutter build apk --debug`).
+    - `mobile-ios` job (macOS-14): Flutter stable, Xcode, `flutter analyze`, `flutter test`, and iOS simulator build (`flutter build ios --simulator --no-codesign`).
+    - `ci-gate` job: Verifies that all web, Android, and iOS jobs succeed before permitting deployment.
+- **Key files**: `apps/web/tests/api/rbac-deep.spec.ts`, `apps/web/tests/e2e/student-journey.spec.ts`, `apps/web/tests/e2e/teacher-journey.spec.ts`, `apps/web/tests/e2e/admin-journey.spec.ts`, `apps/web/tests/e2e/meeting-experience.spec.ts`, `apps/web/tests/e2e/responsive-a11y.spec.ts`, `.github/workflows/ci.yml`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `flutter analyze` (0 issues), `flutter test` (8/8 passed), `npm run test:api` (90 passed, 2 skipped, 1 expected mock fail, exit 0), `npm run test:e2e` (28/28 passed, exit 0), `npm run test` (root turbo 126 tests passed across web and mobile, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+### Phase 11 — Docs & Rollout (2026-09-05)
+- **What was done**:
+  - **Canonical Source-of-Truth Documentation**:
+    - Created `docs/product-requirements.md` specifying core architecture, tenant isolation, RBAC hierarchy, scheduling engine, immediate availability publication, instant booking confirmation, secure realtime protocol, visual system tokens, staged rollout gates, rollback procedures, and operational telemetry thresholds.
+    - Created `docs/role-page-spec.md` specifying every active page across Student, Teacher, Org Admin, Super Admin, and Public roles, including layout contracts (`DashboardChrome`, `NavigationProgress`, streaming skeletons) and dedicated 404 behavior.
+    - Created `docs/meeting-controls.md` specifying the virtual stage geometry, center 3-button self-view pill, floating tiles clearance and magnetic snapping, desktop 9-position canonical bottom dock, mobile compact 5-position dock, device selectors, data channel reactions, platform-gated screen share, host moderation tools, interactive Quran whiteboard, captions, and room-wide volume gain control.
+  - **Operational Guide Alignment**:
+    - Updated `docs/integration-livekit.md`: Aligned room lifecycle with perimeter security rules (assigned teacher arrival stamps `actualStart` and marks `IN_PROGRESS`; early students wait in lobby), removed link-possession auto-booking claims (unbooked users receive 403), documented room locking (`isLocked`), and token claims.
+    - Updated `docs/mobile-app.md`: Documented Phase 9 parity including verified Android App Links and iOS Universal Links, hosted verification endpoints (`assetlinks.json`, `apple-app-site-association`), capability-gated screen sharing (Android MediaProjection bridge enabled; iOS hidden), dark theme visual tokens, and cookie jar authentication persistence.
+    - Updated `docs/attendance.md`: Documented teacher arrival stamping `actualStart` and breakout session attendance tracking (`breakout_room_name`, `breakout_context`).
+    - Updated `docs/timezones.md`: Documented `<LocalTime>` integration across student details, admin scheduled classes, and schedule matrices.
+  - **Archiving Legacy Documentation**:
+    - Created `docs/archive/` and archived historical snapshots: `docs/archive/task-checklist.md`, `docs/archive/walkthrough.md`, and `docs/archive/integration-calcom.md`.
+    - Created `docs/archive/README.md` indexing historical infrastructure and referencing canonical docs.
+  - **Rollout, Rollback & Telemetry Strategy**:
+    - Formulated 5-stage rollout progression (P0 security guards $\to$ UI/action state $\to$ realtime scheduling with polling fallback $\to$ meeting controls $\to$ collaboration tools).
+    - Defined rollback playbooks (backward-compatible database columns, `REALTIME_DISABLED=1` flag fallback, and reversible DDL migrations).
+    - Established alert thresholds for denied joins, cross-org attempts, outbox lag, dead-letter rows, and LiveKit session mismatches with strict zero-logging of credentials, tokens, or PII.
+- **Key files**: `docs/product-requirements.md`, `docs/role-page-spec.md`, `docs/meeting-controls.md`, `docs/integration-livekit.md`, `docs/mobile-app.md`, `docs/attendance.md`, `docs/timezones.md`, `docs/archive/README.md`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test` (root turbo 126 tests passed, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
+---
+
+## 🏁 Final Remediation Acceptance Checklist
+
+| Requirement / Invariant | Status | Verification Evidence |
+|---|:---:|---|
+| **No cross-tenant query or object-action path** | ✅ Pass | `tests/api/tenant-isolation.spec.ts` & `tests/api/rbac-deep.spec.ts` (all cross-org calls fail with 403/404) |
+| **No authenticated link-holder auto-booking** | ✅ Pass | `src/lib/session-access.ts` & `tenant-isolation.spec.ts` (unbooked users receive 403) |
+| **Immediate availability publication & acknowledgement popup** | ✅ Pass | `tests/api/realtime.spec.ts` & `TeacherAvailabilityModal.tsx` (publishes immediately, 1-click acknowledge) |
+| **Student/teacher blue action appears at exact T-60** | ✅ Pass | `tests/api/class-action.spec.ts` & `tests/e2e/student-journey.spec.ts` (UPCOMING at T-65 vs READY at T-55) |
+| **Instant Meeting wording & origin consistent everywhere** | ✅ Pass | `tests/api/data-model.spec.ts` & `tests/e2e/teacher-journey.spec.ts` (origin `INSTANT`, button `⚡ Instant Meeting`) |
+| **Admin home contains only occupied live classes** | ✅ Pass | `src/app/admin/page.tsx` & `tests/e2e/admin-journey.spec.ts` (zero future scheduled rows on `/admin`) |
+| **All supplied Zoom controls work at expected positions** | ✅ Pass | `CallControlBar.tsx` & `tests/e2e/meeting-experience.spec.ts` (9 desktop positions, 5 mobile positions) |
+| **Teacher room-wide volume affects every client with strict authority** | ✅ Pass | `tests/api/meeting-controls.spec.ts` & `tests/api/rbac-deep.spec.ts` (assigned teacher only, student receives 403) |
+| **Every active route has loading, responsive & accessible behavior** | ✅ Pass | 8 `loading.tsx` skeletons, `NavigationProgress.tsx`, `tests/e2e/responsive-a11y.spec.ts` |
+| **Flutter, Android & iOS advertise only working native capabilities** | ✅ Pass | `web_shell.dart`, `apps/mobile/test/shell_test.dart` (Android screenshare enabled; iOS share hidden) |
+| **Automated security, lifecycle, realtime, visual & native gates in CI** | ✅ Pass | `.github/workflows/ci.yml` (multi-platform CI: lint, tsc, migrations, build, playwright, android, ios, ci-gate) |
+
+
 
 
 

@@ -12,12 +12,14 @@ ever written a row to it**, and it structurally cannot answer the question that
 was asked, because its foreign key points at `student_profiles` — the teacher's
 arrival has no home in it.
 
-`sessions.actualStart` doesn't answer it either. That is stamped by *whoever
-walks in first*, student or teacher, which is deliberate (see "one class, one
-room") and useless as a record of when the teacher arrived.
+`sessions.actualStart` is stamped exclusively by the **assigned teacher's arrival**,
+which transitions the class to `IN_PROGRESS`. Early-arriving students wait in the
+lobby until the teacher connects.
 
 So: `session_attendance`, keyed on `user_id` with a `role` of
-`TEACHER | STUDENT | OBSERVER`, which covers all three uniformly. The old table
+`TEACHER | STUDENT | OBSERVER`, which covers all three uniformly. Rows also carry
+`breakout_room_name` and `breakout_context` when participants transition into
+breakout rooms, preserving parent occurrence attendance. The old table
 is left alone rather than migrated — nothing reads it, so nothing breaks.
 
 **One row per connection, append-only.** A student whose phone drops and who

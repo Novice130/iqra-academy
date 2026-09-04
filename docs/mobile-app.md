@@ -58,11 +58,14 @@ it:
   **Consequence: "Sign in with Google" cannot complete inside the app.** Email
   and password works. If Google sign-in on mobile matters, the fix is Custom
   Tabs plus a redirect back into the app, and it is not built.
-- **Offline screen and pull to refresh**, because a WebView's own failure page
-  is a Chrome error page with someone else's branding on it.
-- **Deep links.** `https://novicetutor.com/...` opens the app. Full
-  verification needs `/.well-known/assetlinks.json` on the site carrying this
-  app's signing fingerprint; until then Android shows a chooser, which works.
+- **Offline screen and pull to refresh**, styled with Apple visionOS dark tokens (`#090B0F` background, `#1C2028` glass container, `#0A84FF` retry button).
+- **Deep links & Universal Links.** Verified Android App Links and iOS Universal Links route directly into the WebView:
+  - Android: `/.well-known/assetlinks.json` configured for package `com.novicetutor.app`
+  - iOS: `/.well-known/apple-app-site-association` for App ID `TT3HQ774N4.com.novicetutor.app`
+  - Deep links to `/dashboard/session/*`, `/join/*`, `/dashboard/*` open the exact target path.
+- **Capability-Gated Screen Sharing.** Screen sharing is strictly platform-gated:
+  - Android sets User-Agent marker `NoviceTutorApp/1.2 (screenshare)` and uses native MediaProjection.
+  - iOS omits the marker (`nativeScreenShareSupported = false`); the Share button is completely hidden on iOS until a ReplayKit Broadcast Upload Extension is added.
 
 ## Push — the reason the app exists
 

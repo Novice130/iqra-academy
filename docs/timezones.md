@@ -51,8 +51,10 @@ wasn't. Check what the *app* renders before concluding a stored value is wrong.
 
 ## Where times are rendered
 
-Anything showing a session time should use `LocalTime` (or `formatInZone` for
+Anything showing a session time uses `LocalTime` (or `formatInZone` for
 strings): the student dashboard's next-class card, `TodaySchedule`, `WeekGrid`,
-and the session lobby. `date-fns` `format()` is still used for billing dates
-and message stamps, which are day-resolution and not class-critical — worth
-migrating if a complaint ever points there.
+the session lobby, teacher student details (`/dashboard/teacher/students/[id]`),
+and the admin scheduled classes matrix (`/admin/scheduled-classes`). All timestamps
+are client-formatted according to the viewer's explicit account timezone (`users.timezone`)
+or browser locale, guaranteeing midnight boundaries and daylight savings transitions
+render accurately without server UTC drift.
