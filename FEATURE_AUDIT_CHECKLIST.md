@@ -168,7 +168,7 @@
 | 3 | Canonical scheduling & meeting lifecycle | ✅ Complete | 2026-09-04 | See below |
 | 4 | Secure realtime scheduling | ✅ Complete | 2026-09-04 | See below |
 | 5 | Class action button & navigation responsiveness | ✅ Complete | 2026-09-04 | See below |
-| 6 | Admin information architecture | ⬜ Pending | — | — |
+| 6 | Admin information architecture | ✅ Complete | 2026-09-04 | See below |
 | 7 | Meeting control parity | ⬜ Pending | — | — |
 | 8 | Visual system & every active page | ⬜ Pending | — | — |
 | 9 | Native iOS & Android | ⬜ Pending | — | — |
@@ -306,6 +306,28 @@
     - Created `tests/api/class-action.spec.ts` covering T-60 boundary transition, role-specific labels, duration derivation, countdown formats, backward compatibility re-exports, and zero dead navigation on terminal states.
 - **Key files**: `apps/web/src/lib/class-action.ts`, `apps/web/src/components/ClassActionButton.tsx`, `apps/web/src/components/NavigationProgress.tsx`, `apps/web/src/app/dashboard/loading.tsx`, `apps/web/src/app/admin/loading.tsx`, `apps/web/src/app/dashboard/booking/loading.tsx`, `apps/web/src/app/dashboard/schedule/loading.tsx`, `apps/web/src/app/dashboard/attendance/loading.tsx`, `apps/web/src/app/dashboard/teacher/students/loading.tsx`, `apps/web/src/app/admin/invoices/loading.tsx`, `apps/web/src/app/dashboard/session/[id]/loading.tsx`, `apps/web/tests/api/class-action.spec.ts`.
 - **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test:api` (44 passed, 2 skipped, exit 0).
+
+### Phase 6 — Admin Information Architecture (2026-09-04)
+- **What was done**:
+  - **Eliminated Catch-All Route & Clean 404s**:
+    - Deleted `apps/web/src/app/admin/[[...slug]]/page.tsx`.
+    - Implemented `apps/web/src/app/admin/not-found.tsx` with clear return-to-overview action for unknown admin URLs.
+  - **Dedicated Route Hierarchy**:
+    - `/admin` (Admin Overview): High-level org summary metrics (students, teachers, weekly classes, completion rate, open invoices), quick actions, and active live classes only. Strictly zero future scheduled class rows on overview.
+    - `/admin/live-classes`: Dedicated LiveKit room monitor requiring matching organization, `numParticipants > 0`, and active teacher attendance. Includes direct `ClassActionButton` observer link.
+    - `/admin/scheduled-classes`: Server page + client `ScheduledClassesTable` with viewer timezone calendar grouping (`LocalTime`), filters (teacher, track, status, window), quick search, 25-per-page pagination, copy link, and authorized session cancellation.
+    - `/admin/teacher-schedules`: Server page + client `TeacherSpreadsheet` with sticky teacher columns, 7-day grid with availability shading (green), scheduled class blocks (with live indicators), time-off hatching (amber), 1-click student assignment prefill, CSV export, and responsive mobile day switcher.
+  - **Authorized Session Mutation API**:
+    - Added `PATCH /api/sessions/[id]` handler with host/admin RBAC, updating status to `CANCELLED` (with reason) or rescheduling start/end.
+    - Emits atomic `session.changed` event in `schedulingEvents` transactional outbox and invokes `drainOutbox`.
+  - **Navigation Chrome & Loading Skeletons**:
+    - Updated `apps/web/src/app/dashboard/DashboardChrome.tsx` sidebar items, mobile menu, and app chrome sheet with active route indicators and page title mappings.
+    - Created matching loading skeletons: `live-classes/loading.tsx`, `scheduled-classes/loading.tsx`, and `teacher-schedules/loading.tsx`.
+  - **Automated Test Suite**:
+    - Created `tests/api/admin-architecture.spec.ts` verifying catch-all removal (404), `PATCH /api/sessions/[id]` authorization boundaries and transactional outbox emission, tenant isolation, and strict absence of future classes on admin overview.
+- **Key files**: `apps/web/src/app/admin/page.tsx`, `apps/web/src/app/admin/not-found.tsx`, `apps/web/src/app/admin/live-classes/**`, `apps/web/src/app/admin/scheduled-classes/**`, `apps/web/src/app/admin/teacher-schedules/**`, `apps/web/src/app/api/sessions/[id]/route.ts`, `apps/web/src/app/dashboard/DashboardChrome.tsx`, `apps/web/tests/api/admin-architecture.spec.ts`.
+- **Verification**: `npx tsc --noEmit` (0 errors), `npm run lint` (0 errors), `npm run test:api` (53 passed, 2 skipped, 1 expected fail, exit 0), `npm run build` (exit 0, all 67 routes compiled).
+
 
 
 

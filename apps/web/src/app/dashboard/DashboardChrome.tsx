@@ -114,12 +114,14 @@ export default function DashboardChrome({
                   Admin Management
                 </div>
               </div>
-              <SidebarItem href="/admin" label="Admin Panel" />
+              <SidebarItem href="/admin" label="Overview" />
+              <SidebarItem href="/admin/live-classes" label="Live Classes" />
+              <SidebarItem href="/admin/scheduled-classes" label="Scheduled Classes" />
+              <SidebarItem href="/admin/teacher-schedules" label="Teacher Schedules" />
               <SidebarItem href="/admin/assign-student" label="Assign Students" />
               <SidebarItem href="/dashboard/attendance" label="Attendance Logs" />
               <SidebarItem href="/admin/users" label="Users & Roles" />
               <SidebarItem href="/admin/invoices" label="Invoices & Billing" />
-              <SidebarItem href="/dashboard/schedule" label="Schedule Matrix" />
               <SidebarItem href="/join" label="📹 Join with Code" />
 
               <div className="pt-5 pb-1.5 px-3">
@@ -316,12 +318,14 @@ export default function DashboardChrome({
                 <nav className="p-2 space-y-0.5 max-h-[60vh] overflow-auto">
                   {isAdminRole && (
                     <>
-                      <SidebarItem href="/admin" label="Admin Panel" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin" label="Overview" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/live-classes" label="Live Classes" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={() => setMobileMenuOpen(false)} />
+                      <SidebarItem href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/admin/assign-student" label="Assign Students" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/attendance" label="Attendance Logs" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/admin/users" label="Users & Roles" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/schedule" label="Schedule Matrix" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
                       <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
                     </>
@@ -483,8 +487,10 @@ function AppChrome({
             <div className="app-sheet-list">
               {isAdminRole && (
                 <>
+                  <SheetLink href="/admin/live-classes" label="Live Classes" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={() => setMoreOpen(false)} />
                   <SheetLink href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/schedule" label="Schedule Matrix" onNavigate={() => setMoreOpen(false)} />
                   <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
                   <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
                 </>
@@ -518,6 +524,13 @@ function AppChrome({
 
 function titleFor(pathname: string, isTeachingRole: boolean): string {
   const map: Record<string, string> = {
+    "/admin": "Admin Overview",
+    "/admin/live-classes": "Live Classes Monitor",
+    "/admin/scheduled-classes": "Scheduled Classes",
+    "/admin/teacher-schedules": "Teacher Schedules",
+    "/admin/assign-student": "Assign Students",
+    "/admin/users": "Users & Roles",
+    "/admin/invoices": "Invoices & Billing",
     "/dashboard": "Home",
     "/dashboard/booking": "Book a Class",
     "/dashboard/progress": "Progress",
@@ -605,14 +618,27 @@ function SidebarItem({
   label: string;
   onNavigate?: () => void;
 }) {
+  const pathname = usePathname();
+  const active =
+    href === "/admin" || href === "/dashboard" || href === "/dashboard/teacher"
+      ? pathname === href
+      : (pathname?.startsWith(href) ?? false);
+
   return (
     <Link
       href={href}
       onClick={onNavigate}
-      className="flex items-center px-3 py-2 rounded-lg text-[13px] font-medium transition-colors"
-      style={{ color: "var(--text-secondary)" }}
+      className={`flex items-center px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${
+        active
+          ? "bg-emerald-500/10 font-semibold"
+          : "hover:bg-white/5"
+      }`}
+      style={{
+        color: active ? "var(--accent, #10b981)" : "var(--text-secondary)",
+      }}
     >
       {label}
     </Link>
   );
 }
+
