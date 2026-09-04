@@ -24,29 +24,16 @@ import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
 
-/**
- * Resolves the caller against the session, or throws. An ORG_ADMIN counts as a
- * host for their own org only — role by itself would let an admin of one org
- * reach into another org's live class.
- */
 async function assertHost(request: NextRequest, sessionId: string) {
   const authResult = await requireAuth(request);
   if (authResult instanceof NextResponse) return { response: authResult };
   const ctx = authResult;
 
-  const session = await db.query.sessions.findFirst({
-    where: eq(sessions.id, sessionId),
-  });
-  if (!session) throw new NotFoundError("Session");
+  const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+  assertSessionHost(session, ctx);
 
-  const user = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
-  const isAdmin = user
-    ? user.role === "SUPER_ADMIN" || (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-    : false;
-  if (session.teacherId !== ctx.userId && !isAdmin) {
-    throw new ForbiddenError("Only the host can manage participants.");
-  }
   return { session, ctx };
 }
 

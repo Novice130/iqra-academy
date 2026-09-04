@@ -31,13 +31,14 @@
  * bug to the next caller.
  */
 
-import { db, withHttpDb } from "@/lib/db";
+import { db, withDb, withHttpDb } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
 import { teacherAvailability, users } from "@/db/schema";
 import { NextResponse, NextRequest } from "next/server";
 import { requireRole, ROLE_HIERARCHY, type AuthContext } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { isValidZone } from "@/lib/zones";
+import { assertTeacherInOrg } from "@/lib/session-access";
 import { z } from "zod";
 
 /** "08:00:00", "08:00", and "24:00" (end of day) */
@@ -64,10 +65,6 @@ const slotSchema = z.object({
 
 const bulkSlotsSchema = z
   .object({
-    /**
-     * Required, and the whole point. Without it the two times above mean
-     * nothing — see the file header.
-     */
     timezone: z.string().refine(isValidZone, "Unknown time zone"),
     slotMinutes: z.number().int().min(15).max(120).optional(),
     teacherId: z.string().min(1).optional(),
@@ -83,8 +80,6 @@ const bulkSlotsSchema = z
         });
       }
     }
-    // Overlapping ranges on one day would generate the same slot twice, and a
-    // student would see a duplicate 6:00 PM they cannot tell apart.
     const byDay = new Map<string, typeof data.slots>();
     for (const s of data.slots) {
       const list = byDay.get(s.dayOfWeek) ?? [];
@@ -106,13 +101,6 @@ const bulkSlotsSchema = z
     }
   });
 
-/**
- * Whose calendar is this request for?
- *
- * An admin may name a teacher. Anyone else gets their own id regardless of
- * what they asked for — without this guard, adding the parameter would let one
- * teacher rewrite another's calendar.
- */
 function targetTeacherId(ctx: AuthContext, requested?: string | null): string {
   if (!requested || requested === ctx.userId) return ctx.userId;
   if (ROLE_HIERARCHY[ctx.role] >= ROLE_HIERARCHY.ORG_ADMIN) return requested;
@@ -128,14 +116,17 @@ export async function GET(request: NextRequest) {
 
       const { searchParams } = new URL(request.url);
       const teacherId = targetTeacherId(ctx, searchParams.get("teacherId"));
+      const isSuper = ctx.role === "SUPER_ADMIN";
+
+      const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
 
       const rows = await db.query.teacherAvailability.findMany({
-        where: eq(teacherAvailability.teacherId, teacherId),
+        where: and(
+          eq(teacherAvailability.teacherId, teacherId),
+          eq(teacherAvailability.orgId, teacher.orgId)
+        ),
       });
 
-      // The zone is a property of the teacher, not of each row; they are
-      // written together and always agree. Surface it once so the editor
-      // does not have to guess from row[0].
       const timezone = rows[0]?.timezone ?? null;
 
       return NextResponse.json({
@@ -157,48 +148,44 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  return withHttpDb(async () => {
+  return withDb(async () => {
     try {
       const authResult = await requireRole(req, ["TEACHER"]);
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      // Validate BEFORE the destructive delete — a malformed body must not
-      // wipe a teacher's existing availability.
       const data = bulkSlotsSchema.parse(await req.json());
       const teacherId = targetTeacherId(ctx, data.teacherId);
       const slotMinutes = data.slotMinutes ?? 30;
       const isSuper = ctx.role === "SUPER_ADMIN";
-      const isSelf = teacherId === ctx.userId;
 
-      // An admin naming a teacher must be naming one that exists in their
-      // org, or the foreign key is the only thing standing between a typo
-      // and a calendar attached to nobody.
-      const teacher = await db.query.users.findFirst({
-        where: isSuper || isSelf
-          ? eq(users.id, teacherId)
-          : and(eq(users.id, teacherId), eq(users.orgId, ctx.orgId)),
-        columns: { id: true, orgId: true },
+      const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
+      const targetOrgId = teacher.orgId;
+
+      await db.transaction(async (tx) => {
+        await tx
+          .delete(teacherAvailability)
+          .where(
+            and(
+              eq(teacherAvailability.teacherId, teacherId),
+              eq(teacherAvailability.orgId, targetOrgId)
+            )
+          );
+
+        if (data.slots.length > 0) {
+          await tx.insert(teacherAvailability).values(
+            data.slots.map((s) => ({
+              teacherId,
+              orgId: targetOrgId,
+              dayOfWeek: s.dayOfWeek,
+              startTime: s.startTime,
+              endTime: s.endTime,
+              timezone: data.timezone,
+              slotMinutes,
+            }))
+          );
+        }
       });
-      if (!teacher) throw new NotFoundError("Teacher");
-
-      const targetOrgId = teacher.orgId || ctx.orgId || "org_default";
-
-      await db.delete(teacherAvailability).where(eq(teacherAvailability.teacherId, teacherId));
-
-      if (data.slots.length > 0) {
-        await db.insert(teacherAvailability).values(
-          data.slots.map((s) => ({
-            teacherId,
-            orgId: targetOrgId,
-            dayOfWeek: s.dayOfWeek,
-            startTime: s.startTime,
-            endTime: s.endTime,
-            timezone: data.timezone,
-            slotMinutes,
-          }))
-        );
-      }
 
       return NextResponse.json({ success: true, teacherId, timezone: data.timezone });
     } catch (error) {
@@ -208,7 +195,7 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
-  return withHttpDb(async () => {
+  return withDb(async () => {
     try {
       const authResult = await requireRole(request, ["TEACHER"]);
       if (authResult instanceof NextResponse) return authResult;
@@ -216,8 +203,18 @@ export async function DELETE(request: NextRequest) {
 
       const { searchParams } = new URL(request.url);
       const teacherId = targetTeacherId(ctx, searchParams.get("teacherId"));
+      const isSuper = ctx.role === "SUPER_ADMIN";
 
-      await db.delete(teacherAvailability).where(eq(teacherAvailability.teacherId, teacherId));
+      const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
+
+      await db
+        .delete(teacherAvailability)
+        .where(
+          and(
+            eq(teacherAvailability.teacherId, teacherId),
+            eq(teacherAvailability.orgId, teacher.orgId)
+          )
+        );
 
       return NextResponse.json({ success: true, teacherId });
     } catch (error) {

@@ -257,12 +257,11 @@ export async function generateSlots(opts: GenerateSlotsOptions): Promise<Slot[]>
   if (to <= from) return [];
 
   const whereConditions = [eq(teacherAvailability.isActive, true)];
+  if (opts.orgId) {
+    whereConditions.push(eq(teacherAvailability.orgId, opts.orgId));
+  }
   if (opts.teacherId) {
     whereConditions.push(eq(teacherAvailability.teacherId, opts.teacherId));
-  } else if (opts.orgId) {
-    whereConditions.push(
-      or(eq(teacherAvailability.orgId, opts.orgId), eq(teacherAvailability.orgId, "org_default"))!
-    );
   }
 
   const rows = await db

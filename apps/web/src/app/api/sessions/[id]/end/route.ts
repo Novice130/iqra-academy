@@ -20,6 +20,7 @@ import { closeAttendanceRows } from "@/lib/attendance";
 import { classRosterUserIds } from "@/lib/class-ring";
 import { sendClassEndedPush } from "@/lib/fcm";
 import { afterResponse } from "@/lib/after-response";
+import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
 
 export async function POST(
   request: NextRequest,
@@ -32,25 +33,8 @@ export async function POST(
       const ctx = authResult;
       const { id: sessionId } = await params;
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-      });
-      if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
-      // An admin can end only their own org's sessions. SUPER_ADMIN is the
-      // only role allowed across orgs.
-      const isAdmin = user
-        ? user.role === "SUPER_ADMIN" ||
-          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-        : false;
-      const isHost = session.teacherId === ctx.userId || isAdmin;
-
-      if (!isHost) {
-        throw new ForbiddenError("Only the host can end this session.");
-      }
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      assertSessionHost(session, ctx);
 
       const endedAt = new Date();
 

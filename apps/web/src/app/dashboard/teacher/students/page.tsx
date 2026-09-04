@@ -5,7 +5,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
-import { eq, and, sql, count, desc, inArray } from "drizzle-orm";
+import { eq, and, sql, count, desc, inArray, isNull } from "drizzle-orm";
 import { bookings, sessions, studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
 import { format } from "date-fns";
 import Link from "next/link";
@@ -21,16 +21,23 @@ export default async function TeacherStudentsPage() {
 
   const dbUser = await db.query.users.findFirst({
     where: eq(users.id, session.user.id),
-    columns: { id: true, role: true },
+    columns: { id: true, role: true, orgId: true },
   });
 
   const role = dbUser?.role || "STUDENT";
+  const orgId = dbUser?.orgId || "";
+  const isSuperAdmin = role === "SUPER_ADMIN";
   const isAdmin = ["ORG_ADMIN", "SUPER_ADMIN"].includes(role);
 
   // 1. Fetch Students
   let studentsResult: any[] = [];
   if (isAdmin) {
     // Admin sees ALL student profiles in org
+    const adminConditions = [];
+    if (!isSuperAdmin) {
+      adminConditions.push(eq(studentProfiles.orgId, orgId));
+    }
+
     studentsResult = await db
       .select({
         id: studentProfiles.id,
@@ -42,9 +49,10 @@ export default async function TeacherStudentsPage() {
       .from(studentProfiles)
       .leftJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
       .leftJoin(sessions, eq(bookings.sessionId, sessions.id))
+      .where(adminConditions.length > 0 ? and(...adminConditions) : undefined)
       .groupBy(studentProfiles.id);
   } else {
-    // Teacher sees students assigned to them
+    // Teacher sees students assigned to them in org
     studentsResult = await db
       .select({
         id: studentProfiles.id,
@@ -56,18 +64,32 @@ export default async function TeacherStudentsPage() {
       .from(studentProfiles)
       .innerJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
       .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-      .where(eq(sessions.teacherId, dbUser?.id || session.user.id))
+      .where(
+        and(
+          eq(sessions.teacherId, dbUser?.id || session.user.id),
+          eq(studentProfiles.orgId, orgId)
+        )
+      )
       .groupBy(studentProfiles.id);
   }
 
   // Fetch all teachers and all students for the admin modal
   const allStudentProfiles = isAdmin
-    ? await db.query.studentProfiles.findMany({ columns: { id: true, name: true, track: true } })
+    ? await db.query.studentProfiles.findMany({
+        where: isSuperAdmin ? undefined : eq(studentProfiles.orgId, orgId),
+        columns: { id: true, name: true, track: true },
+      })
     : [];
 
   const allTeachers = isAdmin
     ? await db.query.users.findMany({
-        where: inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+        where: isSuperAdmin
+          ? and(inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]), isNull(users.deletedAt))
+          : and(
+              inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+              eq(users.orgId, orgId),
+              isNull(users.deletedAt)
+            ),
         columns: { id: true, name: true, email: true },
       })
     : [];

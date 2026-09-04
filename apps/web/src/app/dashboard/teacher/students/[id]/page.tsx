@@ -42,13 +42,16 @@ export default async function StudentDetailPage({ params }: PageProps) {
 
     const caller = await db.query.users.findFirst({
       where: eq(users.id, session.user.id),
-      columns: { id: true, role: true },
+      columns: { id: true, role: true, orgId: true },
     });
 
     const isStaff = ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(caller?.role || "");
     if (!isStaff) {
       redirect("/dashboard");
     }
+
+    const callerOrgId = caller?.orgId || "";
+    const isSuperAdmin = caller?.role === "SUPER_ADMIN";
 
     // 1. Fetch student profile and associated parent user
     const student = await db.query.studentProfiles.findFirst({
@@ -61,6 +64,10 @@ export default async function StudentDetailPage({ params }: PageProps) {
     });
 
     if (!student) {
+      notFound();
+    }
+
+    if (!isSuperAdmin && student.orgId !== callerOrgId) {
       notFound();
     }
 

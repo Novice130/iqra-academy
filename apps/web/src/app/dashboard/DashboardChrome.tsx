@@ -60,8 +60,7 @@ export default function DashboardChrome({
   const initials = (user.name || "U").charAt(0).toUpperCase();
   const isAdminRole =
     user.role === "ORG_ADMIN" ||
-    user.role === "SUPER_ADMIN" ||
-    user.email === "syedamer130@gmail.com";
+    user.role === "SUPER_ADMIN";
   const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
   const isStudentRole = !isAdminRole && !isTeacherOnly;
   const isTeachingRole = isTeacherOnly || isAdminRole;
@@ -399,8 +398,7 @@ function AppChrome({
   const [moreOpen, setMoreOpen] = useState(false);
   const isAdminRole =
     user.role === "ORG_ADMIN" ||
-    user.role === "SUPER_ADMIN" ||
-    user.email === "syedamer130@gmail.com";
+    user.role === "SUPER_ADMIN";
   const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
   const isTeachingRole = isTeacherOnly || isAdminRole;
 

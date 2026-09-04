@@ -21,6 +21,7 @@ import { withHttpDb } from "@/lib/db";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
 import { generateSlots } from "@/lib/slots";
+import { assertTeacherInOrg } from "@/lib/session-access";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ export async function GET(request: NextRequest) {
       const { searchParams } = new URL(request.url);
       const teacherId = searchParams.get("teacherId") || undefined;
       const days = Math.min(Math.max(Number(searchParams.get("days") ?? 14) || 14, 1), 28);
+
+      if (teacherId) {
+        await assertTeacherInOrg(teacherId, ctx.orgId, ctx.role === "SUPER_ADMIN");
+      }
 
       const slots = await generateSlots({
         orgId: ctx.orgId,

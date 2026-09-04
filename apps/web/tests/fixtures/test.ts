@@ -25,6 +25,12 @@ export const test = base.extend<
 >({
   orgA: [
     async ({}, use) => {
+      if (process.env.ALLOW_LOCAL_DB_SCRIPTS !== "1") {
+        test.skip(true, "Requires isolated test database (ALLOW_LOCAL_DB_SCRIPTS=1). See docs/testing.md");
+        // @ts-expect-error dummy when skipped
+        await use(null);
+        return;
+      }
       const { orgA } = await seedTwoOrgs();
       await use(orgA);
     },
@@ -32,6 +38,12 @@ export const test = base.extend<
   ],
   orgB: [
     async ({}, use) => {
+      if (process.env.ALLOW_LOCAL_DB_SCRIPTS !== "1") {
+        test.skip(true, "Requires isolated test database (ALLOW_LOCAL_DB_SCRIPTS=1). See docs/testing.md");
+        // @ts-expect-error dummy when skipped
+        await use(null);
+        return;
+      }
       const { orgB } = await seedTwoOrgs();
       await use(orgB);
       await closeTestDb();

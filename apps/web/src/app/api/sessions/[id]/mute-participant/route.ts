@@ -16,6 +16,7 @@ import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
+import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
 
 export async function POST(
   request: NextRequest,
@@ -37,24 +38,8 @@ export async function POST(
         throw new BusinessRuleError("Server-forced unmute isn't supported — request it from the client instead.");
       }
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-      });
-      if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
-      const isAdmin = user
-        ? user.role === "SUPER_ADMIN" ||
-          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-        : false;
-      const isTeacher = user ? user.role === "TEACHER" && (user.orgId === session.orgId || user.orgId === "seed_org_iqra_academy") : false;
-      const isHost = session.teacherId === ctx.userId || isAdmin || isTeacher;
-
-      if (!isHost) {
-        throw new ForbiddenError("Only the host can mute participants.");
-      }
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      assertSessionHost(session, ctx);
 
       const roomName = generateRoomName(sessionId);
       await getRoomServiceClient().mutePublishedTrack(roomName, identity, trackSid, true);

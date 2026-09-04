@@ -22,6 +22,8 @@ import {
 import { logAudit, getClientIp } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 
+const ROOT_SUPER_ADMIN_EMAIL = "syedamer130@gmail.com";
+
 const createUserSchema = z.object({
   email: z.string().email(),
   name: z.string().min(1).max(100).optional(),
@@ -96,13 +98,30 @@ export async function POST(request: NextRequest) {
       const body = await request.json();
       const data = createUserSchema.parse(body);
 
+      const targetEmail = data.email.toLowerCase().trim();
+      if (targetEmail === ROOT_SUPER_ADMIN_EMAIL) {
+        throw new ForbiddenError("Root super admin account cannot be modified or re-created.");
+      }
+
+      const callerLevel = ROLE_HIERARCHY[ctx.role];
+      if (ROLE_HIERARCHY[data.role] > callerLevel) {
+        throw new ForbiddenError("You can't grant a role above your own.");
+      }
+
       return await withRLS(ctx, async (tx) => {
         // Check existing user within org
         const existing = await tx.query.users.findFirst({
-          where: and(eq(users.email, data.email.toLowerCase().trim()), eq(users.orgId, ctx.orgId)),
+          where: and(eq(users.email, targetEmail), eq(users.orgId, ctx.orgId)),
         });
 
         if (existing) {
+          if (existing.email.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
+            throw new ForbiddenError("Root super admin cannot be modified.");
+          }
+          if (ROLE_HIERARCHY[existing.role] > callerLevel) {
+            throw new ForbiddenError("You can't modify someone above your own role.");
+          }
+
           const [updated] = await tx
             .update(users)
             .set({
@@ -129,7 +148,7 @@ export async function POST(request: NextRequest) {
         const [user] = await tx
           .insert(users)
           .values({
-            email: data.email.toLowerCase().trim(),
+            email: targetEmail,
             name: fallbackName,
             role: data.role as typeof users.role.enumValues[number],
             phone: data.phone,
@@ -212,6 +231,15 @@ export async function PATCH(request: NextRequest) {
         });
         if (!target) throw new NotFoundError("User");
 
+        if (target.email?.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
+          if (data.role && data.role !== "SUPER_ADMIN") {
+            throw new ForbiddenError("Root super admin cannot be demoted.");
+          }
+          if (ctx.userId !== target.id) {
+            throw new ForbiddenError("Root super admin cannot be modified by other users.");
+          }
+        }
+
         if (ROLE_HIERARCHY[target.role] > callerLevel) {
           throw new ForbiddenError("You can't modify someone above your own role.");
         }
@@ -260,6 +288,64 @@ export async function PATCH(request: NextRequest) {
       }
 
       return NextResponse.json({ user: result.user });
+    } catch (error) {
+      return handleApiError(error);
+    }
+  });
+}
+
+/** DELETE /api/admin/users — soft-delete a user in the org */
+export async function DELETE(request: NextRequest) {
+  return withDb(async () => {
+    try {
+      const authResult = await requireRole(request, ["ORG_ADMIN"]);
+      if (authResult instanceof NextResponse) return authResult;
+      const ctx = authResult;
+
+      const { searchParams } = new URL(request.url);
+      const userId = searchParams.get("userId");
+      if (!userId) throw new BusinessRuleError("userId is required.");
+
+      if (userId === ctx.userId) {
+        throw new ForbiddenError("You cannot delete your own account.");
+      }
+
+      const callerLevel = ROLE_HIERARCHY[ctx.role];
+
+      return await withRLS(ctx, async (tx) => {
+        const target = await tx.query.users.findFirst({
+          where: and(
+            eq(users.id, userId),
+            eq(users.orgId, ctx.orgId),
+            isNull(users.deletedAt)
+          ),
+          columns: { id: true, role: true, email: true },
+        });
+        if (!target) throw new NotFoundError("User");
+
+        if (target.email?.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
+          throw new ForbiddenError("Root super admin cannot be deleted.");
+        }
+        if (ROLE_HIERARCHY[target.role] > callerLevel) {
+          throw new ForbiddenError("You can't delete someone above your own role.");
+        }
+
+        await tx
+          .update(users)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(users.id, userId), eq(users.orgId, ctx.orgId)));
+
+        await logAudit({
+          orgId: ctx.orgId,
+          actorId: ctx.userId,
+          action: "USER_DELETED",
+          target: `user:${target.id}`,
+          metadata: { email: target.email, role: target.role },
+          ipAddress: getClientIp(request.headers),
+        });
+
+        return NextResponse.json({ success: true });
+      });
     } catch (error) {
       return handleApiError(error);
     }

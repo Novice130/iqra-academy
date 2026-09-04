@@ -27,6 +27,8 @@ const createSchema = z.object({
   reason: z.string().max(200).optional(),
 });
 
+import { assertTeacherInOrg } from "@/lib/session-access";
+
 function targetTeacherId(ctx: AuthContext, requested?: string | null): string {
   if (!requested || requested === ctx.userId) return ctx.userId;
   if (ROLE_HIERARCHY[ctx.role] >= ROLE_HIERARCHY.ORG_ADMIN) return requested;
@@ -42,12 +44,16 @@ export async function GET(request: NextRequest) {
 
       const { searchParams } = new URL(request.url);
       const teacherId = targetTeacherId(ctx, searchParams.get("teacherId"));
+      const isSuper = ctx.role === "SUPER_ADMIN";
+
+      const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
 
       return await withRLS(ctx, async (tx) => {
         // Past time off is history nobody needs on a scheduling screen.
         const rows = await tx.query.teacherTimeOff.findMany({
           where: and(
             eq(teacherTimeOff.teacherId, teacherId),
+            eq(teacherTimeOff.orgId, teacher.orgId),
             gte(teacherTimeOff.endsAt, new Date())
           ),
         });
@@ -68,6 +74,10 @@ export async function POST(request: NextRequest) {
 
       const data = createSchema.parse(await request.json());
       const teacherId = targetTeacherId(ctx, data.teacherId);
+      const isSuper = ctx.role === "SUPER_ADMIN";
+
+      const teacher = await assertTeacherInOrg(teacherId, ctx.orgId, isSuper);
+
       const startsAt = new Date(data.startsAt);
       const endsAt = new Date(data.endsAt);
       if (endsAt <= startsAt) {
@@ -77,7 +87,7 @@ export async function POST(request: NextRequest) {
       return await withRLS(ctx, async (tx) => {
         const [row] = await tx
           .insert(teacherTimeOff)
-          .values({ orgId: ctx.orgId, teacherId, startsAt, endsAt, reason: data.reason })
+          .values({ orgId: teacher.orgId, teacherId, startsAt, endsAt, reason: data.reason })
           .returning();
         return NextResponse.json({ timeOff: row }, { status: 201 });
       });

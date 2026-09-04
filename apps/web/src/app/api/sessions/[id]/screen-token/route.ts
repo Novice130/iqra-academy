@@ -30,6 +30,7 @@ import { sessions, users } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
+import { loadOrgSession, assertSessionViewer } from "@/lib/session-access";
 
 export async function GET(
   request: NextRequest,
@@ -42,31 +43,11 @@ export async function GET(
       const ctx = authResult;
       const { id: sessionId } = await params;
 
-      const [session, user] = await Promise.all([
-        db.query.sessions.findFirst({
-          where: eq(sessions.id, sessionId),
-          with: { bookings: true },
-        }),
-        db.query.users.findFirst({ where: eq(users.id, ctx.userId) }),
-      ]);
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      const { isTeacher, isStudent } = assertSessionViewer(session, ctx);
 
-      if (!session) throw new NotFoundError("Session");
+      const user = await db.query.users.findFirst({ where: eq(users.id, ctx.userId) });
       if (!user) throw new NotFoundError("User");
-
-      // An admin can join only their own org's sessions. SUPER_ADMIN is the
-      // only role allowed across orgs.
-      const isAdmin =
-        user.role === "SUPER_ADMIN" ||
-        (user.role === "ORG_ADMIN" && user.orgId === session.orgId);
-      const isTeacher = session.teacherId === ctx.userId || isAdmin;
-      const isStudent = session.bookings.some((b: { userId: string }) => b.userId === ctx.userId);
-
-      // No auto-booking here, deliberately. /join is the door; this is only
-      // ever reached by someone the door already let through, and a token
-      // endpoint that quietly enrolls people is not one worth having.
-      if (!isTeacher && !isStudent) {
-        throw new ForbiddenError("You are not part of this session.");
-      }
 
       const token = await generateLiveKitToken({
         roomName: generateRoomName(sessionId),

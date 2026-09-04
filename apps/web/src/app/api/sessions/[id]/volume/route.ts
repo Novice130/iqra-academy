@@ -27,6 +27,7 @@ import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
+import { loadOrgSession, assertAssignedTeacher } from "@/lib/session-access";
 
 export async function POST(
   request: NextRequest,
@@ -49,25 +50,8 @@ export async function POST(
         throw new BusinessRuleError("volume must be a number between 0 and 1");
       }
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-      });
-      if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
-
-      const isAdmin = user
-        ? user.role === "SUPER_ADMIN" ||
-          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-        : false;
-      const isTeacher = user ? user.role === "TEACHER" && (user.orgId === session.orgId || user.orgId === "seed_org_iqra_academy") : false;
-      const isHost = session.teacherId === ctx.userId || isAdmin || isTeacher;
-
-      if (!isHost) {
-        throw new ForbiddenError("Only the host can change a participant's volume.");
-      }
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      assertAssignedTeacher(session, ctx);
 
       // The stored value is the slider's own fraction; clients run it through
       // `gainForSlider` before it reaches the audio. 1 is the top of that

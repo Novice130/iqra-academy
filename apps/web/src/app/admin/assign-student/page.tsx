@@ -5,9 +5,13 @@
  * Server page loading students and teachers and rendering AssignStudentDesk.
  */
 
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
+import { canAccessAdmin } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
 import { studentProfiles, users } from "@/db/schema";
-import { eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import AssignStudentDesk, {
   type StudentProfileOption,
   type TeacherOption,
@@ -15,7 +19,31 @@ import AssignStudentDesk, {
 
 export default async function AssignStudentPage() {
   return withDb(async () => {
-    // 1. Fetch all student profiles with user email
+    const headersList = await headers();
+    const session = await auth.api.getSession({ headers: headersList });
+    if (!session) {
+      redirect("/login?redirect=/admin/assign-student");
+    }
+
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+      columns: { id: true, role: true, orgId: true },
+    });
+
+    const role = dbUser?.role || "STUDENT";
+    if (!canAccessAdmin(role) || !dbUser?.orgId) {
+      redirect("/dashboard?error=unauthorized");
+    }
+
+    const isSuperAdmin = role === "SUPER_ADMIN";
+    const orgId = dbUser.orgId;
+
+    // 1. Fetch student profiles in this org with user email
+    const studentConditions = [isNull(users.deletedAt)];
+    if (!isSuperAdmin) {
+      studentConditions.push(eq(studentProfiles.orgId, orgId));
+    }
+
     const rawProfiles = await db
       .select({
         id: studentProfiles.id,
@@ -27,7 +55,7 @@ export default async function AssignStudentPage() {
       })
       .from(studentProfiles)
       .innerJoin(users, eq(studentProfiles.userId, users.id))
-      .where(isNull(users.deletedAt));
+      .where(and(...studentConditions));
 
     const students: StudentProfileOption[] = rawProfiles.map((p) => ({
       id: p.id,
@@ -37,9 +65,17 @@ export default async function AssignStudentPage() {
       track: p.track,
     }));
 
-    // 2. Fetch all teachers
+    // 2. Fetch teachers in this org
+    const teacherConditions = [
+      inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+      isNull(users.deletedAt),
+    ];
+    if (!isSuperAdmin) {
+      teacherConditions.push(eq(users.orgId, orgId));
+    }
+
     const rawTeachers = await db.query.users.findMany({
-      where: inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+      where: and(...teacherConditions),
       columns: {
         id: true,
         name: true,

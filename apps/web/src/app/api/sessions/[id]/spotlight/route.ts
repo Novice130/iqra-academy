@@ -15,6 +15,7 @@ import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateRoomName } from "@/lib/livekit";
 import { patchRoomMetadata } from "@/lib/room-metadata";
+import { loadOrgSession, assertSessionHost } from "@/lib/session-access";
 
 export async function POST(
   request: NextRequest,
@@ -33,24 +34,8 @@ export async function POST(
         throw new BusinessRuleError("identity must be a string or null");
       }
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-      });
-      if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
-      const isAdmin = user
-        ? user.role === "SUPER_ADMIN" ||
-          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-        : false;
-      const isTeacher = user ? user.role === "TEACHER" && (user.orgId === session.orgId || user.orgId === "seed_org_iqra_academy") : false;
-      const isHost = session.teacherId === ctx.userId || isAdmin || isTeacher;
-
-      if (!isHost) {
-        throw new ForbiddenError("Only the host can change the spotlight.");
-      }
+      const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+      assertSessionHost(session, ctx);
 
       // Merge, never replace. `updateRoomMetadata` overwrites the whole
       // string, and the room also carries the per-student volumes the teacher

@@ -163,7 +163,7 @@
 | Phase | Title | Status | Completed | Evidence |
 |---|---|---|---|---|
 | 0 | Safe baseline (git, gates, test harness, script gating) | ✅ Complete | 2026-09-03 | See below |
-| 1 | P0 authorization & tenant isolation | ⬜ Pending | — | — |
+| 1 | P0 authorization & tenant isolation | ✅ Complete | 2026-09-04 | See below |
 | 2 | Data model & migration | ⬜ Pending | — | — |
 | 3 | Canonical scheduling & meeting lifecycle | ⬜ Pending | — | — |
 | 4 | Secure realtime scheduling | ⬜ Pending | — | — |
@@ -185,3 +185,19 @@
   - Fixed broken `next dev` (webpack edge `EvalError`): `dev` now uses Turbopack.
 - **Key files**: `apps/web/playwright.config.ts`, `apps/web/tests/**`, `apps/web/scripts/lib/require-isolated-db.ts`, `docs/testing.md` (full baseline findings + isolated-DB setup).
 - **Verification**: Root `npm run test` (turbo executing both `apps/mobile` and `apps/web`) passes cleanly 100%. Baseline findings (health-check DDL failure, webpack dev) documented in `docs/testing.md`. Two-org fixture scaffolded for Phase 1 isolation test integration.
+
+### Phase 1 — P0 Authorization & Tenant Isolation (2026-09-04)
+- **What was done**:
+  - Implemented centralized session guards (`apps/web/src/lib/session-access.ts`) eliminating link-possession token auto-minting vulnerability. Link possession no longer auto-creates profiles or mints LiveKit tokens; unbooked visitors receive 403.
+  - Hardened 8 session routes (`join`, `guests`, `volume`, `spotlight`, `mute-participant`, `participant`, `end`, `screen-token`) and guest join window to require assigned teacher, same-org admin, or confirmed booked student.
+  - Scoped room-wide volume write controls strictly to the assigned teacher or super-admin support override.
+  - Scoped teacher availability, time-off, slots generation, and `assign-student` by `orgId` with atomic transactions and conflict checks.
+  - Protected root super admin account (`syedamer130@gmail.com`) from demotion, role mutation, and deletion in `admin/users`.
+  - Scoped admin and dashboard pages/queries by `orgId` (`/admin`, `/admin/assign-student`, `/dashboard/schedule`, `/dashboard/teacher/students`, `/dashboard/teacher/students/[id]`).
+  - Added `/dashboard/teacher/layout.tsx` server guard for all teacher sub-routes (`TEACHER`, `ORG_ADMIN`, `SUPER_ADMIN`).
+  - Removed hardcoded email backdoor checks in `DashboardChrome.tsx` and `schedule/page.tsx`.
+  - Rebuilt PostgreSQL RLS policies (`apps/web/src/db/rls-policies.sql`) using `AS RESTRICTIVE` to prevent permissive `OR` tenant isolation bypass.
+  - Added automated test suite in `apps/web/tests/api/tenant-isolation.spec.ts` and updated fixtures with isolated DB check.
+- **Key files**: `apps/web/src/lib/session-access.ts`, `apps/web/src/app/api/sessions/**`, `apps/web/src/app/api/admin/users/route.ts`, `apps/web/src/app/api/admin/assign-student/route.ts`, `apps/web/src/app/admin/**`, `apps/web/src/app/dashboard/**`, `apps/web/src/db/rls-policies.sql`, `apps/web/tests/api/tenant-isolation.spec.ts`.
+- **Verification**: `npm run lint` (0 errors), `npm run build` (exit 0, all 63 routes compiled), `npm run test` (13 passed, exit 0).
+

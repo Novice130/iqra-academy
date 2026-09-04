@@ -27,7 +27,9 @@ export default async function SchedulePage({ searchParams }: Props) {
     columns: { role: true, orgId: true },
   });
   const role = dbUser?.role || user.role || "STUDENT";
-  const isAdmin = role === "ORG_ADMIN" || role === "SUPER_ADMIN" || user.email === "syedamer130@gmail.com";
+  const orgId = dbUser?.orgId || user.orgId;
+  const isSuperAdmin = role === "SUPER_ADMIN";
+  const isAdmin = role === "ORG_ADMIN" || isSuperAdmin;
   const isTeacher = role === "TEACHER";
 
   // Week range, padded by two days on each side. The exact week boundary is
@@ -45,6 +47,10 @@ export default async function SchedulePage({ searchParams }: Props) {
     gte(sessions.scheduledStart, weekStart),
     lte(sessions.scheduledStart, weekEnd),
   ];
+
+  if (!isSuperAdmin) {
+    scheduleWhere.push(eq(sessions.orgId, orgId));
+  }
 
   if (!isAdmin) {
     if (isTeacher) {

@@ -34,7 +34,7 @@ import { resolveClassRoom } from "@/lib/class-room";
 import { ringClassStudents } from "@/lib/class-ring";
 import { afterResponse } from "@/lib/after-response";
 import { createTimings, withTimings } from "@/lib/server-timing";
-import { createId } from "@paralleldrive/cuid2";
+import { loadOrgSession, assertSessionViewer } from "@/lib/session-access";
 
 function normalizeJoinCode(code: string) {
   if (!code) return code;
@@ -74,32 +74,14 @@ export async function GET(
       if (authResult instanceof NextResponse) return withTimings(authResult, timings);
       const ctx = authResult;
       const { id: rawId } = await params;
-      const sessionId = normalizeJoinCode(rawId);
-      const rawTrimmed = (rawId || "").trim();
-      const rawClean = rawTrimmed.replace(/[\s-]/g, "");
-
       const session = await timings.track(
         "load",
-        db.query.sessions.findFirst({
-          where: or(
-            eq(sessions.id, sessionId),
-            eq(sessions.joinCode, sessionId),
-            eq(sessions.joinCode, rawTrimmed),
-            eq(sessions.joinCode, rawClean),
-            eq(sessions.id, rawTrimmed),
-            eq(sessions.id, rawClean)
-          ),
-          with: {
-            bookings: true,
-            teacher: { columns: { email: true, name: true } },
-          },
-        })
+        loadOrgSession(ctx.orgId, rawId, ctx.role)
       );
-
-      if (!session) throw new NotFoundError("Session");
 
       const user = { email: ctx.email, name: ctx.name, role: ctx.role, orgId: ctx.orgId };
       const sessionTeacher = session.teacher ?? undefined;
+      const sessionId = session.id;
 
       // This class was combined into another one (see lib/class-merge.ts).
       // The row still exists, cancelled, holding its own history — but the
@@ -111,54 +93,17 @@ export async function GET(
         return withTimings(NextResponse.json({ redirectSessionId: session.mergedIntoId }), timings);
       }
 
-      // An admin can join only their own org's sessions. SUPER_ADMIN is the
-      // only role allowed across orgs.
-      const isAdmin =
-        user.role === "SUPER_ADMIN" ||
-        (user.role === "ORG_ADMIN" && user.orgId === session.orgId);
-      const isTeacher = session.teacherId === ctx.userId || isAdmin;
-      let isStudent = session.bookings.some((b: any) => b.userId === ctx.userId);
-      const isInstantMeeting = session.consumesQuota === false && session.title?.startsWith("Instant Meeting");
+      // Assert caller is an authorized viewer (assigned teacher, booked student, admin observer)
+      // Any link-holder who is not booked or staff is denied. Auto-booking removed.
+      const { isTeacher, isStudent, isAdmin } = assertSessionViewer(session, ctx);
 
       // Where is this class actually happening? Everyone asks the same
       // question and gets the same answer, so nobody opens a second room.
-      const resolution = await timings.track("resolve", resolveClassRoom(session));
+      const resolution = await timings.track("resolve", resolveClassRoom(session as any));
       const isTheRoom = resolution.session.id === sessionId && resolution.kind !== "too-early";
 
       if (session.status === "COMPLETED" || session.status === "CANCELLED" || resolution.session.status === "COMPLETED" || resolution.session.status === "CANCELLED") {
         throw new BusinessRuleError("This class has already ended.");
-      }
-
-      // Auto-book on the way in. Ensures anyone holding the class link with an account can join.
-      if (!isStudent && !isTeacher) {
-        const existingProfiles = await db.query.studentProfiles.findMany({
-          where: eq(studentProfiles.userId, ctx.userId),
-        });
-
-        let profile = existingProfiles[0];
-        if (!profile) {
-          const profileId = createId();
-          await db.insert(studentProfiles).values({
-            id: profileId,
-            orgId: session.orgId,
-            userId: ctx.userId,
-            name: user.name || "Student",
-            track: "QAIDAH",
-          });
-          profile = { id: profileId, orgId: session.orgId, userId: ctx.userId, name: user.name || "Student", track: "QAIDAH" } as any;
-        }
-
-        if (profile) {
-          await db.insert(bookings).values({
-            id: createId(),
-            orgId: session.orgId,
-            userId: ctx.userId,
-            studentProfileId: profile.id,
-            sessionId: session.id,
-            status: "CONFIRMED",
-          }).catch(() => {});
-          isStudent = true;
-        }
       }
 
       if (resolution.session.id !== sessionId) {

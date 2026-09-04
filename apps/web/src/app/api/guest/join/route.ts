@@ -98,8 +98,16 @@ export async function POST(request: NextRequest) {
       const resolution = await resolveClassRoom(rawSession);
       const session = resolution.session;
 
-      if (!isJoinable(session)) {
+      if (session.status === "COMPLETED" || session.status === "CANCELLED" || rawSession.status === "COMPLETED" || rawSession.status === "CANCELLED") {
         throw new BusinessRuleError("This class has already ended.");
+      }
+
+      if (resolution.kind === "too-early") {
+        throw new BusinessRuleError("This class has not opened yet. Please try again closer to start time.");
+      }
+
+      if (resolution.kind === "expired") {
+        throw new BusinessRuleError("This class scheduled time has expired.");
       }
 
       const targetSessionIds = Array.from(
@@ -245,11 +253,19 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ status: "EXPIRED" });
       }
 
-      const session = await db.query.sessions.findFirst({
+      const rawSession = await db.query.sessions.findFirst({
         where: eq(sessions.id, req.sessionId),
       });
-      if (!session || !isJoinable(session)) {
+      if (!rawSession) throw new NotFoundError("Session");
+
+      const resolution = await resolveClassRoom(rawSession);
+      const session = resolution.session;
+
+      if (session.status === "COMPLETED" || session.status === "CANCELLED" || rawSession.status === "COMPLETED" || rawSession.status === "CANCELLED") {
         throw new BusinessRuleError("This class has already ended.");
+      }
+      if (resolution.kind === "expired") {
+        throw new BusinessRuleError("This class scheduled time has expired.");
       }
 
       const teacher = await db.query.users.findFirst({

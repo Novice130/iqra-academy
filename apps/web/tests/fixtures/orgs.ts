@@ -24,7 +24,7 @@ import { Pool, neonConfig } from "@neondatabase/serverless";
 import ws from "ws";
 import { eq, and } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
-import { organizations, users } from "../../src/db/schema";
+import { organizations, users, authSessions } from "../../src/db/schema";
 import { requireIsolatedDb } from "../../scripts/lib/require-isolated-db";
 
 if (typeof WebSocket === "undefined") {
@@ -123,3 +123,24 @@ export async function seedTwoOrgs(): Promise<{ orgA: TestOrg; orgB: TestOrg }> {
   const orgB = await seedOrg(db, ORG_SEEDS[1], "b");
   return { orgA, orgB };
 }
+
+export function getTestDb(): { db: Db; pool: Pool } {
+  return testDb();
+}
+
+export async function createTestSession(userId: string): Promise<string> {
+  const { db } = testDb();
+  const token = `test-token-${userId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const id = `sess-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+
+  await db.insert(authSessions).values({
+    id,
+    userId,
+    token,
+    expiresAt,
+  });
+
+  return token;
+}
+

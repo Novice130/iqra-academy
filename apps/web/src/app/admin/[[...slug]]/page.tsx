@@ -6,10 +6,13 @@
  */
 
 import Link from "next/link";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 import { canAccessAdmin, adminResources, adminMeta } from "@/lib/admin";
 import { db, withDb } from "@/lib/db";
-import { sessions } from "@/db/schema";
-import { sql, inArray, asc } from "drizzle-orm";
+import { sessions, users } from "@/db/schema";
+import { sql, inArray, asc, and, eq } from "drizzle-orm";
 import { getRoomServiceClient } from "@/lib/livekit";
 import ScheduledClassesMatrix, { type ScheduledClassItem } from "../ScheduledClassesMatrix";
 
@@ -21,9 +24,28 @@ const TABLE_PAGES: Record<string, string> = {
 
 export default async function AdminPage() {
   return withDb(async () => {
-    const tableCounts = await getTableCounts();
-    const liveClasses = await getLiveClasses();
-    const scheduledClasses = await getScheduledClasses();
+    const headersList = await headers();
+    const session = await auth.api.getSession({ headers: headersList });
+    if (!session) {
+      redirect("/login?redirect=/admin");
+    }
+
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.id, session.user.id),
+      columns: { id: true, role: true, orgId: true },
+    });
+
+    const role = dbUser?.role || "STUDENT";
+    if (!canAccessAdmin(role) || !dbUser?.orgId) {
+      redirect("/dashboard?error=unauthorized");
+    }
+
+    const isSuperAdmin = role === "SUPER_ADMIN";
+    const orgId = dbUser.orgId;
+
+    const tableCounts = await getTableCounts(orgId, isSuperAdmin);
+    const liveClasses = await getLiveClasses(orgId, isSuperAdmin);
+    const scheduledClasses = await getScheduledClasses(orgId, isSuperAdmin);
 
     return (
       <div className="space-y-8 animate-fadeIn">
@@ -287,14 +309,18 @@ export default async function AdminPage() {
   });
 }
 
-async function getLiveClasses() {
+async function getLiveClasses(orgId: string, isSuperAdmin: boolean) {
   try {
     const rooms = await getRoomServiceClient().listRooms();
     if (rooms.length === 0) return [];
 
     const sessionIds = rooms.map((r) => r.name.replace(/^qlms-/, ""));
+    const whereClause = isSuperAdmin
+      ? inArray(sessions.id, sessionIds)
+      : and(inArray(sessions.id, sessionIds), eq(sessions.orgId, orgId));
+
     const matchedSessions = await db.query.sessions.findMany({
-      where: inArray(sessions.id, sessionIds),
+      where: whereClause,
       with: { teacher: { columns: { name: true } } },
     });
     const byId = new Map(matchedSessions.map((s) => [s.id, s]));
@@ -302,40 +328,62 @@ async function getLiveClasses() {
       matchedSessions.filter((s) => s.videoRoomName).map((s) => [s.videoRoomName, s])
     );
 
-    return rooms.map((r) => {
-      const session = byId.get(r.name.replace(/^qlms-/, "")) || byVideoRoomName.get(r.name);
-      return {
-        name: r.name,
-        numParticipants: r.numParticipants,
-        creationTime: r.creationTime ? Number(r.creationTime) * 1000 : null,
-        session: session
-          ? { id: session.id, title: session.title, track: session.track, teacherName: session.teacher.name }
-          : null,
-      };
-    });
+    return rooms
+      .map((r) => {
+        const session = byId.get(r.name.replace(/^qlms-/, "")) || byVideoRoomName.get(r.name);
+        if (!isSuperAdmin && !session) return null;
+        return {
+          name: r.name,
+          numParticipants: r.numParticipants,
+          creationTime: r.creationTime ? Number(r.creationTime) * 1000 : null,
+          session: session
+            ? { id: session.id, title: session.title, track: session.track, teacherName: session.teacher.name }
+            : null,
+        };
+      })
+      .filter((r): r is NonNullable<typeof r> => r !== null);
   } catch {
     return [];
   }
 }
 
-async function getTableCounts() {
+async function getTableCounts(orgId: string, isSuperAdmin: boolean) {
   try {
+    if (isSuperAdmin) {
+      const counts = await Promise.all([
+        db.execute(sql`SELECT count(*)::int as c FROM organizations`),
+        db.execute(sql`SELECT count(*)::int as c FROM users WHERE deleted_at IS NULL`),
+        db.execute(sql`SELECT count(*)::int as c FROM student_profiles`),
+        db.execute(sql`SELECT count(*)::int as c FROM subscriptions`),
+        db.execute(sql`SELECT count(*)::int as c FROM sessions`),
+        db.execute(sql`SELECT count(*)::int as c FROM bookings`),
+      ]);
+
+      return [
+        { label: "Organizations", count: (counts[0] as unknown as { c: number }[])[0]?.c ?? 0 },
+        { label: "Users", count: (counts[1] as unknown as { c: number }[])[0]?.c ?? 0 },
+        { label: "Students", count: (counts[2] as unknown as { c: number }[])[0]?.c ?? 0 },
+        { label: "Subscriptions", count: (counts[3] as unknown as { c: number }[])[0]?.c ?? 0 },
+        { label: "Sessions", count: (counts[4] as unknown as { c: number }[])[0]?.c ?? 0 },
+        { label: "Bookings", count: (counts[5] as unknown as { c: number }[])[0]?.c ?? 0 },
+      ];
+    }
+
     const counts = await Promise.all([
-      db.execute(sql`SELECT count(*)::int as c FROM organizations`),
-      db.execute(sql`SELECT count(*)::int as c FROM users`),
-      db.execute(sql`SELECT count(*)::int as c FROM student_profiles`),
-      db.execute(sql`SELECT count(*)::int as c FROM subscriptions`),
-      db.execute(sql`SELECT count(*)::int as c FROM sessions`),
-      db.execute(sql`SELECT count(*)::int as c FROM bookings`),
+      db.execute(sql`SELECT count(*)::int as c FROM users WHERE org_id = ${orgId} AND deleted_at IS NULL`),
+      db.execute(sql`SELECT count(*)::int as c FROM student_profiles WHERE org_id = ${orgId}`),
+      db.execute(sql`SELECT count(*)::int as c FROM subscriptions WHERE org_id = ${orgId}`),
+      db.execute(sql`SELECT count(*)::int as c FROM sessions WHERE org_id = ${orgId}`),
+      db.execute(sql`SELECT count(*)::int as c FROM bookings WHERE org_id = ${orgId}`),
     ]);
 
     return [
-      { label: "Organizations", count: (counts[0] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Users", count: (counts[1] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Students", count: (counts[2] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Subscriptions", count: (counts[3] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Sessions", count: (counts[4] as unknown as { c: number }[])[0]?.c ?? 0 },
-      { label: "Bookings", count: (counts[5] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Organizations", count: 1 },
+      { label: "Users", count: (counts[0] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Students", count: (counts[1] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Subscriptions", count: (counts[2] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Sessions", count: (counts[3] as unknown as { c: number }[])[0]?.c ?? 0 },
+      { label: "Bookings", count: (counts[4] as unknown as { c: number }[])[0]?.c ?? 0 },
     ];
   } catch {
     return [
@@ -349,10 +397,14 @@ async function getTableCounts() {
   }
 }
 
-async function getScheduledClasses(): Promise<ScheduledClassItem[]> {
+async function getScheduledClasses(orgId: string, isSuperAdmin: boolean): Promise<ScheduledClassItem[]> {
   try {
+    const whereClause = isSuperAdmin
+      ? inArray(sessions.status, ["SCHEDULED"])
+      : and(inArray(sessions.status, ["SCHEDULED"]), eq(sessions.orgId, orgId));
+
     const upcoming = await db.query.sessions.findMany({
-      where: inArray(sessions.status, ["SCHEDULED"]),
+      where: whereClause,
       with: {
         teacher: { columns: { name: true, email: true } },
         bookings: {

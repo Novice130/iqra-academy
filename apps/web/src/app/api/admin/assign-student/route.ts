@@ -7,11 +7,23 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { sessions, bookings, studentProfiles, users } from "@/db/schema";
+import { sessions, bookings, studentProfiles, users, schedulingEvents, auditLogs, teacherTimeOff } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { createId } from "@paralleldrive/cuid2";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray, lt, gt } from "drizzle-orm";
+import { assertTeacherInOrg, assertProfileInOrg } from "@/lib/session-access";
+import { getClientIp } from "@/lib/audit";
+import { z } from "zod";
+
+const assignStudentSchema = z.object({
+  studentProfileId: z.string().min(1, "studentProfileId is required"),
+  teacherId: z.string().min(1, "teacherId is required"),
+  title: z.string().max(120).optional(),
+  track: z.enum(["QAIDAH", "QURAN_READING", "HIFZ"]).optional(),
+  scheduledStart: z.string().datetime({ message: "scheduledStart must be a valid ISO 8601 datetime string" }),
+  durationMinutes: z.number().int().min(15).max(180).default(30),
+});
 
 export async function POST(request: NextRequest) {
   return withDb(async () => {
@@ -20,64 +32,116 @@ export async function POST(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const body = await request.json();
-      const { studentProfileId, teacherId, title, track, scheduledStart, durationMinutes = 30 } = body;
-
-      if (!studentProfileId || !teacherId) {
-        return NextResponse.json(
-          { success: false, error: "studentProfileId and teacherId are required" },
-          { status: 400 }
-        );
-      }
-
-      const profile = await db.query.studentProfiles.findFirst({
-        where: eq(studentProfiles.id, studentProfileId),
-      });
-      if (!profile) throw new NotFoundError("Student Profile");
-
-      const teacher = await db.query.users.findFirst({
-        where: eq(users.id, teacherId),
-      });
-      if (!teacher) throw new NotFoundError("Teacher");
+      const body = await request.json().catch(() => ({}));
+      const data = assignStudentSchema.parse(body);
 
       const isSuper = ctx.role === "SUPER_ADMIN";
-      const targetOrgId = profile.orgId || teacher.orgId || ctx.orgId || "org_default";
+      const profile = await assertProfileInOrg(data.studentProfileId, ctx.orgId, isSuper);
+      const teacher = await assertTeacherInOrg(data.teacherId, ctx.orgId, isSuper);
 
-      if (!isSuper && ctx.orgId && profile.orgId && profile.orgId !== ctx.orgId) {
-        throw new ForbiddenError("You can only assign students and teachers from your own organization.");
+      if (profile.orgId !== teacher.orgId) {
+        throw new ForbiddenError("Student profile and teacher must belong to the same organization.");
+      }
+
+      const targetOrgId = profile.orgId;
+      const startTime = new Date(data.scheduledStart);
+      if (startTime.getTime() <= Date.now()) {
+        throw new BusinessRuleError("Scheduled start time must be in the future.");
+      }
+
+      const endTime = new Date(startTime.getTime() + data.durationMinutes * 60 * 1000);
+
+      // Conflict checks for teacher: existing session
+      const conflictingSession = await db.query.sessions.findFirst({
+        where: and(
+          eq(sessions.teacherId, teacher.id),
+          inArray(sessions.status, ["SCHEDULED", "IN_PROGRESS"]),
+          lt(sessions.scheduledStart, endTime),
+          gt(sessions.scheduledEnd, startTime)
+        ),
+        columns: { id: true, scheduledStart: true, scheduledEnd: true },
+      });
+
+      if (conflictingSession) {
+        throw new BusinessRuleError("Teacher already has a scheduled class during this time.");
+      }
+
+      // Conflict check: teacher time-off
+      const conflictingTimeOff = await db.query.teacherTimeOff.findFirst({
+        where: and(
+          eq(teacherTimeOff.teacherId, teacher.id),
+          lt(teacherTimeOff.startsAt, endTime),
+          gt(teacherTimeOff.endsAt, startTime)
+        ),
+        columns: { id: true },
+      });
+
+      if (conflictingTimeOff) {
+        throw new BusinessRuleError("Teacher has scheduled time off during this time.");
       }
 
       const sessionId = createId();
-      const startTime = scheduledStart ? new Date(scheduledStart) : new Date(Date.now() + 24 * 60 * 60 * 1000);
-      const dur = Number(durationMinutes) || 30;
-      const endTime = new Date(startTime.getTime() + dur * 60 * 1000);
+      const bookingId = createId();
+      const resolvedTrack = data.track || profile.track || "QAIDAH";
+      const sessionTitle = data.title || `${resolvedTrack} Lesson with ${teacher.name}`;
 
-      await db.insert(sessions).values({
-        id: sessionId,
-        orgId: targetOrgId,
-        teacherId: teacher.id,
-        track: track || profile.track || "QAIDAH",
-        type: "INDIVIDUAL",
-        status: "SCHEDULED",
-        title: title || `${track || profile.track || "Quran"} Lesson with ${teacher.name}`,
-        scheduledStart: startTime,
-        scheduledEnd: endTime,
-        consumesQuota: true,
-      });
+      await db.transaction(async (tx) => {
+        await tx.insert(sessions).values({
+          id: sessionId,
+          orgId: targetOrgId,
+          teacherId: teacher.id,
+          track: resolvedTrack,
+          type: "INDIVIDUAL",
+          status: "SCHEDULED",
+          title: sessionTitle,
+          scheduledStart: startTime,
+          scheduledEnd: endTime,
+          consumesQuota: true,
+        });
 
-      await db.insert(bookings).values({
-        id: createId(),
-        orgId: targetOrgId,
-        userId: profile.userId,
-        studentProfileId: profile.id,
-        sessionId: sessionId,
-        status: "CONFIRMED",
+        await tx.insert(bookings).values({
+          id: bookingId,
+          orgId: targetOrgId,
+          userId: profile.userId,
+          studentProfileId: profile.id,
+          sessionId: sessionId,
+          status: "CONFIRMED",
+        });
+
+        // Insert scheduling outbox event
+        await tx.insert(schedulingEvents).values({
+          id: createId(),
+          orgId: targetOrgId,
+          teacherId: teacher.id,
+          actorId: ctx.userId,
+          type: "session.scheduled",
+          aggregateType: "session",
+          aggregateId: sessionId,
+        });
+
+        // Insert audit log
+        await tx.insert(auditLogs).values({
+          id: createId(),
+          orgId: targetOrgId,
+          actorId: ctx.userId,
+          action: "SESSION_CREATED",
+          target: `session:${sessionId}`,
+          metadata: {
+            studentProfileId: profile.id,
+            teacherId: teacher.id,
+            bookingId,
+            scheduledStart: startTime.toISOString(),
+            scheduledEnd: endTime.toISOString(),
+          },
+          ipAddress: getClientIp(request.headers),
+        });
       });
 
       return NextResponse.json({
         success: true,
         message: `Assigned ${profile.name} to ${teacher.name}`,
         sessionId,
+        bookingId,
       });
     } catch (error) {
       return handleApiError(error);
