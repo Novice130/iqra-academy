@@ -11,7 +11,7 @@ import { db, withDb } from "@/lib/db";
 import { bookings, sessions, studentProfiles } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError } from "@/lib/errors";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
   return withDb(async () => {
@@ -29,7 +29,13 @@ export async function GET(request: NextRequest) {
         .from(studentProfiles)
         .innerJoin(bookings, eq(bookings.studentProfileId, studentProfiles.id))
         .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-        .where(eq(sessions.teacherId, ctx.userId));
+        .where(
+          and(
+            eq(sessions.teacherId, ctx.userId),
+            eq(sessions.orgId, ctx.orgId),
+            eq(studentProfiles.orgId, ctx.orgId)
+          )
+        );
 
       return NextResponse.json({ students });
     } catch (error) {

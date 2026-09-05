@@ -23,6 +23,18 @@
  * `consumesQuota: false` alone would not do as the marker: instant meetings
  * and free makeups already set it, and we need to tell a trial apart from
  * those for the one-per-family rule and for reporting.
+ *
+ * ── Canonical flag per question (AI2 Phase 2) ───────────────────────────────
+ * Two sources of truth coexist on purpose, each owning one question:
+ * - "Is this a trial?" → `origin = 'TRIAL'` (set on insert below; the
+ *   cleanup route and data-model spec read `origin`, never title prefixes).
+ * - "Does this booking spend quota?" → `consumesQuota` (quota.ts reads
+ *   only this; trials set it false because a prospect has no subscription).
+ * `isTrial` is the legacy mirror of `origin = 'TRIAL'`, kept because the
+ * merge-exclusion check, the one-per-family check, and the join response
+ * still read it. New code must write BOTH `origin: "TRIAL"` and
+ * `isTrial: true` together (as the insert below does) until that cleanup
+ * lands — never one without the other.
  */
 
 import { NextRequest, NextResponse } from "next/server";

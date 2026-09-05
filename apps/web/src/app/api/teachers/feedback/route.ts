@@ -33,9 +33,14 @@ export async function POST(request: NextRequest) {
       const body = await request.json();
       const data = feedbackSchema.parse(body);
 
-      // Verify teacher is assigned to this session
+      // Verify teacher is assigned to this session. Org in the WHERE
+      // itself: a foreign id must match zero rows, not one row plus an error.
       const session = await db.query.sessions.findFirst({
-        where: and(eq(sessions.id, data.sessionId), eq(sessions.teacherId, ctx.userId)),
+        where: and(
+          eq(sessions.id, data.sessionId),
+          eq(sessions.teacherId, ctx.userId),
+          eq(sessions.orgId, ctx.orgId)
+        ),
       });
       if (!session) throw new NotFoundError("Session");
 

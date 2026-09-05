@@ -32,9 +32,14 @@ export async function POST(request: NextRequest) {
       const body = await request.json();
       const { sessionId, studentUserId } = callNowSchema.parse(body);
 
-      // Verify session exists and teacher is assigned
+      // Verify session exists and teacher is assigned. Org in the WHERE
+      // itself: a foreign id must match zero rows, not one row plus an error.
       const session = await db.query.sessions.findFirst({
-        where: and(eq(sessions.id, sessionId), eq(sessions.teacherId, ctx.userId)),
+        where: and(
+          eq(sessions.id, sessionId),
+          eq(sessions.teacherId, ctx.userId),
+          eq(sessions.orgId, ctx.orgId)
+        ),
       });
       if (!session) throw new NotFoundError("Session");
 

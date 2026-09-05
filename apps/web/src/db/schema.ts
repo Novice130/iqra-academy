@@ -193,6 +193,11 @@ export const sessionOriginEnum = pgEnum("SessionOrigin", [
   "SCHEDULED",
   "INSTANT",
   "TRIAL",
+  // MAKEUP has no writer yet (AI2 Phase 2): kept as a reserved enum value
+  // because Postgres cannot drop enum values once added — removing it now
+  // would still leave it in every database that ran 0001/0007. The first
+  // makeup flow must insert origin: "MAKEUP" explicitly; until then no
+  // reader may assume a MAKEUP row exists.
   "MAKEUP",
   "WEBHOOK",
 ]);

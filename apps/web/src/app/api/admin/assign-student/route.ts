@@ -54,10 +54,13 @@ export async function POST(request: NextRequest) {
 
       const endTime = new Date(startTime.getTime() + data.durationMinutes * 60 * 1000);
 
-      // Conflict checks for teacher: existing session
+      // Conflict checks for teacher: existing session. Org in the WHERE
+      // itself — the teacher row is org-verified, but the check must not
+      // depend on that staying true through future refactors.
       const conflictingSession = await db.query.sessions.findFirst({
         where: and(
           eq(sessions.teacherId, teacher.id),
+          eq(sessions.orgId, targetOrgId),
           inArray(sessions.status, ["SCHEDULED", "IN_PROGRESS"]),
           lt(sessions.scheduledStart, endTime),
           gt(sessions.scheduledEnd, startTime)
@@ -73,6 +76,7 @@ export async function POST(request: NextRequest) {
       const conflictingTimeOff = await db.query.teacherTimeOff.findFirst({
         where: and(
           eq(teacherTimeOff.teacherId, teacher.id),
+          eq(teacherTimeOff.orgId, targetOrgId),
           lt(teacherTimeOff.startsAt, endTime),
           gt(teacherTimeOff.endsAt, startTime)
         ),

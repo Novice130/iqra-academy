@@ -19,8 +19,10 @@
  * the AsyncLocalStorage request-pool machinery in lib/db buys nothing here.
  */
 
-import { drizzle, type NeonDatabase } from "drizzle-orm/neon-serverless";
+import { drizzle as drizzleNeon, type NeonDatabase } from "drizzle-orm/neon-serverless";
 import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle as drizzlePostgresJs } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
 import ws from "ws";
 import { eq, and } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
@@ -47,7 +49,7 @@ export interface TestOrg {
   student: TestUser;
 }
 
-type Db = NeonDatabase<typeof schema>;
+type Db = NeonDatabase<typeof schema> | ReturnType<typeof drizzlePostgresJs<typeof schema>>;
 
 const ORG_SEEDS = [
   { slug: "pw-org-a", name: "Playwright Org A" },
@@ -60,20 +62,49 @@ const ROLE_SEEDS = [
   { role: "STUDENT", label: "student" },
 ] as const;
 
-let sharedDb: { db: Db; pool: Pool } | null = null;
+type TestPool = Pool | { end: () => Promise<void> };
 
-function testDb(): { db: Db; pool: Pool } {
+let sharedDb: { db: Db; pool: TestPool; sql?: ReturnType<typeof postgres> } | null = null;
+
+function isLocalPgUrl(raw: string): boolean {
+  try {
+    const host = new URL(raw).hostname.toLowerCase();
+    return (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host === "[::1]" ||
+      host === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+function testDb(): { db: Db; pool: TestPool; sql?: ReturnType<typeof postgres> } {
   if (!sharedDb) {
     requireIsolatedDb("playwright-fixtures");
-    const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
-    sharedDb = { db: drizzle(pool, { schema }), pool };
+    const connectionString = process.env.DATABASE_URL!;
+    // @neondatabase/serverless speaks the Neon wire protocol over
+    // WebSockets; it cannot open a plain-TCP session to a local Postgres
+    // (docs/testing.md Option B). `postgres` (postgres-js) is already a
+    // runtime dependency, so route localhost fixtures through it and keep
+    // the Neon pool for isolated Neon branches.
+    if (isLocalPgUrl(connectionString)) {
+      const sql = postgres(connectionString);
+      sharedDb = { db: drizzlePostgresJs(sql, { schema }), pool: { end: async () => { await sql.end({ timeout: 2 }); } }, sql };
+    } else {
+      const pool = new Pool({ connectionString });
+      sharedDb = { db: drizzleNeon(pool, { schema }), pool };
+    }
   }
   return sharedDb;
 }
 
 export async function closeTestDb(): Promise<void> {
   if (sharedDb) {
-    await sharedDb.pool.end();
+    await sharedDb.pool?.end?.().catch(() => {});
+    await sharedDb.sql?.end?.({ timeout: 2 }).catch(() => {});
     sharedDb = null;
   }
 }
@@ -124,7 +155,7 @@ export async function seedTwoOrgs(): Promise<{ orgA: TestOrg; orgB: TestOrg }> {
   return { orgA, orgB };
 }
 
-export function getTestDb(): { db: Db; pool: Pool } {
+export function getTestDb(): { db: Db; pool: TestPool } {
   return testDb();
 }
 
@@ -141,6 +172,37 @@ export async function createTestSession(userId: string): Promise<string> {
     expiresAt,
   });
 
+  // Better Auth reads the session cookie via getSignedCookie: the raw token
+  // plus "." + base64(HMAC-SHA256(secret, token)) (better-call's
+  // signCookieValue / better-auth's makeSignature — same algorithm). The
+  // fixture DB row holds the raw token; the cookie must carry
+  // token.signature or every seeded request 401s (the dev server and the
+  // fixture share neither secret storage nor signer).
+  // Playwright sends the Cookie header raw, so no encodeURIComponent.
+  // Signed inline with WebCrypto (same algorithm as better-call) because
+  // better-call/crypto is not in its exports map.
+  // NOTE: the app server itself runs @neondatabase/serverless (WebSocket +
+  // HTTP drivers), which cannot speak to a plain-TCP local Postgres
+  // (docs/testing.md Option B). Seeded suites therefore need an isolated
+  // *Neon branch*, not localhost — localhost only proves the fixture signs
+  // and seeds correctly. The unsigned raw token is returned when no
+  // BETTER_AUTH_SECRET is set.
+  const secret = process.env.BETTER_AUTH_SECRET;
+  if (secret) {
+    const subtle =
+      globalThis.crypto?.subtle ??
+      (await import("node:crypto")).webcrypto.subtle;
+    const key = await subtle.importKey(
+      "raw",
+      new TextEncoder().encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    const sig = await subtle.sign("HMAC", key, new TextEncoder().encode(token));
+    const b64 = Buffer.from(sig).toString("base64");
+    return `${token}.${b64}`;
+  }
   return token;
 }
 

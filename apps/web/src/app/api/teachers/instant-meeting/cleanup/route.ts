@@ -25,7 +25,11 @@ export async function POST(request: NextRequest) {
 
       const target = isAdmin
         ? and(eq(sessions.orgId, ctx.orgId), eq(sessions.origin, "INSTANT"))
-        : and(eq(sessions.teacherId, ctx.userId), eq(sessions.origin, "INSTANT"));
+        : and(
+            eq(sessions.teacherId, ctx.userId),
+            eq(sessions.orgId, ctx.orgId),
+            eq(sessions.origin, "INSTANT")
+          );
 
       const toDelete = await db.query.sessions.findMany({
         where: target,

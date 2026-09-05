@@ -110,7 +110,9 @@ migrations and deploys that reference them.
 
 ```sh
 cd apps/web
-npx drizzle-kit migrate       # or psql -f drizzle/000N_*.sql against Neon
+# Blessed path per docs/architecture.md:54-68 (the journal tracks only
+# 0000, so `drizzle-kit migrate` silently skips 0001+ — do NOT rely on it):
+psql $DATABASE_URL -f drizzle/0002_notification_types.sql  # then 0003... in numeric order
 ```
 
 `0003` deactivates every availability row belonging to a teacher with no
@@ -135,7 +137,7 @@ applied:
 ```sh
 cd apps/web
 echo 'DATABASE_URL="postgresql://…"' >> .env    # Neon console → neondb
-npx drizzle-kit migrate                          # 0002 → 0005, in order
+psql $DATABASE_URL -f drizzle/0002_notification_types.sql  # 0002 → 0005, in order
 ```
 
 Worth doing first, once there is a connection: check whether `0002`–`0004`
