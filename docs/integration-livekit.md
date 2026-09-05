@@ -130,10 +130,21 @@ That is not preference: `ParticipantTile`'s `children` *replaces* its
 internals, and wrapping it breaks `GridLayout`'s sizing, so per-tile overlay
 controls are not possible with the stock components.
 
-**One control row, no floating buttons.** `CallControlBar` is a single centred
-row: mic▾, camera▾, present, effects, chat, people, view, leave. The screen had
-previously grown one floating button per feature. New features belong in the
-People panel or the view menu, not as another button.
+**Canonical 9-position dock, no floating buttons.** `CallControlBar` implements the canonical 9-position desktop dock (mic▾, video▾, participants, chat, reactions, share, host tools, more, end) and compact 5-button mobile dock (mic, video, share, more, end) with grouped overflow sheets. Floating action buttons have been consolidated into this unified control dock.
+
+- **Desktop & Tablet (>= 768px)**:
+  1. Mute with device caret
+  2. Video with device caret
+  3. Participants with count
+  4. Chat with unread badge
+  5. Reactions (popover burst + persistent Hand Raise)
+  6. Share (green active state)
+  7. Host Tools (host only)
+  8. More (overflow grid)
+  9. End (rightmost red)
+- **Mobile & Compact (< 768px)**:
+  - Dock: Mute, Video, Share, More, End.
+  - More sheet contains all collaboration, host tools, and secondary tools in a grouped grid.
 
 - **View menu** (the layout glyph) is layout only: Speaker (follows the room's
   spotlight), Gallery (equal grid), Active speaker (follows the voice). Active
@@ -176,20 +187,15 @@ Every host route resolves the caller against the session, and an `ORG_ADMIN`
 counts as a host **only for their own org** — role alone let an admin of one
 org reach into another org's live class.
 
-### Per-student volume
+### Room-wide volume control
 
-The teacher can turn one student down without muting them — asked for so a
-student who has finished their turn can carry on reciting out loud while the
-class listens to somebody else. Muting would stop that; a quieter mic doesn't.
+The teacher can adjust a participant's volume level, changing the room-wide gain for every listener in the class — asked for so a student who has finished their turn can carry on reciting out loud while the class listens to somebody else. Muting would stop that; a quieter mic doesn't.
 
-**It is room state, not a listener preference.** The teacher lowers Sobur and
-*everybody* hears Sobur quietly. So the value lives in room metadata beside the
-spotlight, as `volumes: { "<base identity>": 0..1 }`, written by a host-only
-route and applied on every client:
+**It is room state, not a listener preference.** The teacher lowers a student and *everybody* hears that student quietly. Room-wide gain is written to room metadata beside the spotlight via `POST /api/sessions/[id]/volume` (restricted strictly to authorized session hosts / assigned teachers with audit logging) as `volumes: { "<base identity>": 0..1 }`, and broadcast across all connected clients:
 
 ```
 teacher drags ──▶ POST /api/sessions/[id]/volume  (host only)
-                     └─ patchRoomMetadata → LiveKit broadcasts
+                     └─ patchRoomMetadata + audit log → LiveKit broadcasts
                           └─ every client: RemoteParticipant.setVolume()
 ```
 

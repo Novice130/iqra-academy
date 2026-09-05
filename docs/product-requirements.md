@@ -63,6 +63,7 @@ The platform defines four discrete roles ordered by privilege ceiling:
 
 ### 2.2 Tenant Isolation Guarantees
 - Every database query and mutation includes `orgId`. Foreign entities fail closed with `404 Not Found` to prevent tenant oracle discovery.
+- **User Identification**: Authenticated identity must resolve by `session.user.id`, never email. User lookup operations strictly query by immutable user IDs from the verified session to eliminate email collision vulnerabilities and prevent cross-tenant impersonation.
 - **Root Super Admin Protection**: Server routes (`/api/admin/users`) strictly reject any attempt to demote, delete, or recreate `syedamer130@gmail.com` with `403 Forbidden`.
 - **Defense in Depth**: PostgreSQL Row Level Security (`apps/web/src/db/rls-policies.sql`) uses `AS RESTRICTIVE` policies combining tenant and object predicates with `AND`, preventing permissive `OR` tenant leakage.
 
@@ -213,13 +214,16 @@ To ensure zero-downtime adoption and risk mitigation, features are deployed acro
 
 If regressions occur in production, follow these isolated rollback paths:
 
-1. **Realtime Socket Failure**:
+1. **Breakout Rooms & Collaboration Recovery**:
+   - Force-close active breakout rooms and return all students to the primary session via `POST /api/sessions/[id]/breakouts` (`action: "CLOSE_ALL"`).
+   - Ensure all participants have returned to the main LiveKit room before disabling collaboration features or socket bridges.
+2. **Realtime Socket Failure**:
    - Set environment variable `REALTIME_DISABLED=1`.
    - `useSchedulingRealtime` immediately drops WebSocket connections and engages client safety polling without requiring server redeployment.
-2. **Meeting UI Regression**:
-   - Revert `CustomVideoConference.tsx` component mount without rolling back database migrations or authorization rules.
+3. **Meeting UI Regression**:
+   - Revert `CustomVideoConference.tsx` component mount to the baseline fallback without rolling back database migrations or authorization rules. (This is a clean component mount revert, not an in-flight dock flag).
    - Preserves underlying LiveKit connection and call stability.
-3. **Database Migration Recovery**:
+4. **Database Migration Recovery**:
    - Reversible rollback scripts are maintained for every migration:
      - `drizzle/rollback/0007_data_model_parity_rollback.sql`
      - `drizzle/rollback/0008_scheduling_events_version_rollback.sql`
@@ -239,6 +243,9 @@ Production monitoring alerts trigger under the following conditions:
 | **Dead-Letter Outbox Rows** | $> 0$ (`attempts >= 5`) | P1 / Warning | Inspect poisoned event payload in `scheduling_events` |
 | **LiveKit Room / Session Mismatch** | $> 0$ | P1 / Warning | Validate canonical occurrence resolution in `class-room.ts` |
 | **WebSocket Reconnect Spikes** | $> 25\%$ drop rate | P1 / Warning | Inspect Cloudflare network or DO instance eviction |
+| **Caption Worker Failures** | $> 5$ in 5 min | P1 / Warning | Restart caption worker pool and inspect speech API quota |
+| **Breakout Return Failures** | $> 0$ | P1 / Warning | Force-reassign orphaned students to main room via `POST /api/sessions/[id]/breakouts` |
+| **Whiteboard DO Errors** | $> 10$ in 5 min | P1 / Warning | Evict corrupted Durable Object instance and verify snapshot storage |
 
 > [!CAUTION]
 > **Zero Logging of Credentials & Transcripts**  

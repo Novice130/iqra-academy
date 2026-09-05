@@ -1,5 +1,9 @@
 # Cal.com Integration Guide
 
+> [!WARNING]
+> **Historical & Superseded**  
+> This guide describes a legacy self-hosted Cal.com setup that is no longer maintained. Scheduling and booking are now handled directly by the internal canonical scheduling engine (`src/lib/class-room.ts` and `src/lib/class-action.ts`) with outbox-driven realtime dispatch. For current architecture, see [`docs/product-requirements.md`](../product-requirements.md).
+
 ## Overview
 Cal.com handles scheduling (time slots, recurring events, timezone conversion).
 We self-host Cal.com and receive webhooks when bookings are created/cancelled.
