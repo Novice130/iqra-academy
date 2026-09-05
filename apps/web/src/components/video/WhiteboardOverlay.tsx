@@ -16,13 +16,27 @@ const STROKE_WIDTHS = [
   { id: 10, label: 'Bold' },
 ];
 
-export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) {
+type Stroke = { x0: number; y0: number; x1: number; y1: number; color: string; width: number; erase?: boolean };
+
+export default function WhiteboardOverlay({
+  onClose,
+  sessionId,
+  isHost = false,
+}: {
+  onClose: () => void;
+  sessionId?: string;
+  isHost?: boolean;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [color, setColor] = useState('#ffffff');
   const [strokeWidth, setStrokeWidth] = useState(4);
   const [isEraser, setIsEraser] = useState(false);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const socketRef = useRef<WebSocket | null>(null);
+  const [syncState, setSyncState] = useState<'local' | 'syncing' | 'live' | 'locked'>('local');
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const drawStrokeRef = useRef<(s: Stroke) => void>(() => {});
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -70,7 +84,40 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
     };
   };
 
+  const drawStroke = (st: Stroke) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    ctx.save();
+    if (st.erase) {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.strokeStyle = 'rgba(0,0,0,1)';
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.strokeStyle = st.color;
+    }
+    ctx.lineWidth = st.width;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(st.x0, st.y0);
+    ctx.lineTo(st.x1, st.y1);
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    drawStrokeRef.current = drawStroke;
+  });
+
+  const emitStroke = (st: Stroke) => {
+    try {
+      socketRef.current?.send(JSON.stringify({ type: 'stroke', stroke: st }));
+    } catch {}
+  };
+
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (syncState === 'locked' && !isHost) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     try {
@@ -83,8 +130,8 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     ctx.beginPath();
-    ctx.arc(pos.x, pos.y, (isEraser ? strokeWidth * 2 : strokeWidth) / 2, 0, Math.PI * 2);
-    ctx.fillStyle = isEraser ? '#0f1117' : color;
+    ctx.arc(pos.x, pos.y, strokeWidth / 2, 0, Math.PI * 2);
+    ctx.fillStyle = color;
     ctx.fill();
   };
 
@@ -95,15 +142,17 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
     if (!canvas || !ctx) return;
 
     const currentPos = getPos(e);
-    ctx.lineWidth = isEraser ? strokeWidth * 3 : strokeWidth;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.strokeStyle = isEraser ? '#0f1117' : color;
-
-    ctx.beginPath();
-    ctx.moveTo(lastPointRef.current.x, lastPointRef.current.y);
-    ctx.lineTo(currentPos.x, currentPos.y);
-    ctx.stroke();
+    const st: Stroke = {
+      x0: lastPointRef.current.x,
+      y0: lastPointRef.current.y,
+      x1: currentPos.x,
+      y1: currentPos.y,
+      color,
+      width: isEraser ? strokeWidth * 3 : strokeWidth,
+      erase: isEraser,
+    };
+    drawStroke(st);
+    emitStroke(st);
 
     lastPointRef.current = currentPos;
   };
@@ -120,13 +169,104 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
   };
 
   const clearCanvas = () => {
+    if (!isHost) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     const dpr = window.devicePixelRatio || 1;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
     ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+    ctx.restore();
+    try {
+      socketRef.current?.send(JSON.stringify({ type: 'clear' }));
+    } catch {}
+    if (sessionId) {
+      fetch(`/api/sessions/${sessionId}/whiteboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clear: true }),
+      }).catch(() => {});
+    }
   };
+
+  const toggleLock = () => {
+    if (!isHost) return;
+    const next = syncState !== 'locked';
+    try {
+      socketRef.current?.send(JSON.stringify({ type: 'lock', locked: next }));
+    } catch {}
+    setSyncState(next ? 'locked' : 'live');
+    if (sessionId) {
+      fetch(`/api/sessions/${sessionId}/whiteboard`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locked: next }),
+      }).catch(() => {});
+    }
+  };
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+    setSyncState('syncing');
+    setSyncError(null);
+    (async () => {
+      try {
+        const res = await fetch(`/api/sessions/${sessionId}/whiteboard`);
+        if (!res.ok) throw new Error(`Ticket failed (${res.status})`);
+        const data = await res.json();
+        const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const base = process.env.NEXT_PUBLIC_REALTIME_URL || `${protocol}://${window.location.host}/realtime/whiteboard`;
+        ws = new WebSocket(`${base}?ticket=${encodeURIComponent(data.ticket)}&sessionId=${encodeURIComponent(sessionId)}&boardId=${encodeURIComponent(data.boardId)}`);
+        socketRef.current = ws;
+        ws.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg.type === 'init') {
+              for (const st of msg.strokes ?? []) drawStrokeRef.current(st as Stroke);
+              if (!cancelled) setSyncState(msg.locked && !isHost ? 'locked' : 'live');
+            } else if (msg.type === 'stroke') {
+              drawStrokeRef.current(msg.stroke as Stroke);
+            } else if (msg.type === 'lock') {
+              if (!cancelled) setSyncState(msg.locked && !isHost ? 'locked' : 'live');
+            } else if (msg.type === 'clear') {
+              const canvas = canvasRef.current;
+              const ctx = canvas?.getContext('2d');
+              if (canvas && ctx) {
+                const dpr = window.devicePixelRatio || 1;
+                ctx.save();
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.clearRect(0, 0, canvas.width / dpr, canvas.height / dpr);
+                ctx.restore();
+              }
+            }
+          } catch {}
+        };
+        ws.onerror = () => {
+          if (!cancelled) {
+            setSyncError('Sync connection failed — drawing stays local.');
+            setSyncState('local');
+          }
+        };
+        ws.onclose = () => {
+          if (!cancelled && syncState === 'syncing') setSyncState('local');
+        };
+      } catch (e) {
+        if (!cancelled) {
+          setSyncError(e instanceof Error ? e.message : 'Sync unavailable — drawing stays local.');
+          setSyncState('local');
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+      try { ws?.close(); } catch {}
+      socketRef.current = null;
+    };
+  }, [sessionId, isHost]);
 
   return (
     <div
@@ -146,7 +286,7 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
               !isEraser ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white'
             }`}
           >
-            ✏️ Pen
+            Pen
           </button>
           <button
             type="button"
@@ -155,7 +295,7 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
               isEraser ? 'bg-blue-600 text-white shadow-md' : 'text-neutral-400 hover:text-white'
             }`}
           >
-            🧹 Eraser
+            Eraser
           </button>
         </div>
 
@@ -195,12 +335,35 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
           ))}
         </div>
 
+        {/* Sync status */}
+        <div className="flex items-center gap-1.5 px-2 border-l border-white/10" role="status" aria-live="polite">
+          <span
+            className="w-2 h-2 rounded-full"
+            style={{ background: syncState === 'live' ? '#34d399' : syncState === 'syncing' ? '#fbbf24' : syncState === 'locked' ? '#f87171' : '#9ca3af' }}
+          />
+          <span className="text-[11px] text-white/60">
+            {syncState === 'live' ? 'Shared' : syncState === 'syncing' ? 'Syncing…' : syncState === 'locked' ? 'Locked' : 'Local only'}
+          </span>
+        </div>
+
         {/* Actions */}
         <div className="flex items-center gap-1.5 pl-2 border-l border-white/10">
+          {isHost && (
+            <button
+              type="button"
+              onClick={toggleLock}
+              aria-label={syncState === 'locked' ? 'Unlock whiteboard' : 'Lock whiteboard'}
+              className="px-2.5 py-1.5 rounded-xl text-xs font-medium text-amber-300 hover:bg-amber-500/10 cursor-pointer transition"
+            >
+              {syncState === 'locked' ? 'Unlock' : 'Lock'}
+            </button>
+          )}
           <button
             type="button"
             onClick={clearCanvas}
-            className="px-2.5 py-1.5 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 cursor-pointer transition"
+            disabled={!isHost}
+            title={isHost ? 'Clear board for everyone' : 'Only the host can clear'}
+            className="px-2.5 py-1.5 rounded-xl text-xs font-medium text-red-400 hover:bg-red-500/10 cursor-pointer transition disabled:opacity-40"
           >
             Clear
           </button>
@@ -214,9 +377,17 @@ export default function WhiteboardOverlay({ onClose }: { onClose: () => void }) 
         </div>
       </div>
 
+      {syncError && (
+        <div role="alert" className="absolute top-16 left-1/2 -translate-x-1/2 z-50 px-3 py-1.5 rounded-xl text-[11px] font-semibold bg-red-500/20 border border-red-500/40 text-red-200">
+          {syncError}
+        </div>
+      )}
+
       {/* Interactive Canvas */}
       <canvas
         ref={canvasRef}
+        role="application"
+        aria-label="Shared whiteboard canvas. Use pointer or touch to draw."
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

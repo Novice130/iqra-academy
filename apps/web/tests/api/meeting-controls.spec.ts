@@ -34,21 +34,21 @@ test.describe("Phase 7: Meeting Control Parity & Moderation Security", () => {
     // 1. Student A in Org A cannot lock meeting (403)
     const resStudent = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenStudentA}` },
-      data: { action: "lock", locked: true },
+      data: { action: "lock", value: true },
     });
     expect(resStudent.status()).toBe(403);
 
     // 2. Teacher B (different org) cannot lock meeting (403)
     const resTeacherB = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacherB}` },
-      data: { action: "lock", locked: true },
+      data: { action: "lock", value: true },
     });
     expect(resTeacherB.status()).toBe(403);
 
     // 3. Teacher A (session host) can lock and unlock meeting
     const lockRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacherA}` },
-      data: { action: "lock", locked: true },
+      data: { action: "lock", value: true },
     });
     expect(lockRes.status()).toBe(200);
     const lockData = await lockRes.json();
@@ -58,7 +58,7 @@ test.describe("Phase 7: Meeting Control Parity & Moderation Security", () => {
     // 4. Teacher A can toggle participant screen sharing permission
     const shareRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacherA}` },
-      data: { action: "participantShare", allow: false },
+      data: { action: "participantShare", value: false },
     });
     expect(shareRes.status()).toBe(200);
     const shareData = await shareRes.json();
@@ -103,7 +103,7 @@ test.describe("Phase 7: Meeting Control Parity & Moderation Security", () => {
     // Lock the session
     const lockRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacher}` },
-      data: { action: "lock", locked: true },
+      data: { action: "lock", value: true },
     });
     expect(lockRes.status()).toBe(200);
 
@@ -122,7 +122,7 @@ test.describe("Phase 7: Meeting Control Parity & Moderation Security", () => {
     // Unlock the session
     const unlockRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
       headers: { Cookie: `better-auth.session_token=${tokenTeacher}` },
-      data: { action: "lock", locked: false },
+      data: { action: "lock", value: false },
     });
     expect(unlockRes.status()).toBe(200);
 

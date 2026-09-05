@@ -22,12 +22,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { sessions, users } from "@/db/schema";
+import { sessions, users, auditLogs } from "@/db/schema";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 import { parseRoomMetadata, patchRoomMetadata } from "@/lib/room-metadata";
 import { loadOrgSession, assertAssignedTeacher } from "@/lib/session-access";
+import { getClientIp } from "@/lib/audit";
+import { createId } from "@paralleldrive/cuid2";
 
 export async function POST(
   request: NextRequest,
@@ -72,6 +74,16 @@ export async function POST(
       else volumes[identity] = clamped;
 
       await patchRoomMetadata(roomName, { volumes });
+
+      await db.insert(auditLogs).values({
+        id: createId(),
+        orgId: session.orgId,
+        actorId: ctx.userId,
+        action: "SETTINGS_CHANGED",
+        target: `session:${sessionId}`,
+        metadata: { setting: "participant_volume", identity, volume: clamped },
+        ipAddress: getClientIp(request.headers),
+      }).catch(() => {});
 
       return NextResponse.json({ success: true, identity, volume: clamped });
     } catch (error) {

@@ -7,8 +7,9 @@
  * - Categories: General, Audio, Video, Backgrounds, Statistics, About
  */
 
-import React, { useState, useEffect } from 'react';
-import { useRoomContext } from '@livekit/components-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Track } from 'livekit-client';
+import { useRoomContext, useLocalParticipant } from '@livekit/components-react';
 import {
   SettingsIcon,
   MicIcon,
@@ -33,6 +34,77 @@ interface CallSettingsModalProps {
   onSelectSpeaker?: (id: string) => void;
 }
 
+function LiveMicBar() {
+  const { localParticipant } = useLocalParticipant();
+  const audioTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+  const level = useLiveAudioLevel(audioTrack ?? undefined);
+  const pct = Math.round(Math.min(1, Math.max(0, level)) * 100);
+  return (
+    <div
+      className="w-full h-2 rounded-full bg-black/40 overflow-hidden"
+      role="meter"
+      aria-label="Microphone input level"
+      aria-valuenow={pct}
+      aria-valuemin={0}
+      aria-valuemax={100}
+    >
+      <div className="h-full bg-emerald-400 transition-[width]" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+function useLiveAudioLevel(track?: { attach?: (el: HTMLAudioElement) => unknown } | null): number {
+  const [level, setLevel] = useState(0);
+  const stateRef = useRef<{ ctx: AudioContext | null; analyser: AnalyserNode | null; raf: number; el: HTMLAudioElement | null }>({
+    ctx: null,
+    analyser: null,
+    raf: 0,
+    el: null,
+  });
+  useEffect(() => {
+    const media = (track as unknown as { mediaStreamTrack?: MediaStreamTrack } | null | undefined)?.mediaStreamTrack;
+    if (!track || !media) {
+      setLevel(0);
+      return;
+    }
+    let cancelled = false;
+    let ctx: AudioContext | null = null;
+    let analyser: AnalyserNode | null = null;
+    let raf = 0;
+    const el: HTMLAudioElement | null = null;
+    try {
+      const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      ctx = new AC();
+      const src = ctx.createMediaStreamSource(new MediaStream([media]));
+      analyser = ctx.createAnalyser();
+      analyser.fftSize = 512;
+      src.connect(analyser);
+      const buf = new Uint8Array(analyser.frequencyBinCount);
+      const tick = () => {
+        if (cancelled || !analyser) return;
+        analyser.getByteTimeDomainData(buf);
+        let peak = 0;
+        for (let i = 0; i < buf.length; i++) {
+          const v = Math.abs(buf[i] - 128) / 128;
+          if (v > peak) peak = v;
+        }
+        setLevel(peak);
+        raf = requestAnimationFrame(tick);
+      };
+      tick();
+      stateRef.current = { ctx, analyser, raf, el };
+    } catch {
+      setLevel(0);
+    }
+    return () => {
+      cancelled = true;
+      try { cancelAnimationFrame(raf); } catch {}
+      try { ctx?.close().catch(() => {}); } catch {}
+    };
+  }, [track]);
+  return level;
+}
+
 export default function CallSettingsModal({
   onClose,
   viewMode = 'gallery',
@@ -50,29 +122,100 @@ export default function CallSettingsModal({
   const [activeMicId, setActiveMicId] = useState<string>(() => room.getActiveDevice('audioinput') ?? '');
   const [mirrorSelfView, setMirrorSelfView] = useState(true);
 
-  // Live statistics state
+  // Live statistics state — derived from the real RTCStatsReport, never synthesized.
   const [stats, setStats] = useState<{
     connectionState: string;
     serverUrl: string;
-    ping: number;
+    ping: number | null;
     participantsCount: number;
+    audioCodec: string;
+    videoCodec: string;
+    bitrateKbps: number | null;
+    packetLossPct: number | null;
   }>({
     connectionState: room.state,
     serverUrl: (room as any).serverUrl || 'LiveKit Cloud',
-    ping: 28,
+    ping: null,
     participantsCount: room.remoteParticipants.size + 1,
+    audioCodec: '—',
+    videoCodec: '—',
+    bitrateKbps: null,
+    packetLossPct: null,
   });
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      setStats({
-        connectionState: room.state,
-        serverUrl: (room as any).serverUrl || 'LiveKit Cloud',
-        ping: Math.floor(20 + Math.random() * 15),
-        participantsCount: room.remoteParticipants.size + 1,
-      });
-    }, 3000);
-    return () => clearInterval(timer);
+    let cancelled = false;
+    const collect = async () => {
+      try {
+        const peer = (room as unknown as { engine?: { pcManager?: {
+          publisher?: { getStats: () => Promise<RTCStatsReport> };
+          subscriber?: { getStats: () => Promise<RTCStatsReport> };
+        } } }).engine?.pcManager;
+        const reports: RTCStatsReport[] = [];
+        if (peer?.publisher) {
+          try { reports.push(await peer.publisher.getStats()); } catch {}
+        }
+        if (peer?.subscriber) {
+          try { reports.push(await peer.subscriber.getStats()); } catch {}
+        }
+        if (cancelled || reports.length === 0) return;
+        let rttMs: number | null = null;
+        let audioCodec = '—';
+        let videoCodec = '—';
+        let bytesNow = 0;
+        let lostNow = 0;
+        let packetsNow = 0;
+        for (const report of reports) {
+          report.forEach((s: RTCStats) => {
+            const st = s as unknown as Record<string, unknown> & { type: string; id: string };
+            if (st.type === 'candidate-pair' && (st as Record<string, unknown>).state === 'succeeded') {
+              const rtt = (st as Record<string, unknown>).currentRoundTripTime;
+              if (typeof rtt === 'number') rttMs = Math.round(rtt * 1000);
+            }
+            if (st.type === 'codec') {
+              const mime = (st as Record<string, unknown>).mimeType;
+              if (typeof mime === 'string') {
+                const short = mime.replace('audio/', '').replace('video/', '').toUpperCase();
+                if (mime.startsWith('audio/')) audioCodec = short;
+                else if (mime.startsWith('video/')) videoCodec = short;
+              }
+            }
+            if (st.type === 'inbound-rtp' || st.type === 'outbound-rtp') {
+              const bytes = (st as Record<string, unknown>).bytesReceived ?? (st as Record<string, unknown>).bytesSent;
+              if (typeof bytes === 'number') bytesNow += bytes;
+              const lost = (st as Record<string, unknown>).packetsLost;
+              if (typeof lost === 'number') lostNow += lost;
+              const count = (st as Record<string, unknown>).packetsReceived ?? (st as Record<string, unknown>).packetsSent;
+              if (typeof count === 'number') packetsNow += count;
+            }
+          });
+        }
+        setStats((prev) => {
+          const elapsedSec = 3;
+          const bitrateKbps = prev.bitrateKbps == null || bytesNow === 0
+            ? (bytesNow > 0 ? 0 : null)
+            : Math.max(0, Math.round(((bytesNow - (collect as { _bytes?: number })._bytes!) * 8) / 1000 / elapsedSec));
+          (collect as { _bytes?: number })._bytes = bytesNow;
+          const packetLossPct = packetsNow > 0 ? Math.round((lostNow / (lostNow + packetsNow)) * 1000) / 10 : null;
+          return {
+            connectionState: room.state,
+            serverUrl: (room as any).serverUrl || 'LiveKit Cloud',
+            ping: rttMs,
+            participantsCount: room.remoteParticipants.size + 1,
+            audioCodec,
+            videoCodec,
+            bitrateKbps,
+            packetLossPct,
+          };
+        });
+      } catch {}
+    };
+    collect();
+    const timer = setInterval(collect, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
   }, [room]);
 
   const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
@@ -254,10 +397,8 @@ export default function CallSettingsModal({
                 </div>
 
                 <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-1.5">
-                  <div className="text-xs font-bold text-white">Microphone Test Meter</div>
-                  <div className="w-full h-2 rounded-full bg-black/40 overflow-hidden">
-                    <div className="h-full bg-emerald-400 w-1/3 animate-pulse" />
-                  </div>
+                  <div className="text-[11px] text-white/50">Microphone Test Meter</div>
+                  <LiveMicBar />
                   <p className="text-[10px] text-white/40">Speak into your microphone to verify audio pickup.</p>
                 </div>
               </div>
@@ -321,15 +462,27 @@ export default function CallSettingsModal({
                   </div>
                   <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
                     <div className="text-[11px] text-white/50">Ping / Latency</div>
-                    <div className="text-sm font-bold text-white">{stats.ping} ms</div>
+                    <div className="text-sm font-bold text-white">{stats.ping == null ? 'Measuring…' : `${stats.ping} ms`}</div>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
                     <div className="text-[11px] text-white/50">Room Participants</div>
                     <div className="text-sm font-bold text-white">{stats.participantsCount}</div>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
-                    <div className="text-[11px] text-white/50">Codec / Protocol</div>
-                    <div className="text-sm font-bold text-white">VP8 / Opus (WebRTC)</div>
+                    <div className="text-[11px] text-white/50">Audio Codec</div>
+                    <div className="text-sm font-bold text-white">{stats.audioCodec}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
+                    <div className="text-[11px] text-white/50">Video Codec</div>
+                    <div className="text-sm font-bold text-white">{stats.videoCodec}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
+                    <div className="text-[11px] text-white/50">Bitrate</div>
+                    <div className="text-sm font-bold text-white">{stats.bitrateKbps == null ? 'Measuring…' : `${stats.bitrateKbps} kbps`}</div>
+                  </div>
+                  <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">
+                    <div className="text-[11px] text-white/50">Packet Loss</div>
+                    <div className="text-sm font-bold text-white">{stats.packetLossPct == null ? 'Measuring…' : `${stats.packetLossPct}%`}</div>
                   </div>
                 </div>
                 <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10">

@@ -41,7 +41,16 @@ export default function HostToolsModal({
   const [shareAllowed, setShareAllowed] = useState(allowParticipantShare);
   const [muting, setMuting] = useState(false);
   const [muteSuccess, setMuteSuccess] = useState(false);
+  const [confirmMuteAll, setConfirmMuteAll] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
+
+  React.useEffect(() => {
+    setLocked(isLocked);
+  }, [isLocked]);
+
+  React.useEffect(() => {
+    setShareAllowed(allowParticipantShare);
+  }, [allowParticipantShare]);
 
   const handleToggleLock = async () => {
     const next = !locked;
@@ -58,6 +67,7 @@ export default function HostToolsModal({
   };
 
   const handleMuteAll = async () => {
+    setConfirmMuteAll(false);
     setMuting(true);
     const ok = await muteAll();
     setMuting(false);
@@ -117,19 +127,40 @@ export default function HostToolsModal({
                 <div className="text-[11px] text-white/50">Turn off all student microphones</div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleMuteAll}
-              disabled={muting}
-              className="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 disabled:opacity-50"
-              style={{
-                background: muteSuccess ? '#10b981' : 'rgba(239, 68, 68, 0.25)',
-                color: muteSuccess ? '#ffffff' : '#fca5a5',
-                border: muteSuccess ? '1px solid #10b981' : '1px solid rgba(239, 68, 68, 0.4)',
-              }}
-            >
-              {muting ? 'Muting...' : muteSuccess ? '✓ Muted' : 'Mute All'}
-            </button>
+            {confirmMuteAll ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleMuteAll}
+                  disabled={muting}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {muting ? 'Muting…' : 'Confirm Mute'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmMuteAll(false)}
+                  disabled={muting}
+                  className="px-2 py-1.5 rounded-xl text-xs font-medium text-white/70 hover:text-white bg-white/10 hover:bg-white/15 cursor-pointer"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setConfirmMuteAll(true)}
+                disabled={muting}
+                className="px-3 py-1.5 rounded-xl text-xs font-bold transition cursor-pointer active:scale-95 disabled:opacity-50"
+                style={{
+                  background: muteSuccess ? '#10b981' : 'rgba(239, 68, 68, 0.25)',
+                  color: muteSuccess ? '#ffffff' : '#fca5a5',
+                  border: muteSuccess ? '1px solid #10b981' : '1px solid rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                {muteSuccess ? '✓ Muted' : 'Mute All'}
+              </button>
+            )}
           </div>
 
           {/* Action 2: Lock Meeting */}

@@ -33,7 +33,15 @@ export async function POST(
       assertSessionHost(session, ctx);
 
       const body = await request.json().catch(() => ({}));
-      const { action, value } = body || {};
+      const { action } = body || {};
+      const value =
+        body?.value !== undefined
+          ? body.value
+          : action === "lock"
+          ? body?.locked
+          : action === "participantShare"
+          ? body?.allow
+          : undefined;
 
       const roomName = generateRoomName(sessionId);
       const roomClient = getRoomServiceClient();

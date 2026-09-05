@@ -20,6 +20,7 @@ import {
   useRoomContext,
   useSpeakingParticipants,
   useRemoteParticipants,
+  useTranscriptions,
   LayoutContextProvider,
   useCreateLayoutContext,
 } from '@livekit/components-react';
@@ -312,6 +313,63 @@ function snapPoint(
   return { left, top };
 }
 
+function LiveCaptionBar({
+  lastSpeaker,
+  onUnavailable,
+  onError,
+}: {
+  lastSpeaker: string | null;
+  onUnavailable: () => void;
+  onError: (msg: string) => void;
+}) {
+  const segments = useTranscriptions();
+  const empty = segments.length === 0;
+  useEffect(() => {
+    if (!empty) return;
+    const timer = setTimeout(() => {
+      try {
+        onUnavailable();
+      } catch (e) {
+        onError(e instanceof Error ? e.message : 'Transcription unavailable.');
+      }
+    }, 15000);
+    return () => clearTimeout(timer);
+  }, [empty, onUnavailable, onError]);
+  const latest = segments.slice(-2);
+  return (
+    <div
+      className="fixed bottom-[96px] left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-2xl max-w-xl text-center pointer-events-none transition-all shadow-xl"
+      style={{
+        background: 'rgba(10, 12, 16, 0.85)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: '1px solid rgba(255, 255, 255, 0.15)',
+      }}
+      role="status"
+      aria-live="polite"
+      aria-label="Live captions"
+    >
+      <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 mb-0.5">
+        Live Captions · Subtitles
+      </div>
+      <div className="text-sm font-medium text-white space-y-0.5">
+        {latest.length === 0 ? (
+          <span className="text-neutral-400 italic">
+            {lastSpeaker ? `Listening to ${lastSpeaker.split('#')[0]}…` : 'Listening for speech…'}
+          </span>
+        ) : (
+          latest.map((seg, i) => (
+            <div key={`${seg.participantInfo.identity}-${i}`}>
+              <span className="text-emerald-300 font-semibold">{seg.participantInfo.identity.split('#')[0]}: </span>
+              <span>{seg.text}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DraggableTile({
   slot,
   customPosition,
@@ -569,6 +627,8 @@ export default function CustomVideoConference({
   const [handRaisedMap, setHandRaisedMap] = useState<Record<string, boolean>>({});
   const [floatingReactions, setFloatingReactions] = useState<{ id: string; emoji: string; x: number }[]>([]);
   const [captionsActive, setCaptionsActive] = useState(false);
+  const [captionsAvailable, setCaptionsAvailable] = useState(true);
+  const [captionsError, setCaptionsError] = useState<string | null>(null);
   const [whiteboardActive, setWhiteboardActive] = useState(false);
   const tapStartTimeRef = useRef(0);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1436,6 +1496,7 @@ export default function CustomVideoConference({
               captionsActive={captionsActive}
               onToggleWhiteboard={() => setWhiteboardActive((v) => !v)}
               whiteboardActive={whiteboardActive}
+              sessionIdProp={sessionId}
               participantsCount={all.length}
               onHandRaiseChange={(raised) => {
                 const myId = room.localParticipant.identity;
@@ -1447,32 +1508,38 @@ export default function CustomVideoConference({
           </div>
 
           {whiteboardActive && (
-            <WhiteboardOverlay onClose={() => setWhiteboardActive(false)} />
+            <WhiteboardOverlay
+              sessionId={sessionId}
+              isHost={isHost}
+              onClose={() => setWhiteboardActive(false)}
+            />
           )}
 
           {captionsActive && (
+            <LiveCaptionBar
+              lastSpeaker={lastSpeaker}
+              onUnavailable={() => setCaptionsAvailable(false)}
+              onError={(msg) => setCaptionsError(msg)}
+            />
+          )}
+          {captionsActive && !captionsAvailable && (
             <div
-              className="fixed bottom-[96px] left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-2xl max-w-xl text-center pointer-events-none transition-all shadow-xl"
-              style={{
-                background: 'rgba(10, 12, 16, 0.85)',
-                backdropFilter: 'blur(20px)',
-                WebkitBackdropFilter: 'blur(20px)',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-              }}
+              role="alert"
+              className="fixed bottom-[96px] left-1/2 -translate-x-1/2 z-40 px-5 py-2.5 rounded-2xl max-w-xl text-center shadow-xl"
+              style={{ background: 'rgba(10, 12, 16, 0.85)', border: '1px solid rgba(255, 255, 255, 0.15)' }}
             >
-              <div className="text-[10px] uppercase font-bold tracking-wider text-emerald-400 mb-0.5">
-                Live Captions · Subtitles
-              </div>
-              <div className="text-sm font-medium text-white">
-                {lastSpeaker ? (
-                  <>
-                    <span className="text-emerald-300 font-semibold">{lastSpeaker.split('#')[0]}: </span>
-                    <span className="italic text-neutral-300">Speaking / reciting…</span>
-                  </>
-                ) : (
-                  <span className="text-neutral-400 italic">Waiting for audio speech…</span>
-                )}
-              </div>
+              <div className="text-sm font-medium text-white">Captions unavailable — no transcription service is publishing to this room.</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCaptionsError(null);
+                  setCaptionsAvailable(true);
+                }}
+                className="mt-1 text-xs font-bold text-emerald-300 underline cursor-pointer"
+              >
+                Retry
+              </button>
+              {captionsError && <div className="text-[11px] text-white/50 mt-0.5">{captionsError}</div>}
             </div>
           )}
 

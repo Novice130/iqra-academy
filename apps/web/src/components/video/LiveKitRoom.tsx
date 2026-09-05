@@ -330,7 +330,9 @@ export default function LiveKitRoom({
     }
 
     if (isHost && endOnDisconnectRef.current) {
-      fetch(`/api/sessions/${sessionId}/end`, { method: 'POST' }).catch(() => {});
+      recordLeave();
+      navigateAway();
+      return;
     }
     recordLeave();
     navigateAway();

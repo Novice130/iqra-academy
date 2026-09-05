@@ -40,6 +40,7 @@ import {
   FlipCameraIcon,
   HandRaiseIcon,
   HostShieldIcon,
+  BreakoutIcon,
   InfoIcon,
   LeaveIcon,
   MicIcon,
@@ -55,6 +56,7 @@ import {
 } from './CallIcons';
 import CallSettingsModal from './CallSettingsModal';
 import HostToolsModal from './HostToolsModal';
+import BreakoutPanel from './BreakoutPanel';
 
 export type ViewMode = 'speaker' | 'gallery' | 'active';
 
@@ -82,6 +84,9 @@ export default function CallControlBar({
   captionsActive = false,
   onToggleWhiteboard,
   whiteboardActive = false,
+  sessionIdProp,
+  onToggleBreakout,
+  breakoutOpen = false,
   participantsCount = 1,
   onHandRaiseChange,
   onReaction,
@@ -101,6 +106,9 @@ export default function CallControlBar({
   captionsActive?: boolean;
   onToggleWhiteboard?: () => void;
   whiteboardActive?: boolean;
+  sessionIdProp?: string;
+  onToggleBreakout?: () => void;
+  breakoutOpen?: boolean;
   participantsCount?: number;
   onHandRaiseChange?: (raised: boolean) => void;
   onReaction?: (emoji: string) => void;
@@ -109,12 +117,19 @@ export default function CallControlBar({
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hostToolsOpen, setHostToolsOpen] = useState(false);
+  const [breakoutFallbackOpen, setBreakoutFallbackOpen] = useState(false);
+  const breakoutOpenEffective = onToggleBreakout ? breakoutOpen : breakoutFallbackOpen;
+  const toggleBreakout = onToggleBreakout ?? (() => setBreakoutFallbackOpen((v) => !v));
+  const breakoutSessionId = sessionIdProp ?? '';
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [micMenuOpen, setMicMenuOpen] = useState(false);
   const [camMenuOpen, setCamMenuOpen] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [stopIncomingVideo, setStopIncomingVideo] = useState(false);
+  const stoppedVideoSubsRef = React.useRef<Map<string, boolean>>(new Map());
   const [endConfirmOpen, setEndConfirmOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [endError, setEndError] = useState<string | null>(null);
 
   const mic = useTrackToggle({ source: Track.Source.Microphone });
   const camera = useTrackToggle({ source: Track.Source.Camera });
@@ -124,6 +139,7 @@ export default function CallControlBar({
   const [mics, setMics] = useState<MediaDeviceInfo[]>([]);
   const [speakers, setSpeakers] = useState<MediaDeviceInfo[]>([]);
   const [audioOutputDeviceId, setAudioOutputDeviceId] = useState<string>();
+  const [deviceError, setDeviceError] = useState<string | null>(null);
 
   const cycleCamera = useCycleCamera();
   const hasMultipleCameras = useHasMultipleCameras();
@@ -146,12 +162,60 @@ export default function CallControlBar({
       setCameras(all.filter((d) => d.kind === 'videoinput'));
       setMics(all.filter((d) => d.kind === 'audioinput'));
       setSpeakers(all.filter((d) => d.kind === 'audiooutput'));
-    } catch {}
+      setDeviceError(null);
+    } catch {
+      setDeviceError('Could not list devices. Check browser permissions and try again.');
+    }
   };
 
   useEffect(() => {
     refreshDevices();
+    let handler: (() => void) | undefined;
+    try {
+      handler = () => refreshDevices();
+      navigator.mediaDevices?.addEventListener?.('devicechange', handler);
+    } catch {}
+    return () => {
+      try {
+        if (handler) navigator.mediaDevices?.removeEventListener?.('devicechange', handler);
+      } catch {}
+    };
   }, []);
+
+  const [micError, setMicError] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const handleMicToggle = async () => {
+    setMicError(null);
+    try {
+      await mic.toggle();
+    } catch (e) {
+      const name = (e as Error)?.name;
+      setMicError(
+        name === 'NotAllowedError'
+          ? 'Microphone blocked. Allow access in the browser address bar, then try again.'
+          : name === 'OverconstrainedError' || name === 'NotFoundError'
+            ? 'No usable microphone was found. Connect one and use the device menu to pick it.'
+            : 'Could not toggle the microphone. Try again.'
+      );
+    }
+  };
+
+  const handleCameraToggle = async () => {
+    setCameraError(null);
+    try {
+      await camera.toggle();
+    } catch (e) {
+      const name = (e as Error)?.name;
+      setCameraError(
+        name === 'NotAllowedError'
+          ? 'Camera blocked. Allow access in the browser address bar, then try again.'
+          : name === 'OverconstrainedError' || name === 'NotFoundError'
+            ? 'No usable camera was found. Connect one and use the device menu to pick it.'
+            : 'Could not toggle the camera. Try again.'
+      );
+    }
+  };
 
   const toggleNativeShare = async () => {
     if (!sessionId || nativePending) return;
@@ -174,7 +238,38 @@ export default function CallControlBar({
   const isModerator = room.localParticipant.permissions?.canPublishData ?? false;
   const isAppShell = typeof window !== 'undefined' && (/NoviceTutorApp/.test(navigator.userAgent) || typeof window.flutter_inappwebview !== 'undefined');
   const hasBrowserDisplayMedia = typeof navigator !== 'undefined' && typeof navigator.mediaDevices !== 'undefined' && !!navigator.mediaDevices.getDisplayMedia;
-  const canScreenShare = (isModerator || isHost) && (nativeShell || (!isAppShell && hasBrowserDisplayMedia));
+  const [allowParticipantShare, setAllowParticipantShare] = useState<boolean>(true);
+  const [roomLocked, setRoomLocked] = useState<boolean>(false);
+  useEffect(() => {
+    let cancelled = false;
+    const applyMetadata = (raw?: string) => {
+      if (!raw) return;
+      try {
+        const parsed = JSON.parse(raw);
+        if (!cancelled && typeof parsed.allowParticipantShare === 'boolean') {
+          setAllowParticipantShare(parsed.allowParticipantShare);
+        }
+        if (!cancelled && typeof parsed.isLocked === 'boolean') {
+          setRoomLocked(parsed.isLocked);
+        }
+      } catch {}
+    };
+    applyMetadata(room.metadata);
+    const handler = () => {
+      applyMetadata(room.metadata);
+    };
+    try {
+      (room as unknown as { on: (e: string, h: () => void) => void }).on('RoomMetadataChanged', handler);
+    } catch {}
+    return () => {
+      cancelled = true;
+      try {
+        (room as unknown as { off: (e: string, h: () => void) => void }).off('RoomMetadataChanged', handler);
+      } catch {}
+    };
+  }, [room]);
+  const sharePolicyAllows = isHost || allowParticipantShare !== false;
+  const canScreenShare = (isModerator || isHost) && sharePolicyAllows && (nativeShell || (!isAppShell && hasBrowserDisplayMedia));
   const isSharing = nativeShell ? nativeSharing : screenShare.enabled;
 
   const toggleHandRaise = () => {
@@ -211,33 +306,48 @@ export default function CallControlBar({
     try {
       for (const p of room.remoteParticipants.values()) {
         for (const pub of p.videoTrackPublications.values()) {
-          pub.setEnabled(!next);
+          const remote = pub as unknown as {
+            setSubscribed?: (v: boolean) => void;
+            isSubscribed?: boolean;
+          };
+          if (next) {
+            stoppedVideoSubsRef.current.set(pub.trackSid, remote.isSubscribed ?? true);
+            remote.setSubscribed?.(false);
+          } else {
+            const wasOn = stoppedVideoSubsRef.current.get(pub.trackSid);
+            if (wasOn !== false) remote.setSubscribed?.(true);
+          }
         }
       }
+      if (!next) stoppedVideoSubsRef.current.clear();
     } catch {}
   };
 
   const handleExecuteEnd = async (endForAll: boolean) => {
     setEndConfirmOpen(false);
+    if (ending) return;
+    setEnding(true);
+    setEndError(null);
     try {
       if (endForAll && isHost) {
         onEndClassIntent();
         try {
-          const payload = new TextEncoder().encode(JSON.stringify({ type: 'CLASS_ENDED', sessionId }));
-          room.localParticipant.publishData(payload, { reliable: true }).catch(() => {});
-        } catch {}
-        fetch(`/api/sessions/${sessionId}/end`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true,
-        }).catch(() => {});
+          await fetch(`/api/sessions/${sessionId}/end`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+          });
+        } catch (e) {
+          setEndError('Could not end the class on the server. You have left the room; the class may still show as live.');
+        }
       }
-      room.disconnect();
+      await room.disconnect();
     } catch (err) {
       console.warn('Disconnect error:', err);
       if (typeof window !== 'undefined') {
         window.location.href = '/dashboard';
       }
+    } finally {
+      setEnding(false);
     }
   };
 
@@ -263,7 +373,7 @@ export default function CallControlBar({
             <div className="flex items-center">
               <button
                 type="button"
-                onClick={() => mic.toggle()}
+                onClick={handleMicToggle}
                 disabled={mic.pending}
                 title={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
                 aria-label={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
@@ -291,6 +401,12 @@ export default function CallControlBar({
             <span className="text-[10px] text-white/70 font-medium mt-1 select-none">
               {mic.enabled ? 'Mute' : 'Unmute'}
             </span>
+            {micError && (
+              <span role="alert" className="mt-1 max-w-[160px] text-center text-[10px] font-semibold text-amber-300">
+                {micError}{' '}
+                <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+              </span>
+            )}
 
             {/* Mic device dropdown */}
             {micMenuOpen && (
@@ -303,6 +419,18 @@ export default function CallControlBar({
                   <div className="font-bold text-white text-[11px] uppercase tracking-wider px-1">
                     Select Microphone
                   </div>
+                  {deviceError && (
+                    <div role="alert" className="px-1 text-[11px] text-amber-300">
+                      {deviceError}{' '}
+                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                    </div>
+                  )}
+                  {mics.length === 0 && !deviceError && (
+                    <div className="px-1 text-[11px] text-white/60">
+                      No microphones found. Connect one, allow permission, then{' '}
+                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>.
+                    </div>
+                  )}
                   <div className="space-y-1 max-h-48 overflow-y-auto">
                     {mics.map((m) => {
                       const active = room.getActiveDevice('audioinput') === m.deviceId;
@@ -333,7 +461,7 @@ export default function CallControlBar({
             <div className="flex items-center">
               <button
                 type="button"
-                onClick={() => camera.toggle()}
+                onClick={handleCameraToggle}
                 disabled={camera.pending}
                 title={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
                 aria-label={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
@@ -361,6 +489,12 @@ export default function CallControlBar({
             <span className="text-[10px] text-white/70 font-medium mt-1 select-none">
               {camera.enabled ? 'Stop Video' : 'Start Video'}
             </span>
+            {cameraError && (
+              <span role="alert" className="mt-1 max-w-[160px] text-center text-[10px] font-semibold text-amber-300">
+                {cameraError}{' '}
+                <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+              </span>
+            )}
 
             {/* Camera device dropdown */}
             {camMenuOpen && (
@@ -373,6 +507,18 @@ export default function CallControlBar({
                   <div className="font-bold text-white text-[11px] uppercase tracking-wider px-1">
                     Select Camera
                   </div>
+                  {deviceError && (
+                    <div role="alert" className="px-1 text-[11px] text-amber-300">
+                      {deviceError}{' '}
+                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                    </div>
+                  )}
+                  {cameras.length === 0 && !deviceError && (
+                    <div className="px-1 text-[11px] text-white/60">
+                      No cameras found. Connect one, allow permission, then{' '}
+                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>.
+                    </div>
+                  )}
                   <div className="space-y-1 max-h-48 overflow-y-auto">
                     {cameras.map((c) => {
                       const active = room.getActiveDevice('videoinput') === c.deviceId;
@@ -587,12 +733,14 @@ export default function CallControlBar({
             <button
               type="button"
               onClick={() => {
+                if (ending) return;
                 if (isHost) {
                   setEndConfirmOpen(true);
                 } else {
                   handleExecuteEnd(false);
                 }
               }}
+              disabled={ending}
               title={isHost ? 'End or leave class' : 'Leave call'}
               aria-label={isHost ? 'End or leave class' : 'Leave call'}
               className="w-13 sm:w-16 h-11 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-lg hover:brightness-110"
@@ -608,6 +756,11 @@ export default function CallControlBar({
             <span className="text-[10px] text-red-400 font-bold mt-1 select-none">
               {isHost ? 'End' : 'Leave'}
             </span>
+            {endError && (
+              <span role="alert" className="mt-1 max-w-[180px] text-center text-[10px] font-semibold text-amber-300">
+                {endError}
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -739,7 +892,31 @@ export default function CallControlBar({
                   </button>
                 )}
 
-                {/* 2. Captions */}
+                {/* 2. Breakout Rooms */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoreMenuOpen(false);
+                    toggleBreakout();
+                  }}
+                  className={`p-3 rounded-2xl border text-left transition cursor-pointer flex items-center gap-3 ${
+                    breakoutOpenEffective
+                      ? 'bg-amber-600/20 border-amber-500/80 text-white'
+                      : 'bg-white/5 border-white/10 text-white/80 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                    <BreakoutIcon className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold text-white">Breakout Rooms</div>
+                    <div className="text-[10px] text-white/50">
+                      {breakoutOpenEffective ? 'Manage Groups' : 'Split & Group'}
+                    </div>
+                  </div>
+                </button>
+
+                {/* 3. Captions */}
                 <button
                   type="button"
                   onClick={() => {
@@ -762,7 +939,7 @@ export default function CallControlBar({
                   </div>
                 </button>
 
-                {/* 3. Visual Effects / Backgrounds */}
+                {/* 4. Visual Effects / Backgrounds */}
                 {onToggleEffects && (
                   <button
                     type="button"
@@ -782,7 +959,7 @@ export default function CallControlBar({
                   </button>
                 )}
 
-                {/* 4. Stop Incoming Video (Bandwidth saver) */}
+                {/* 5. Stop Incoming Video (Bandwidth saver) */}
                 <button
                   type="button"
                   onClick={toggleStopIncomingVideo}
@@ -803,7 +980,7 @@ export default function CallControlBar({
                   </div>
                 </button>
 
-                {/* 5. Flip Camera (mobile) */}
+                {/* 6. Flip Camera (mobile) */}
                 {hasMultipleCameras && (
                   <button
                     type="button"
@@ -823,7 +1000,7 @@ export default function CallControlBar({
                   </button>
                 )}
 
-                {/* 6. Settings */}
+                {/* 7. Settings */}
                 <button
                   type="button"
                   onClick={() => {
@@ -893,16 +1070,18 @@ export default function CallControlBar({
               <button
                 type="button"
                 onClick={() => handleExecuteEnd(true)}
-                className="w-full py-2.5 rounded-2xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer transition active:scale-95 shadow-lg"
+                disabled={ending}
+                className="w-full py-2.5 rounded-2xl text-xs font-bold bg-red-600 hover:bg-red-700 text-white cursor-pointer transition active:scale-95 shadow-lg disabled:opacity-50"
               >
-                End Class for Everyone
+                {ending ? 'Ending…' : 'End Class for Everyone'}
               </button>
               <button
                 type="button"
                 onClick={() => handleExecuteEnd(false)}
-                className="w-full py-2.5 rounded-2xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white cursor-pointer transition"
+                disabled={ending}
+                className="w-full py-2.5 rounded-2xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white cursor-pointer transition disabled:opacity-50"
               >
-                Leave Class (Keep Running)
+                {ending ? 'Leaving…' : 'Leave Class (Keep Running)'}
               </button>
               <button
                 type="button"
@@ -931,10 +1110,26 @@ export default function CallControlBar({
         />
       )}
 
+      {/* BREAKOUT ROOMS PANEL */}
+      {breakoutOpenEffective && (
+        <BreakoutPanel
+          sessionId={breakoutSessionId || sessionId || ''}
+          isHost={isHost}
+          onClose={() => {
+            if (onToggleBreakout) onToggleBreakout();
+            else setBreakoutFallbackOpen(false);
+          }}
+        />
+      )}
+
       {/* HOST TOOLS MODAL */}
       {hostToolsOpen && (
         <HostToolsModal
           sessionId={sessionId || ''}
+          isLocked={roomLocked}
+          allowParticipantShare={allowParticipantShare}
+          onLockChange={(locked) => setRoomLocked(locked)}
+          onSharePolicyChange={(allowed) => setAllowParticipantShare(allowed)}
           onEndClassIntent={onEndClassIntent}
           onClose={() => setHostToolsOpen(false)}
           onOpenGuests={onTogglePeople}

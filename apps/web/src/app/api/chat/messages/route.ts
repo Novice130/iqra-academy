@@ -13,6 +13,7 @@ import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
 import { eq, and, asc, isNull, gte, lt, sql } from "drizzle-orm";
 import { chatMessages, chatRooms, notifications, subscriptions, users } from "@/db/schema";
+import { loadOrgSession, assertSessionViewer } from "@/lib/session-access";
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { createId } from "@paralleldrive/cuid2";
@@ -59,8 +60,10 @@ export async function GET(request: NextRequest) {
 
         let room;
         if (sessionId) {
+          const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+          assertSessionViewer(session, ctx);
           room = await tx.query.chatRooms.findFirst({
-            where: and(eq(chatRooms.sessionId, sessionId), eq(chatRooms.orgId, ctx.orgId)),
+            where: and(eq(chatRooms.sessionId, session.id), eq(chatRooms.orgId, ctx.orgId)),
           });
           if (!room) throw new NotFoundError("Chat room for this session");
         } else if (studentId) {
@@ -147,8 +150,10 @@ export async function POST(request: NextRequest) {
         let roomSessionId: string | null = null;
 
         if (sessionId) {
-          roomName = `Session ${sessionId}`;
-          roomSessionId = sessionId;
+          const session = await loadOrgSession(ctx.orgId, sessionId, ctx.role);
+          assertSessionViewer(session, ctx);
+          roomName = `Session ${session.id}`;
+          roomSessionId = session.id;
         } else if (studentId) {
           if (!STAFF_ROLES.includes(ctx.role)) {
             throw new ForbiddenError("Only staff can reply in a student's support thread.");
