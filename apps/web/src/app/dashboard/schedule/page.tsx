@@ -70,6 +70,10 @@ export default async function SchedulePage({ searchParams }: Props) {
       title: sessions.title,
       teacherName: usersTable.name,
       start: sessions.scheduledStart,
+      end: sessions.scheduledEnd,
+      actualStart: sessions.actualStart,
+      status: sessions.status,
+      teacherId: sessions.teacherId,
       id_session: sessions.id,
     })
     .from(bookings)
@@ -86,6 +90,10 @@ export default async function SchedulePage({ searchParams }: Props) {
     track: b.track,
     title: b.title,
     start: b.start ? (typeof b.start === "string" ? b.start : b.start.toISOString()) : new Date().toISOString(),
+    end: b.end ? (typeof b.end === "string" ? b.end : b.end.toISOString()) : null,
+    actualStart: b.actualStart ? (typeof b.actualStart === "string" ? b.actualStart : b.actualStart.toISOString()) : null,
+    status: b.status || "SCHEDULED",
+    teacherId: b.teacherId,
   }));
 
   return (
@@ -124,7 +132,11 @@ export default async function SchedulePage({ searchParams }: Props) {
         </div>
       </div>
 
-      <WeekGrid bookings={gridBookings} weekOffset={weekOffset} />
+      <WeekGrid
+        bookings={gridBookings}
+        weekOffset={weekOffset}
+        viewer={{ userId: user.id, role, isTeacher, isAdmin }}
+      />
     </div>
   );
   });

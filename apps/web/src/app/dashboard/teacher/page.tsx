@@ -134,6 +134,8 @@ export default async function TeacherDashboard() {
   const scheduleRows: ScheduleRow[] = todaySessions.map((s) => ({
     id: s.id,
     scheduledStart: safeIso(s.scheduledStart) || new Date().toISOString(),
+    scheduledEnd: safeIso(s.scheduledEnd),
+    teacherId: s.teacherId,
     status: s.status,
     title: s.title,
     track: s.track,
@@ -188,7 +190,7 @@ export default async function TeacherDashboard() {
             Today&apos;s Schedule
           </h2>
           <div className="card">
-            <TodaySchedule rows={scheduleRows} />
+            <TodaySchedule rows={scheduleRows} currentUserId={user.id} />
           </div>
         </div>
 

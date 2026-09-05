@@ -5,7 +5,8 @@
 
 export default function SessionLoading() {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-[#0b0f17] text-white animate-pulse">
+    <div className="fixed inset-0 z-50 flex flex-col bg-[#0b0f17] text-white animate-pulse" role="status" aria-live="polite">
+      <span className="sr-only">Loading classroom...</span>
       {/* Top Bar Skeleton */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
         <div className="flex items-center gap-3">

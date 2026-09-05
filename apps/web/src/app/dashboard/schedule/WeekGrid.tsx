@@ -16,7 +16,11 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { useViewerTimeZone } from '@/components/LocalTime';
-import { getMeetingLifecycleState } from '@/lib/class-action';
+import ClassActionButton from '@/components/ClassActionButton';
+import {
+  getClassActionState,
+  type ClassActionViewer,
+} from '@/lib/class-action';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -28,6 +32,10 @@ export interface WeekBooking {
   track: string | null;
   title: string | null;
   start: string;
+  end?: string | null;
+  actualStart?: string | null;
+  status?: string | null;
+  teacherId?: string | null;
 }
 
 function startOfLocalWeek(offsetWeeks: number) {
@@ -53,9 +61,11 @@ function hourLabel(hour: number) {
 export default function WeekGrid({
   bookings,
   weekOffset,
+  viewer,
 }: {
   bookings: WeekBooking[];
   weekOffset: number;
+  viewer?: ClassActionViewer;
 }) {
   const tz = useViewerTimeZone();
   const [viewMode, setViewMode] = useState<'week' | 'list'>('week');
@@ -129,10 +139,24 @@ export default function WeekGrid({
             </div>
           ) : (
             inWeek.map((b) => {
-              const lifecycle = getMeetingLifecycleState({ status: 'SCHEDULED', scheduledStart: b.start });
-              const isPast = lifecycle === 'COMPLETED' || lifecycle === 'EXPIRED';
-              const isLive = lifecycle === 'LIVE';
-              const isReady = lifecycle === 'READY';
+              const sessionPayload = {
+                id: b.sessionId,
+                status: b.status || 'SCHEDULED',
+                scheduledStart: b.start,
+                scheduledEnd: b.end,
+                actualStart: b.actualStart,
+                teacherId: b.teacherId,
+                title: b.title,
+                track: b.track,
+              };
+              const actionViewer: ClassActionViewer = viewer || { role: 'STUDENT' };
+              const actionState = getClassActionState(sessionPayload, actionViewer);
+              const isPast =
+                actionState.state === 'COMPLETED' ||
+                actionState.state === 'EXPIRED' ||
+                actionState.state === 'CANCELLED';
+              const isLive = actionState.state === 'LIVE';
+              const isReady = actionState.state === 'READY';
 
               const dateStr = new Date(b.start).toLocaleDateString('en-US', {
                 weekday: 'short',
@@ -194,26 +218,15 @@ export default function WeekGrid({
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
                         </span>
                       )}
-                      {lifecycle}
+                      {actionState.state}
                     </span>
 
-                    {/* Action */}
-                    {isPast ? (
-                      <span className="text-xs px-3 py-1.5 rounded-xl text-[var(--text-tertiary)] bg-[var(--bg-secondary)]">
-                        Ended
-                      </span>
-                    ) : (
-                      <Link
-                        href={`/dashboard/session/${b.sessionId}`}
-                        className={`text-xs font-semibold px-4 py-1.5 rounded-xl transition ${
-                          isLive || isReady
-                            ? 'bg-[var(--accent)] text-white shadow-xs hover:opacity-90'
-                            : 'bg-[var(--bg-secondary)] text-[var(--text-primary)] hover:bg-[var(--border)]'
-                        }`}
-                      >
-                        {isLive ? 'Join Live' : isReady ? 'Join Class' : 'View Class'}
-                      </Link>
-                    )}
+                    {/* Canonical Action Button */}
+                    <ClassActionButton
+                      session={sessionPayload}
+                      viewer={actionViewer}
+                      variant="compact"
+                    />
                   </div>
                 </div>
               );
@@ -266,9 +279,23 @@ export default function WeekGrid({
                     style={{ borderRight: dayIndex < 6 ? '1px solid var(--border)' : undefined }}
                   >
                     {atSlot.map((b) => {
-                      const lifecycle = getMeetingLifecycleState({ status: 'SCHEDULED', scheduledStart: b.start });
-                      const isPast = lifecycle === 'COMPLETED' || lifecycle === 'EXPIRED';
-                      const isLive = lifecycle === 'LIVE';
+                      const sessionPayload = {
+                        id: b.sessionId,
+                        status: b.status || 'SCHEDULED',
+                        scheduledStart: b.start,
+                        scheduledEnd: b.end,
+                        actualStart: b.actualStart,
+                        teacherId: b.teacherId,
+                        title: b.title,
+                        track: b.track,
+                      };
+                      const actionViewer: ClassActionViewer = viewer || { role: 'STUDENT' };
+                      const actionState = getClassActionState(sessionPayload, actionViewer);
+                      const isPast =
+                        actionState.state === 'COMPLETED' ||
+                        actionState.state === 'EXPIRED' ||
+                        actionState.state === 'CANCELLED';
+                      const isLive = actionState.state === 'LIVE';
 
                       const tileContent = (
                         <>
@@ -287,13 +314,15 @@ export default function WeekGrid({
                         </>
                       );
 
-                      if (isPast) {
+                      if (actionState.disabled || !actionState.actionUrl) {
                         return (
                           <div
                             key={b.id}
-                            className="block rounded-lg p-2 text-white text-[10px] cursor-default mb-1 leading-tight shadow-xs opacity-60 grayscale-[40%]"
+                            className={`block rounded-lg p-2 text-white text-[10px] cursor-default mb-1 leading-tight shadow-xs ${
+                              isPast ? 'opacity-60 grayscale-[40%]' : 'opacity-85'
+                            }`}
                             style={{ background: getStudentColor(b.studentId) }}
-                            title="Class completed / expired"
+                            title={actionState.state === 'UPCOMING' ? actionState.countdownText || 'Upcoming Class' : actionState.label}
                           >
                             {tileContent}
                           </div>
@@ -303,9 +332,10 @@ export default function WeekGrid({
                       return (
                         <Link
                           key={b.id}
-                          href={`/dashboard/session/${b.sessionId}`}
+                          href={actionState.actionUrl}
                           className="block rounded-lg p-2 text-white text-[10px] cursor-pointer transition-transform hover:scale-[1.02] mb-1 leading-tight shadow-sm"
                           style={{ background: getStudentColor(b.studentId) }}
+                          title={actionState.label}
                         >
                           {tileContent}
                         </Link>

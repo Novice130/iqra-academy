@@ -5,7 +5,8 @@
 
 export default function BookingLoading() {
   return (
-    <div className="p-6 sm:p-8 max-w-[760px] mx-auto animate-pulse space-y-5">
+    <div className="p-6 sm:p-8 max-w-[760px] mx-auto animate-pulse space-y-5" role="status" aria-live="polite">
+      <span className="sr-only">Loading booking calendar...</span>
       {/* Title Skeleton */}
       <div className="space-y-2">
         <div className="h-7 w-52 rounded bg-[var(--border)]" />

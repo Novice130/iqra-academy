@@ -22,7 +22,9 @@ import {
   LATE_JOIN_MS,
   LIVE_WINDOW_MS,
   SIBLING_WINDOW_MS,
-} from "@/lib/class-room";
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+} from "@/lib/meeting-constants";
 import { generateLiveKitToken, generateRoomName } from "@/lib/livekit";
 import { sendCallPush, sendPushToUsers } from "@/lib/fcm";
 import { sendWebPushToUsers } from "@/lib/webpush";
@@ -33,16 +35,14 @@ import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
 
-export { EARLY_JOIN_MS, LATE_JOIN_MS, LIVE_WINDOW_MS, SIBLING_WINDOW_MS };
-
-/** Time windows around now for scheduled class resolution.
- * Aliased (not copied) from lib/class-room.ts so the resolver and the join
- * window cannot drift: at any instant the button and the resolver must agree
- * on whether a class is "due", or teacher and student land in different rooms.
- * (The client-side mirror in lib/class-action.ts is value-checked by test.)
- */
-export const SCHEDULED_BEFORE_MS = EARLY_JOIN_MS; // T-60
-export const SCHEDULED_AFTER_MS = LATE_JOIN_MS; // T+180
+export {
+  EARLY_JOIN_MS,
+  LATE_JOIN_MS,
+  LIVE_WINDOW_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+};
 
 export {
   getMeetingLifecycleState,

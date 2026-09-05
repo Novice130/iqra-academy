@@ -7,15 +7,23 @@
  * @module lib/class-action
  */
 
-// NOTE: mirrors of lib/class-room.ts BY DESIGN, not by accident.
-// class-room.ts imports the db layer (server-only); this file ships to the
-// browser via ClassActionButton/WeekGrid, so importing it here would drag
-// drizzle into client bundles. The lifecycle spec asserts the values match —
-// if you change one side, change both and keep the test green.
-export const EARLY_JOIN_MS = 60 * 60 * 1000; // T-60, must equal class-room.ts
-export const LATE_JOIN_MS = 3 * 60 * 60 * 1000; // T+180, must equal class-room.ts
-export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000; // 6h, must equal class-room.ts
-export const SIBLING_WINDOW_MS = 90 * 60 * 1000; // 90m, must equal class-room.ts
+import {
+  EARLY_JOIN_MS,
+  LATE_JOIN_MS,
+  LIVE_WINDOW_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+} from "@/lib/meeting-constants";
+
+export {
+  EARLY_JOIN_MS,
+  LATE_JOIN_MS,
+  LIVE_WINDOW_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+};
 
 export type MeetingLifecycleState =
   | "UPCOMING"

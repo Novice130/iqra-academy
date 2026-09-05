@@ -1,26 +1,62 @@
 import { test, expect } from "../fixtures/test";
 import {
   getClassActionState,
+  getMeetingLifecycleState,
   formatClassDuration,
   formatClassCountdown,
   EARLY_JOIN_MS,
   LATE_JOIN_MS,
   LIVE_WINDOW_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
   type ClassActionSession,
 } from "../../src/lib/class-action";
+import * as meetingConstants from "../../src/lib/meeting-constants";
+import * as classRoomExports from "../../src/lib/class-room";
 import * as meetingServiceExports from "../../src/lib/meeting-service";
 
 test.describe("Phase 5: Class Action Button & Navigation Responsiveness", () => {
   const baseNow = new Date("2026-09-04T12:00:00.000Z");
 
-  test("pure class-action exports are re-exported by meeting-service for backward compatibility", () => {
+  test("parity for all mirrored constants across meeting-constants, class-action, class-room, and meeting-service", () => {
+    // Single source in meeting-constants
+    expect(meetingConstants.EARLY_JOIN_MS).toBe(60 * 60 * 1000);
+    expect(meetingConstants.LATE_JOIN_MS).toBe(3 * 60 * 60 * 1000);
+    expect(meetingConstants.LIVE_WINDOW_MS).toBe(6 * 60 * 60 * 1000);
+    expect(meetingConstants.SIBLING_WINDOW_MS).toBe(90 * 60 * 1000);
+    expect(meetingConstants.SCHEDULED_BEFORE_MS).toBe(meetingConstants.EARLY_JOIN_MS);
+    expect(meetingConstants.SCHEDULED_AFTER_MS).toBe(meetingConstants.LATE_JOIN_MS);
+
+    // Re-exported in class-action
+    expect(EARLY_JOIN_MS).toBe(meetingConstants.EARLY_JOIN_MS);
+    expect(LATE_JOIN_MS).toBe(meetingConstants.LATE_JOIN_MS);
+    expect(LIVE_WINDOW_MS).toBe(meetingConstants.LIVE_WINDOW_MS);
+    expect(SIBLING_WINDOW_MS).toBe(meetingConstants.SIBLING_WINDOW_MS);
+    expect(SCHEDULED_BEFORE_MS).toBe(meetingConstants.SCHEDULED_BEFORE_MS);
+    expect(SCHEDULED_AFTER_MS).toBe(meetingConstants.SCHEDULED_AFTER_MS);
+
+    // Re-exported in class-room
+    expect(classRoomExports.EARLY_JOIN_MS).toBe(meetingConstants.EARLY_JOIN_MS);
+    expect(classRoomExports.LATE_JOIN_MS).toBe(meetingConstants.LATE_JOIN_MS);
+    expect(classRoomExports.LIVE_WINDOW_MS).toBe(meetingConstants.LIVE_WINDOW_MS);
+    expect(classRoomExports.SIBLING_WINDOW_MS).toBe(meetingConstants.SIBLING_WINDOW_MS);
+    expect(classRoomExports.SCHEDULED_BEFORE_MS).toBe(meetingConstants.SCHEDULED_BEFORE_MS);
+    expect(classRoomExports.SCHEDULED_AFTER_MS).toBe(meetingConstants.SCHEDULED_AFTER_MS);
+
+    // Re-exported in meeting-service
+    expect(meetingServiceExports.EARLY_JOIN_MS).toBe(meetingConstants.EARLY_JOIN_MS);
+    expect(meetingServiceExports.LATE_JOIN_MS).toBe(meetingConstants.LATE_JOIN_MS);
+    expect(meetingServiceExports.LIVE_WINDOW_MS).toBe(meetingConstants.LIVE_WINDOW_MS);
+    expect(meetingServiceExports.SIBLING_WINDOW_MS).toBe(meetingConstants.SIBLING_WINDOW_MS);
+    expect(meetingServiceExports.SCHEDULED_BEFORE_MS).toBe(meetingConstants.SCHEDULED_BEFORE_MS);
+    expect(meetingServiceExports.SCHEDULED_AFTER_MS).toBe(meetingConstants.SCHEDULED_AFTER_MS);
+
+    // Functions re-exported in meeting-service
     expect(typeof meetingServiceExports.getClassActionState).toBe("function");
     expect(typeof meetingServiceExports.getMeetingLifecycleState).toBe("function");
     expect(typeof meetingServiceExports.formatClassDuration).toBe("function");
     expect(typeof meetingServiceExports.formatClassCountdown).toBe("function");
-    expect(meetingServiceExports.EARLY_JOIN_MS).toBe(EARLY_JOIN_MS);
-    expect(meetingServiceExports.LATE_JOIN_MS).toBe(LATE_JOIN_MS);
-    expect(meetingServiceExports.LIVE_WINDOW_MS).toBe(LIVE_WINDOW_MS);
   });
 
   test("duration formatting handles range, minutes, and defaults correctly", () => {
@@ -187,5 +223,151 @@ test.describe("Phase 5: Class Action Button & Navigation Responsiveness", () => 
     expect(expiredState.disabled).toBe(true);
     expect(expiredState.actionUrl).toBe("");
     expect(expiredState.label).toBe("Expired");
+  });
+
+  test("schedule UPCOMING-no-URL: UPCOMING sessions never link to the room and remain disabled", () => {
+    const futureTimes = [
+      new Date(baseNow.getTime() + 65 * 60 * 1000), // T-65
+      new Date(baseNow.getTime() + 120 * 60 * 1000), // T-120
+      new Date(baseNow.getTime() + 24 * 60 * 60 * 1000), // Tomorrow
+    ];
+
+    for (const scheduledStart of futureTimes) {
+      const session: ClassActionSession = {
+        id: "sess-future",
+        status: "SCHEDULED",
+        scheduledStart,
+      };
+
+      // Student viewer
+      const studentState = getClassActionState(session, { role: "STUDENT" }, baseNow);
+      expect(studentState.state).toBe("UPCOMING");
+      expect(studentState.disabled).toBe(true);
+      expect(studentState.actionUrl).toBe(""); // Zero dead navigation
+      expect(studentState.countdownText).toBeTruthy();
+
+      // Teacher viewer
+      const teacherState = getClassActionState(session, { role: "TEACHER", isTeacher: true }, baseNow);
+      expect(teacherState.state).toBe("UPCOMING");
+      expect(teacherState.disabled).toBe(true);
+      expect(teacherState.actionUrl).toBe("");
+
+      // Admin viewer
+      const adminState = getClassActionState(session, { role: "ORG_ADMIN", isAdmin: true }, baseNow);
+      expect(adminState.state).toBe("UPCOMING");
+      expect(adminState.disabled).toBe(true);
+      expect(adminState.actionUrl).toBe("");
+    }
+  });
+
+  test("IN_PROGRESS -> LIVE via helper: active session resolves to LIVE within 6h, EXPIRED past 6h", () => {
+    const sessionId = "sess-in-progress-1";
+
+    // Case 1: Session started 1 hour ago (within 6h LIVE window)
+    const active1h: ClassActionSession = {
+      id: sessionId,
+      status: "IN_PROGRESS",
+      actualStart: new Date(baseNow.getTime() - 60 * 60 * 1000),
+    };
+    expect(getMeetingLifecycleState(active1h, baseNow)).toBe("LIVE");
+    const activeState = getClassActionState(active1h, { role: "STUDENT" }, baseNow);
+    expect(activeState.state).toBe("LIVE");
+    expect(activeState.disabled).toBe(false);
+    expect(activeState.actionUrl).toBe(`/dashboard/session/${sessionId}`);
+    expect(activeState.label).toBe("Join Live Class");
+
+    // Case 2: Session marked IN_PROGRESS but started 6h 15m ago (past 6h LIVE window)
+    const stale6h: ClassActionSession = {
+      id: sessionId,
+      status: "IN_PROGRESS",
+      actualStart: new Date(baseNow.getTime() - (LIVE_WINDOW_MS + 15 * 60 * 1000)),
+    };
+    expect(getMeetingLifecycleState(stale6h, baseNow)).toBe("EXPIRED");
+    const staleState = getClassActionState(stale6h, { role: "STUDENT" }, baseNow);
+    expect(staleState.state).toBe("EXPIRED");
+    expect(staleState.disabled).toBe(true);
+    expect(staleState.actionUrl).toBe("");
+    expect(staleState.label).toBe("Expired");
+  });
+
+  test("unrelated-teacher non-host label: unrelated teachers in same org see Join Class, not Start Class", () => {
+    const sessionId = "sess-teacher-assigned";
+    const assignedTeacherId = "teacher-alice";
+    const unrelatedTeacherId = "teacher-bob";
+    const adminId = "admin-carol";
+
+    // 1. READY Window (T-30 min)
+    const readySession: ClassActionSession = {
+      id: sessionId,
+      status: "SCHEDULED",
+      teacherId: assignedTeacherId,
+      scheduledStart: new Date(baseNow.getTime() + 30 * 60 * 1000),
+    };
+
+    // Assigned teacher -> Start Class, isHost: true
+    const assignedReady = getClassActionState(
+      readySession,
+      { userId: assignedTeacherId, role: "TEACHER" },
+      baseNow
+    );
+    expect(assignedReady.isHost).toBe(true);
+    expect(assignedReady.label).toBe("Start Class");
+    expect(assignedReady.disabled).toBe(false);
+    expect(assignedReady.actionUrl).toBe(`/dashboard/session/${sessionId}`);
+
+    // Unrelated teacher -> Join Class, isHost: false (Phase 1 / Phase 5 non-host guarantee)
+    const unrelatedReady = getClassActionState(
+      readySession,
+      { userId: unrelatedTeacherId, role: "TEACHER" },
+      baseNow
+    );
+    expect(unrelatedReady.isHost).toBe(false);
+    expect(unrelatedReady.label).toBe("Join Class");
+    expect(unrelatedReady.disabled).toBe(false);
+    expect(unrelatedReady.actionUrl).toBe(`/dashboard/session/${sessionId}`);
+
+    // Admin observer -> Observe Live, isHost: false
+    const adminReady = getClassActionState(
+      readySession,
+      { userId: adminId, role: "ORG_ADMIN", isAdmin: true },
+      baseNow
+    );
+    expect(adminReady.isHost).toBe(false);
+    expect(adminReady.label).toBe("Observe Live");
+
+    // 2. LIVE Window
+    const liveSession: ClassActionSession = {
+      id: sessionId,
+      status: "IN_PROGRESS",
+      teacherId: assignedTeacherId,
+      actualStart: new Date(baseNow.getTime() - 10 * 60 * 1000),
+    };
+
+    // Assigned teacher -> Rejoin Class, isHost: true
+    const assignedLive = getClassActionState(
+      liveSession,
+      { userId: assignedTeacherId, role: "TEACHER" },
+      baseNow
+    );
+    expect(assignedLive.isHost).toBe(true);
+    expect(assignedLive.label).toBe("Rejoin Class");
+
+    // Unrelated teacher -> Join Live Class, isHost: false
+    const unrelatedLive = getClassActionState(
+      liveSession,
+      { userId: unrelatedTeacherId, role: "TEACHER" },
+      baseNow
+    );
+    expect(unrelatedLive.isHost).toBe(false);
+    expect(unrelatedLive.label).toBe("Join Live Class");
+
+    // Admin observer -> Observe Live, isHost: false
+    const adminLive = getClassActionState(
+      liveSession,
+      { userId: adminId, role: "ORG_ADMIN", isAdmin: true },
+      baseNow
+    );
+    expect(adminLive.isHost).toBe(false);
+    expect(adminLive.label).toBe("Observe Live");
   });
 });

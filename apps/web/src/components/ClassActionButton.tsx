@@ -17,12 +17,13 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import {
   getClassActionState,
   type ClassActionSession,
   type ClassActionViewer,
 } from '@/lib/class-action';
+import { LATE_JOIN_MS } from '@/lib/meeting-constants';
 
 export interface ClassActionButtonProps {
   session: ClassActionSession;
@@ -85,6 +86,69 @@ export default function ClassActionButton({
   }, [session, viewer]);
 
   const { state, label, actionUrl, disabled, durationText, countdownText } = actionState;
+
+  // 1. T-65 route prefetch: prefetches the class route in advance (NEVER mints/prefetches LiveKit tokens)
+  useEffect(() => {
+    if (!session.id || !session.scheduledStart) return;
+    const startMs = new Date(session.scheduledStart).getTime();
+    if (Number.isNaN(startMs)) return;
+
+    const T_MINUS_65_MS = 65 * 60 * 1000;
+    const nowMs = Date.now();
+    const msUntilT65 = (startMs - T_MINUS_65_MS) - nowMs;
+    const targetUrl = `/dashboard/session/${session.id}`;
+
+    // If already within T-65 window and not expired
+    if (msUntilT65 <= 0) {
+      if (nowMs < startMs + LATE_JOIN_MS) {
+        router.prefetch(targetUrl);
+      }
+      return;
+    }
+
+    // Schedule prefetch at T-65 if within a reasonable upcoming window (next 4 hours)
+    if (msUntilT65 < 4 * 60 * 60 * 1000) {
+      const timer = setTimeout(() => {
+        router.prefetch(targetUrl);
+      }, msUntilT65);
+      return () => clearTimeout(timer);
+    }
+  }, [session.id, session.scheduledStart, router]);
+
+  // 2. Preload next primary role tab during browser idle time
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const win = window as unknown as {
+      requestIdleCallback?: (cb: () => void) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+
+    if (typeof win.requestIdleCallback === 'function' && typeof win.cancelIdleCallback === 'function') {
+      const id = win.requestIdleCallback(() => {
+        if (viewer.role === 'TEACHER') {
+          router.prefetch('/dashboard/schedule');
+        } else if (viewer.role === 'ORG_ADMIN' || viewer.role === 'SUPER_ADMIN') {
+          router.prefetch('/admin/live-classes');
+        } else {
+          router.prefetch('/dashboard/schedule');
+        }
+      });
+      return () => {
+        win.cancelIdleCallback?.(id);
+      };
+    }
+
+    const timer = setTimeout(() => {
+      if (viewer.role === 'TEACHER') {
+        router.prefetch('/dashboard/schedule');
+      } else if (viewer.role === 'ORG_ADMIN' || viewer.role === 'SUPER_ADMIN') {
+        router.prefetch('/admin/live-classes');
+      } else {
+        router.prefetch('/dashboard/schedule');
+      }
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [viewer.role, router]);
 
   const prefetchDestination = () => {
     if (!disabled && actionUrl) {
@@ -149,7 +213,7 @@ export default function ClassActionButton({
   const sizeClasses =
     variant === 'prominent'
       ? 'px-6 py-3 min-h-[48px] text-sm font-semibold rounded-xl'
-      : 'px-3.5 py-1.5 text-xs font-semibold rounded-lg';
+      : 'px-3.5 py-1.5 min-h-[36px] sm:min-h-[32px] text-xs font-semibold rounded-lg';
 
   return (
     <Link

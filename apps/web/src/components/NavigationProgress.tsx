@@ -13,9 +13,13 @@
 import { useEffect, useState, useRef, Suspense } from 'react';
 import { usePathname, useSearchParams } from 'next/navigation';
 
+let activeProgressCount = 0;
+
 function NavigationProgressBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const isPrimaryRef = useRef(false);
+  const [isPrimary, setIsPrimary] = useState(false);
   const [isNavigating, setIsNavigating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [isVisible, setIsVisible] = useState(false);
@@ -23,10 +27,27 @@ function NavigationProgressBar() {
   const finishTimerRef = useRef<NodeJS.Timeout | null>(null);
   const prevUrlRef = useRef<string>('');
 
+  // Enforce single-mount singleton guard across the application
+  useEffect(() => {
+    activeProgressCount++;
+    if (activeProgressCount === 1) {
+      isPrimaryRef.current = true;
+      setIsPrimary(true);
+    }
+    return () => {
+      activeProgressCount--;
+      if (isPrimaryRef.current) {
+        isPrimaryRef.current = false;
+        setIsPrimary(false);
+      }
+    };
+  }, []);
+
   const currentUrl = `${pathname}?${searchParams?.toString() || ''}`;
 
   // Complete progress on URL change
   useEffect(() => {
+    if (!isPrimary) return;
     if (prevUrlRef.current && prevUrlRef.current !== currentUrl) {
       // Reached new route
       setProgress(100);
@@ -41,10 +62,11 @@ function NavigationProgressBar() {
     return () => {
       if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
     };
-  }, [currentUrl]);
+  }, [currentUrl, isPrimary]);
 
   // Global click listener for internal navigation triggers
   useEffect(() => {
+    if (!isPrimary) return;
     const handleClick = (e: MouseEvent) => {
       // Find closest anchor tag
       const target = e.target as HTMLElement | null;
@@ -97,9 +119,9 @@ function NavigationProgressBar() {
       if (timerRef.current) clearInterval(timerRef.current);
       if (finishTimerRef.current) clearTimeout(finishTimerRef.current);
     };
-  }, []);
+  }, [isPrimary]);
 
-  if (!isVisible) return null;
+  if (!isPrimary || !isVisible) return null;
 
   return (
     <div

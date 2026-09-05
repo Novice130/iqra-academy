@@ -21,21 +21,23 @@ import { sessions } from "@/db/schema";
 
 type SessionRow = typeof sessions.$inferSelect;
 
-/** A class already running belongs to today, not to a tab someone left open. */
-export const LIVE_WINDOW_MS = 6 * 60 * 60 * 1000;
+import {
+  LIVE_WINDOW_MS,
+  EARLY_JOIN_MS,
+  LATE_JOIN_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+} from "@/lib/meeting-constants";
 
-/** How early anyone may open the room. Arriving before the teacher is fine. */
-export const EARLY_JOIN_MS = 60 * 60 * 1000;
-
-/** How long after the scheduled start the slot still counts as "now". */
-export const LATE_JOIN_MS = 3 * 60 * 60 * 1000;
-
-/**
- * Rows within this much of each other are the same occurrence. Wide enough to
- * absorb a 1-on-1 booked five minutes off the group slot, narrow enough not to
- * swallow the next class.
- */
-export const SIBLING_WINDOW_MS = 90 * 60 * 1000;
+export {
+  LIVE_WINDOW_MS,
+  EARLY_JOIN_MS,
+  LATE_JOIN_MS,
+  SIBLING_WINDOW_MS,
+  SCHEDULED_BEFORE_MS,
+  SCHEDULED_AFTER_MS,
+};
 
 /**
  * Group already-fetched session rows into class occurrences, by the same rule

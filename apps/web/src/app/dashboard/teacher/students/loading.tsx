@@ -5,7 +5,8 @@
 
 export default function TeacherStudentsLoading() {
   return (
-    <div className="p-6 lg:p-10 max-w-6xl animate-pulse space-y-8">
+    <div className="p-6 lg:p-10 max-w-6xl animate-pulse space-y-8" role="status" aria-live="polite">
+      <span className="sr-only">Loading students list...</span>
       {/* Header Skeleton */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="space-y-2">

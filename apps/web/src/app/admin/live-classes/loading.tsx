@@ -5,7 +5,8 @@
 
 export default function LiveClassesLoading() {
   return (
-    <div className="space-y-6 animate-pulse">
+    <div className="space-y-6 animate-pulse" role="status" aria-live="polite">
+      <span className="sr-only">Loading live classes...</span>
       {/* Header Skeleton */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
         <div className="space-y-2">

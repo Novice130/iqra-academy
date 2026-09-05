@@ -5,7 +5,8 @@
 
 export default function AttendanceLoading() {
   return (
-    <div className="p-6 lg:p-10 max-w-5xl animate-pulse space-y-6">
+    <div className="p-6 lg:p-10 max-w-5xl animate-pulse space-y-6" role="status" aria-live="polite">
+      <span className="sr-only">Loading attendance...</span>
       {/* Header and Controls */}
       <div className="flex flex-wrap items-end justify-between gap-4 mb-6">
         <div className="space-y-2">

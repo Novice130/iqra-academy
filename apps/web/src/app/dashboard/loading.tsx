@@ -5,7 +5,8 @@
 
 export default function DashboardLoading() {
   return (
-    <div className="p-6 lg:p-10 max-w-5xl animate-pulse">
+    <div className="p-6 lg:p-10 max-w-5xl animate-pulse" role="status" aria-live="polite">
+      <span className="sr-only">Loading dashboard...</span>
       {/* Greeting Skeleton */}
       <div className="mb-10 space-y-2">
         <div className="h-8 w-64 rounded-md bg-[var(--border)]" />

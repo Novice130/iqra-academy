@@ -9,20 +9,20 @@
  */
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 import MeetingNotificationBanner from "./MeetingNotificationBanner";
 import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
 import PushRegistrar from "./PushRegistrar";
 import TeacherAvailabilityModal from "@/components/TeacherAvailabilityModal";
-import NavigationProgress from "@/components/NavigationProgress";
 import { authClient } from "@/lib/auth-client";
 
 interface DashboardUser {
   name?: string;
   email?: string;
   role?: string;
+  orgId?: string;
 }
 
 export default function DashboardChrome({
@@ -35,13 +35,12 @@ export default function DashboardChrome({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const router = useRouter();
   const isCallRoute = pathname?.startsWith("/dashboard/session/");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const signOut = async () => {
     await authClient.signOut();
-    router.push("/login");
+    window.location.href = "/login";
   };
 
   if (isCallRoute) {
@@ -93,7 +92,6 @@ export default function DashboardChrome({
       className="min-h-screen flex"
       style={{ background: "var(--bg-secondary)" }}
     >
-      <NavigationProgress />
       <IncomingCallOverlay />
       <PushRegistrar />
 
@@ -531,7 +529,6 @@ function AppChrome({
 
   return (
     <div className="app-shell" style={{ background: "var(--bg-secondary)" }}>
-      <NavigationProgress />
       <IncomingCallOverlay />
       <PushRegistrar />
 

@@ -11,7 +11,6 @@
  * viewer's own local date — correct for every timezone, DST included.
  */
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import LocalTime from '@/components/LocalTime';
 import ClassActionButton from '@/components/ClassActionButton';
@@ -20,13 +19,21 @@ import SessionRowActions from './SessionRowActions';
 export interface ScheduleRow {
   id: string;
   scheduledStart: string;
+  scheduledEnd?: string | null;
+  teacherId?: string | null;
   status: string;
   title: string | null;
   track: string | null;
   studentNames: string;
 }
 
-export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
+export default function TodaySchedule({
+  rows,
+  currentUserId,
+}: {
+  rows: ScheduleRow[];
+  currentUserId?: string;
+}) {
   // Start with every row in the window so the server HTML and the first
   // client render agree, then narrow to the viewer's local day.
   const [today, setToday] = useState<ScheduleRow[]>(rows);
@@ -83,10 +90,17 @@ export default function TodaySchedule({ rows }: { rows: ScheduleRow[] }) {
               session={{
                 id: s.id,
                 scheduledStart: s.scheduledStart,
+                scheduledEnd: s.scheduledEnd,
+                teacherId: s.teacherId,
                 status: s.status,
                 title: s.title,
+                track: s.track,
               }}
-              viewer={{ role: 'TEACHER', isTeacher: true }}
+              viewer={{
+                role: 'TEACHER',
+                isTeacher: s.teacherId ? s.teacherId === currentUserId : true,
+                userId: currentUserId,
+              }}
               variant="compact"
             />
             <SessionRowActions sessionId={s.id} showEnd={s.status === 'IN_PROGRESS'} />

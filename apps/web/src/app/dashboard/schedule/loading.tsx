@@ -5,7 +5,8 @@
 
 export default function ScheduleLoading() {
   return (
-    <div className="p-6 lg:p-10 max-w-6xl animate-pulse space-y-8">
+    <div className="p-6 lg:p-10 max-w-6xl animate-pulse space-y-8" role="status" aria-live="polite">
+      <span className="sr-only">Loading class schedule...</span>
       {/* Header and Week Navigation */}
       <div className="flex items-center justify-between">
         <div className="space-y-2">
