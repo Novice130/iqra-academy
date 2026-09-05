@@ -7,10 +7,21 @@ import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
 import { eq, and, sql, count, desc, inArray, isNull } from "drizzle-orm";
 import { bookings, sessions, studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
-import { format } from "date-fns";
-import Link from "next/link";
 import AssignStudentModal from "./AssignStudentModal";
-import CallStudentButton from "./CallStudentButton";
+import TeacherStudentsClient from "./TeacherStudentsClient";
+
+function calculateAge(dob: string | Date | null | undefined): string | number {
+  if (!dob) return "N/A";
+  const birthDate = new Date(dob);
+  if (isNaN(birthDate.getTime())) return "N/A";
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const m = today.getMonth() - birthDate.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--;
+  }
+  return age >= 0 ? age : "N/A";
+}
 
 export default async function TeacherStudentsPage() {
   return withDb(async () => {
@@ -104,15 +115,45 @@ export default async function TeacherStudentsPage() {
     trackCounts.map((tc) => [tc.track, tc.total])
   );
 
+  const enrichedStudents = await Promise.all(
+    studentsResult.map(async (student) => {
+      const completed = await db
+        .select({ count: count() })
+        .from(progressRecords)
+        .where(and(eq(progressRecords.studentProfileId, student.id), eq(progressRecords.isCompleted, true)));
+
+      const latestNote = await db.query.progressRecords.findFirst({
+        where: eq(progressRecords.studentProfileId, student.id),
+        orderBy: [desc(progressRecords.completedAt)],
+        with: { lesson: true }
+      });
+
+      const totalInTrack = totalLessonsMap[student.track] || 1;
+      const progress = Math.min(100, Math.round(((completed[0]?.count || 0) / totalInTrack) * 100));
+      const age = calculateAge(student.dateOfBirth);
+
+      return {
+        id: student.id,
+        name: student.name,
+        track: student.track,
+        age,
+        lastClass: student.lastClass ? new Date(student.lastClass).toISOString() : null,
+        progress,
+        currentLesson: latestNote ? latestNote.lesson.title : "Not started",
+        teacherNotes: latestNote?.teacherNotes || null,
+      };
+    })
+  );
+
   return (
-    <div className="p-6 lg:p-10 max-w-5xl">
+    <div className="p-6 lg:p-10 max-w-6xl">
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
             {isAdmin ? "All Registered Students" : "My Students"}
           </h1>
           <p className="text-sm mt-1" style={{ color: "var(--text-secondary)" }}>
-            {studentsResult.length} active students
+            {enrichedStudents.length} active students
           </p>
         </div>
 
@@ -124,83 +165,7 @@ export default async function TeacherStudentsPage() {
         )}
       </div>
 
-      <div className="space-y-4">
-        {studentsResult.length > 0 ? (
-          await Promise.all(studentsResult.map(async (student) => {
-            const completed = await db
-              .select({ count: count() })
-              .from(progressRecords)
-              .where(and(eq(progressRecords.studentProfileId, student.id), eq(progressRecords.isCompleted, true)));
-
-            const latestNote = await db.query.progressRecords.findFirst({
-              where: eq(progressRecords.studentProfileId, student.id),
-              orderBy: [desc(progressRecords.completedAt)],
-              with: { lesson: true }
-            });
-
-            const totalInTrack = totalLessonsMap[student.track] || 1;
-            const progress = Math.min(100, Math.round(((completed[0]?.count || 0) / totalInTrack) * 100));
-            const age = student.dateOfBirth
-              ? new Date().getFullYear() - new Date(student.dateOfBirth).getFullYear()
-              : "N/A";
-
-            return (
-              <div key={student.id} className="card">
-                <div className="p-5">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold text-white" style={{ background: "var(--accent)" }}>
-                        {student.name.split(" ").map((n: string) => n[0]).join("")}
-                      </div>
-                      <div>
-                        <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{student.name}</div>
-                        <div className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                          Age {age} • {student.track.toLowerCase()}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                        Last Class: {student.lastClass ? format(new Date(student.lastClass), "MMM d") : "Never"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                      {latestNote ? latestNote.lesson.title : "Not started"}
-                    </span>
-                    <span className="text-sm font-bold" style={{ color: "var(--accent)" }}>{progress}%</span>
-                  </div>
-                  <div className="h-1.5 rounded-full overflow-hidden mb-3" style={{ background: "var(--bg-secondary)" }}>
-                    <div className="h-full rounded-full" style={{ width: `${progress}%`, background: "var(--accent)" }} />
-                  </div>
-
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs italic" style={{ color: "var(--text-tertiary)" }}>
-                      {latestNote?.teacherNotes ? `📝 ${latestNote.teacherNotes}` : "No feedback yet."}
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <CallStudentButton studentProfileId={student.id} studentName={student.name} />
-                      <Link
-                        href={`/dashboard/teacher/students/${student.id}`}
-                        className="text-xs font-semibold px-3 py-1.5 rounded-lg border transition-colors hover:bg-opacity-10 hover:bg-accent"
-                        style={{ background: "var(--bg-secondary)", color: "var(--text-secondary)", border: "1px solid var(--border)" }}
-                      >
-                        View Details
-                      </Link>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
-          }))
-        ) : (
-          <div className="card p-10 text-center">
-            <p style={{ color: "var(--text-tertiary)" }}>No students found.</p>
-          </div>
-        )}
-      </div>
+      <TeacherStudentsClient students={enrichedStudents} />
     </div>
   );
   });

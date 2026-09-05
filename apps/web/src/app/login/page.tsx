@@ -445,8 +445,7 @@ export default function LoginPage() {
                   </div>
                   {showForgot && (
                     <p className="text-xs mt-2" style={{ color: "var(--text-secondary)" }}>
-                      Message your teacher on WhatsApp and we&apos;ll reset it for you.
-                      Password reset by email is coming soon.
+                      Message your teacher or academy admin on WhatsApp and we&apos;ll reset it for you.
                     </p>
                   )}
                 </div>

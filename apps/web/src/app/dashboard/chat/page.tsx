@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
 import { format } from "date-fns";
@@ -38,6 +38,8 @@ export default function ChatPage() {
   const [attachedImage, setAttachedImage] = useState<string | null>(null);
   const [previewModalImg, setPreviewModalImg] = useState<string | null>(null);
 
+  const [error, setError] = useState<{ message: string; retry?: () => void } | null>(null);
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -45,26 +47,38 @@ export default function ChatPage() {
   const user = session?.user as { id: string; name?: string } | undefined;
 
   // 1. Fetch messages
-  useEffect(() => {
-    async function fetchMessages() {
-      setLoading(true);
-      try {
-        const url = studentId
-          ? `/api/chat/messages?studentId=${encodeURIComponent(studentId)}`
-          : "/api/chat/messages";
-        const res = await fetch(url);
-        if (res.ok) {
-          const data = await res.json();
-          setMessages(data.messages || []);
-        }
-      } catch (err) {
-        console.error("Failed to fetch messages:", err);
-      } finally {
-        setLoading(false);
+  const fetchMessages = useCallback(async () => {
+    setLoading(true);
+    try {
+      const url = studentId
+        ? `/api/chat/messages?studentId=${encodeURIComponent(studentId)}`
+        : "/api/chat/messages";
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        setMessages(data.messages || []);
+        setError(null);
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        setError({
+          message: errData.error || "Failed to load messages.",
+          retry: () => fetchMessages(),
+        });
       }
+    } catch (err) {
+      console.error("Failed to fetch messages:", err);
+      setError({
+        message: "Failed to load messages. Check your connection.",
+        retry: () => fetchMessages(),
+      });
+    } finally {
+      setLoading(false);
     }
-    fetchMessages();
   }, [studentId]);
+
+  useEffect(() => {
+    fetchMessages();
+  }, [fetchMessages]);
 
   // 2. Auto-scroll to bottom
   useEffect(() => {
@@ -112,6 +126,7 @@ export default function ChatPage() {
     if ((!message.trim() && !attachedImage) || sending) return;
 
     setSending(true);
+    setError(null);
     let payloadContent = message.trim();
     if (attachedImage) {
       payloadContent = payloadContent
@@ -131,12 +146,20 @@ export default function ChatPage() {
         setMessages((prev) => [...prev, data.message]);
         setMessage("");
         setAttachedImage(null);
+        setError(null);
       } else {
         const errData = await res.json().catch(() => ({}));
-        alert(errData.error || "Failed to send message.");
+        setError({
+          message: errData.error || "Failed to send message.",
+          retry: () => handleSend(),
+        });
       }
     } catch (err) {
       console.error("Failed to send message:", err);
+      setError({
+        message: "Failed to send message. Check your connection.",
+        retry: () => handleSend(),
+      });
     } finally {
       setSending(false);
     }
@@ -279,6 +302,38 @@ export default function ChatPage() {
           </div>
         </div>
 
+        {/* Inline Error Banner */}
+        {error && (
+          <div
+            role="alert"
+            className="mx-4 my-2 p-3 rounded-2xl bg-red-500/15 border border-red-500/30 text-red-200 text-xs sm:text-sm flex items-center justify-between gap-3 animate-fadeIn"
+          >
+            <div className="flex items-center gap-2">
+              <span className="text-base">⚠️</span>
+              <span>{error.message}</span>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              {error.retry && (
+                <button
+                  type="button"
+                  onClick={error.retry}
+                  className="px-3 py-1 rounded-xl text-xs font-bold bg-red-500/25 hover:bg-red-500/40 text-white transition cursor-pointer"
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Dismiss error"
+                className="text-red-300 hover:text-white transition px-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Messages list */}
         <div
           ref={scrollRef}
@@ -286,8 +341,16 @@ export default function ChatPage() {
           style={{ background: "rgba(15, 17, 23, 0.6)" }}
         >
           {loading ? (
-            <div className="flex justify-center py-10">
-              <div className="animate-spin rounded-full h-7 w-7 border-b-2 border-blue-500" />
+            <div className="space-y-4 py-4 animate-pulse">
+              <div className="flex justify-start">
+                <div className="w-48 h-12 rounded-3xl bg-white/10" />
+              </div>
+              <div className="flex justify-end">
+                <div className="w-64 h-16 rounded-3xl bg-blue-500/20" />
+              </div>
+              <div className="flex justify-start">
+                <div className="w-56 h-12 rounded-3xl bg-white/10" />
+              </div>
             </div>
           ) : messages.length > 0 ? (
             messages.map((msg) => {

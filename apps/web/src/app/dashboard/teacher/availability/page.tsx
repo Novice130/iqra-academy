@@ -72,7 +72,28 @@ export default function AvailabilityPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [note, setNote] = useState<{ text: string; bad: boolean } | null>(null);
+  const [toast, setToast] = useState<{ text: string; bad: boolean } | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [dragging, setDragging] = useState<null | boolean>(null);
+
+  const clearTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+
+  const gridLocked = !zoneConfirmed;
+
+  // Auto-focus cancel button in destructive confirmation modal
+  useEffect(() => {
+    if (showClearConfirm) {
+      cancelBtnRef.current?.focus();
+    }
+  }, [showClearConfirm]);
+
+  // Auto-dismiss toast
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(null), 4000);
+    return () => clearTimeout(timer);
+  }, [toast]);
 
   // Quick Repeat State
   const [repeatMode, setRepeatMode] = useState<RepeatOption>("weekdays");
@@ -127,21 +148,40 @@ export default function AvailabilityPage() {
   }, [teacherId, onboarding]);
 
   const setCell = useCallback((day: string, cell: string, on: boolean) => {
+    if (gridLocked) return;
     setSelected((prev) => {
       const set = new Set(prev[day] ?? []);
       if (on) set.add(cell);
       else set.delete(cell);
       return { ...prev, [day]: set };
     });
-  }, []);
+  }, [gridLocked]);
 
-  const clearAll = useCallback(() => {
+  const requestClearAll = useCallback((e: React.MouseEvent<HTMLButtonElement>) => {
+    if (gridLocked) return;
+    clearTriggerRef.current = e.currentTarget;
+    setShowClearConfirm(true);
+  }, [gridLocked]);
+
+  const confirmClearAll = useCallback(() => {
     setSelected({});
     setQuickAppliedNote(null);
+    setShowClearConfirm(false);
+    setToast({ text: "All availability hours cleared.", bad: false });
+    setTimeout(() => clearTriggerRef.current?.focus(), 50);
+  }, []);
+
+  const cancelClearAll = useCallback(() => {
+    setShowClearConfirm(false);
+    setTimeout(() => clearTriggerRef.current?.focus(), 50);
   }, []);
 
   // Apply Quick Repeat pattern across chosen days
   const applyQuickRepeat = useCallback(() => {
+    if (gridLocked) {
+      setNote({ text: "Please confirm your timezone above to edit availability.", bad: true });
+      return;
+    }
     const startM = toMinutes(quickStart);
     const endM = toMinutes(quickEnd);
     if (startM >= endM) {
@@ -178,9 +218,10 @@ export default function AvailabilityPage() {
     setQuickAppliedNote(`Applied ${pretty(quickStart)} – ${pretty(quickEnd)} to ${repeatLabel}!`);
     setNote(null);
     setTimeout(() => setQuickAppliedNote(null), 3000);
-  }, [quickStart, quickEnd, repeatMode]);
+  }, [gridLocked, quickStart, quickEnd, repeatMode]);
 
   const toggleDay = useCallback((dayId: string) => {
+    if (gridLocked) return;
     setSelected((prev) => {
       const current = prev[dayId] ?? new Set<string>();
       const allSelected = ALL_CELLS.every((c) => current.has(c));
@@ -194,7 +235,7 @@ export default function AvailabilityPage() {
 
       return { ...prev, [dayId]: nextSet };
     });
-  }, []);
+  }, [gridLocked]);
 
   /** Contiguous half-hour ticks converted to API range format */
   const ranges = useMemo(() => {
@@ -288,7 +329,24 @@ export default function AvailabilityPage() {
     }
   }
 
-  const gridLocked = !zoneConfirmed;
+  if (loading) {
+    return (
+      <div className="p-6 sm:p-8 md:p-10 space-y-6 animate-pulse pb-12 max-w-6xl mx-auto">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[var(--border)]">
+          <div className="space-y-2">
+            <div className="h-8 w-64 rounded-xl bg-neutral-200 dark:bg-neutral-800" />
+            <div className="h-4 w-96 rounded-xl bg-neutral-200 dark:bg-neutral-800" />
+          </div>
+          <div className="flex gap-3">
+            <div className="h-10 w-24 rounded-xl bg-neutral-200 dark:bg-neutral-800" />
+            <div className="h-10 w-32 rounded-xl bg-neutral-200 dark:bg-neutral-800" />
+          </div>
+        </div>
+        <div className="h-20 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
+        <div className="h-64 rounded-2xl bg-neutral-200 dark:bg-neutral-800" />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -296,6 +354,30 @@ export default function AvailabilityPage() {
       onMouseUp={() => setDragging(null)}
       onMouseLeave={() => setDragging(null)}
     >
+      {/* Toast Notification */}
+      {toast && (
+        <div
+          role="status"
+          className={`p-3.5 rounded-2xl text-xs font-semibold flex items-center justify-between gap-3 border shadow-lg animate-in ${
+            toast.bad
+              ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20"
+              : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span>{toast.bad ? "⚠️" : "✓"}</span>
+            <span>{toast.text}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 text-sm px-1"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Target Teacher Admin Banner */}
       {teacherId && (
         <div className="p-4 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-800 dark:text-blue-300 flex items-center justify-between gap-4">
@@ -310,6 +392,14 @@ export default function AvailabilityPage() {
           </span>
         </div>
       )}
+
+      {gridLocked && (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs font-semibold flex items-center gap-2">
+          <span>🔒</span>
+          <span>Grid is locked. Please confirm your timezone above to edit your availability hours.</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-[var(--border)]">
         <div>
@@ -326,17 +416,17 @@ export default function AvailabilityPage() {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={clearAll}
-            disabled={totalCells === 0}
-            className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            onClick={requestClearAll}
+            disabled={totalCells === 0 || gridLocked}
+            className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
           >
             Clear All
           </button>
           <button
             type="button"
             onClick={save}
-            disabled={saving || loading}
-            className="px-5 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 shadow-md hover:shadow-emerald-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            disabled={saving || loading || gridLocked}
+            className="px-5 py-2 rounded-xl text-sm font-semibold bg-emerald-600 text-white hover:bg-emerald-500 shadow-md hover:shadow-emerald-500/20 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 cursor-pointer"
           >
             {saving ? "Saving…" : onboarding ? "Save & Finish" : "Save Hours"}
           </button>
@@ -418,9 +508,9 @@ export default function AvailabilityPage() {
             </div>
             <button
               type="button"
-              onClick={clearAll}
+              onClick={requestClearAll}
               disabled={gridLocked}
-              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 select-none shrink-0"
+              className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 hover:bg-red-500/20 transition disabled:opacity-40 select-none shrink-0 cursor-pointer"
             >
               Start Fresh (Clear All)
             </button>
@@ -546,7 +636,7 @@ export default function AvailabilityPage() {
             <button
               type="button"
               onClick={applyQuickRepeat}
-              disabled={saving || loading}
+              disabled={saving || loading || gridLocked}
               className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-500 shadow-md hover:shadow-emerald-600/15 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed select-none shrink-0 cursor-pointer"
             >
               + Apply Repeat Hours
@@ -671,6 +761,59 @@ export default function AvailabilityPage() {
           💡 Click & drag across boxes to paint hours. Click any day column to toggle all 24 hours.
         </span>
       </div>
+
+      {/* Destructive Clear All Confirmation Dialog */}
+      {showClearConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="clear-availability-title"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in"
+          onClick={cancelClearAll}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") cancelClearAll();
+          }}
+        >
+          <div
+            className="w-full max-w-md p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full flex items-center justify-center bg-red-500/10 text-red-500 text-lg shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 id="clear-availability-title" className="text-base font-bold text-[var(--text-primary)]">
+                  Clear All Availability Hours?
+                </h3>
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+                  This action removes all your selected weekly hours.
+                </p>
+              </div>
+            </div>
+            <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
+              Are you sure you want to clear your availability? Your active calendar blocks will be cleared, but you can set new hours or repeat hours at any time.
+            </p>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                ref={cancelBtnRef}
+                type="button"
+                onClick={cancelClearAll}
+                className="px-4 py-2 rounded-xl text-xs font-semibold border border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--bg-secondary)] transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmClearAll}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-red-600 text-white hover:bg-red-500 shadow-sm transition cursor-pointer"
+              >
+                Yes, Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

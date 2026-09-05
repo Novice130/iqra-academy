@@ -66,8 +66,37 @@
   --spacing-24: 24px;
   --spacing-32: 32px;
 
+  /* Typography tokens: Geist (28/34 desktop title, 24/30 mobile title, 15/22 body, 12/16 caption) */
+  --font-title-desktop: 600 28px/34px var(--font-geist-sans);
+  --font-title-mobile: 600 24px/30px var(--font-geist-sans);
+  --font-body: 400 15px/22px var(--font-geist-sans);
+  --font-caption: 400 12px/16px var(--font-geist-sans);
+  --text-title-desktop-size: 28px;
+  --text-title-desktop-line: 34px;
+  --text-title-mobile-size: 24px;
+  --text-title-mobile-line: 30px;
+  --text-body-size: 15px;
+  --text-body-line: 22px;
+  --text-caption-size: 12px;
+  --text-caption-line: 16px;
+
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
   --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+/* ── Meeting Breakpoints: compact control <768px & landscape-height compact <480px ── */
+@media (max-width: 768px) {
+  .meeting-controls-compact {
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+}
+
+@media (max-height: 480px) and (orientation: landscape) {
+  .meeting-landscape-compact {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
 }
 
 /* Reduced transparency fallback */
@@ -116,7 +145,7 @@ body {
 .card {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-card);
   box-shadow: var(--shadow-sm);
 }
 
@@ -403,6 +432,7 @@ body {
   overflow: hidden;
 }
 
+.app-header,
 .app-titlebar {
   display: flex;
   align-items: center;

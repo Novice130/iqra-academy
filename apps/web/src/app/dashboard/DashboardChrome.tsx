@@ -10,7 +10,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import MeetingNotificationBanner from "./MeetingNotificationBanner";
 import LiveClassRibbon from "./LiveClassRibbon";
 import IncomingCallOverlay from "./IncomingCallOverlay";
@@ -497,6 +497,24 @@ function AppChrome({
   children: React.ReactNode;
 }) {
   const [moreOpen, setMoreOpen] = useState(false);
+  const moreTriggerRef = useRef<HTMLButtonElement | null>(null);
+
+  const closeMore = useCallback(() => {
+    setMoreOpen(false);
+    moreTriggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeMore();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [moreOpen, closeMore]);
+
   const isAdminRole =
     user.role === "ORG_ADMIN" ||
     user.role === "SUPER_ADMIN";
@@ -555,7 +573,14 @@ function AppChrome({
             </Link>
           );
         })}
-        <button type="button" onClick={() => setMoreOpen(true)} className="app-tab">
+        <button
+          ref={moreTriggerRef}
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          className="app-tab"
+          aria-expanded={moreOpen}
+          aria-haspopup="dialog"
+        >
           <MoreIcon />
           <span>More</span>
         </button>
@@ -565,8 +590,7 @@ function AppChrome({
           secondary menu, and reachable by the thumb that opened it. */}
       {moreOpen && (
         <>
-          {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
-          <div className="app-sheet-scrim" onClick={() => setMoreOpen(false)} />
+          <div className="app-sheet-scrim" onClick={closeMore} />
           <div className="app-sheet" role="dialog" aria-label="More">
             <div className="app-sheet-grip" />
             <div className="app-sheet-head">
@@ -579,32 +603,38 @@ function AppChrome({
             <div className="app-sheet-list">
               {isAdminRole && (
                 <>
-                  <SheetLink href="/admin/live-classes" label="Live Classes" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/admin/live-classes" label="Live Classes" onNavigate={closeMore} />
+                  <SheetLink href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={closeMore} />
+                  <SheetLink href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={closeMore} />
+                  <SheetLink href="/admin/invoices" label="Invoices & Billing" onNavigate={closeMore} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
                 </>
               )}
               {isTeacherOnly && (
                 <>
-                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={closeMore} />
+                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={closeMore} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
                 </>
               )}
               {!isAdminRole && !isTeacherOnly && (
                 <>
-                  <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={() => setMoreOpen(false)} />
-                  <SheetLink href="/dashboard/billing" label="Billing" onNavigate={() => setMoreOpen(false)} />
+                  <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={closeMore} />
+                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
+                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
+                  <SheetLink href="/dashboard/billing" label="Billing" onNavigate={closeMore} />
                 </>
               )}
             </div>
-            <button onClick={onSignOut} className="app-sheet-signout">
+            <button
+              onClick={() => {
+                closeMore();
+                onSignOut();
+              }}
+              className="app-sheet-signout"
+            >
               Sign Out
             </button>
           </div>

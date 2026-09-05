@@ -196,4 +196,67 @@ test.describe("Phase 8: Visual System & Every Active Page", () => {
     expect(joinContent).toContain("Request Expired");
     expect(joinContent).toContain("Try Again");
   });
+
+  test("Phase 8 Review Fixes: Search/Filter/Sort, no alert(), no coming soon, Google parity, availability confirm, type tokens", () => {
+    // 1. Teacher Students: Search, filter, sort, desktop table & mobile cards
+    const studentsClientPath = path.join(webRoot, "src/app/dashboard/teacher/students/TeacherStudentsClient.tsx");
+    expect(fs.existsSync(studentsClientPath)).toBe(true);
+    const studentsClient = fs.readFileSync(studentsClientPath, "utf-8");
+    expect(studentsClient).toContain("Search students");
+    expect(studentsClient).toContain("track-filter");
+    expect(studentsClient).toContain("sort-selector");
+    expect(studentsClient).toContain("<table");
+    expect(studentsClient).toContain("hidden md:block");
+    expect(studentsClient).toContain("block md:hidden");
+
+    // 2. Chat: inline error banner + retry, no alert()
+    const chatPath = path.join(webRoot, "src/app/dashboard/chat/page.tsx");
+    const chatContent = fs.readFileSync(chatPath, "utf-8");
+    expect(chatContent).not.toContain("alert(");
+    expect(chatContent).toContain('role="alert"');
+    expect(chatContent).toContain("Retry");
+
+    // 3. Login: no coming soon
+    const loginPath = path.join(webRoot, "src/app/login/page.tsx");
+    const loginContent = fs.readFileSync(loginPath, "utf-8");
+    expect(loginContent.toLowerCase()).not.toContain("coming soon");
+
+    // 4. Register: Google loading/error parity, role="alert", signed-in guard
+    const registerPath = path.join(webRoot, "src/app/register/page.tsx");
+    const registerContent = fs.readFileSync(registerPath, "utf-8");
+    expect(registerContent).toContain("googleLoading");
+    expect(registerContent).toContain('role="alert"');
+    expect(registerContent).toContain("authClient.getSession()");
+
+    // 5. Availability: confirm dialog, toast notification, real grid lock
+    const availPath = path.join(webRoot, "src/app/dashboard/teacher/availability/page.tsx");
+    const availContent = fs.readFileSync(availPath, "utf-8");
+    expect(availContent).toContain("showClearConfirm");
+    expect(availContent).toContain("toast");
+    expect(availContent).toContain("cancelBtnRef");
+    expect(availContent).toContain("Clear All Availability");
+    expect(availContent).toContain("disabled={saving || loading || gridLocked}");
+
+    // 6. CSS: type tokens, meeting breakpoints, card radius, app-header
+    const cssPath = path.join(webRoot, "src/app/globals.css");
+    const cssContent = fs.readFileSync(cssPath, "utf-8");
+    expect(cssContent).toContain("--font-title-desktop");
+    expect(cssContent).toContain("28px/34px");
+    expect(cssContent).toContain("24px/30px");
+    expect(cssContent).toContain("@media (max-width: 768px)");
+    expect(cssContent).toContain("border-radius: var(--radius-card);");
+    expect(cssContent).toContain(".app-header");
+
+    // 7. Join formatting: 12-digit 3-3-3-3 grouping
+    const joinPath = path.join(webRoot, "src/app/join/[id]/page.tsx");
+    const joinContent = fs.readFileSync(joinPath, "utf-8");
+    expect(joinContent).toContain("digitsOnly.length === 12");
+    expect(joinContent).toContain("slice(0, 3)} ${digitsOnly.slice(3, 6)} ${digitsOnly.slice(6, 9)} ${digitsOnly.slice(9, 12)}");
+
+    // 8. DashboardChrome: Escape key listener and focus restore
+    const chromePath = path.join(webRoot, "src/app/dashboard/DashboardChrome.tsx");
+    const chromeContent = fs.readFileSync(chromePath, "utf-8");
+    expect(chromeContent).toContain('e.key === "Escape"');
+    expect(chromeContent).toContain("moreTriggerRef.current?.focus()");
+  });
 });
