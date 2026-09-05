@@ -42,6 +42,7 @@ Option A — Neon branch of the dev project (recommended, schema-identical):
 DATABASE_URL=postgresql://...your-test-branch...
 ALLOW_LOCAL_DB_SCRIPTS=1
 LOCAL_TEST_DB_HOSTS=ep-your-test-branch.c-3.us-east-2.aws.neon.tech
+REALTIME_SECRET=test-realtime-secret-at-least-32-chars
 ```
 
 Option B — local Postgres:
@@ -51,8 +52,13 @@ createdb quran_lms_test
 # apps/web/.env.local:
 DATABASE_URL=postgresql://localhost:5432/quran_lms_test
 ALLOW_LOCAL_DB_SCRIPTS=1
+REALTIME_SECRET=test-realtime-secret-at-least-32-chars
 cd apps/web && npx drizzle-kit push   # schema into the empty test DB
 ```
+
+`REALTIME_SECRET` is required in both options: the realtime ticket, ws, and
+drain-outbox routes all fail closed (401/503) without it, so the Phase 4
+`realtime.spec.ts` suite cannot pass on an env that omits it.
 
 `.env.local` wins over `.env` locally and is git-ignored, so the app still
 runs against the shared DB while your shell points scripts at the test DB.

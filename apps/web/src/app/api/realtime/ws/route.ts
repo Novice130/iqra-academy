@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyRealtimeTicket } from "@/lib/realtime/ticket";
+import { verifyRealtimeTicket, getRealtimeSecret } from "@/lib/realtime/ticket";
 
 export const dynamic = "force-dynamic";
 
@@ -11,7 +11,12 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing realtime ticket" }, { status: 401 });
   }
 
-  const secret = process.env.REALTIME_SECRET || "novicetutor-realtime-secret";
+  let secret: string;
+  try {
+    secret = getRealtimeSecret();
+  } catch {
+    return NextResponse.json({ error: "Realtime is not configured." }, { status: 503 });
+  }
   let claims;
   try {
     claims = await verifyRealtimeTicket(ticket, secret);

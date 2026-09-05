@@ -111,10 +111,22 @@ export async function PATCH(
 
         if (body.status === "CANCELLED") {
           const { bookings } = await import("@/db/schema");
-          await tx
+          const cancelledBookings = await tx
             .update(bookings)
             .set({ status: "CANCELLED", updatedAt: new Date() })
-            .where(eq(bookings.sessionId, sessionId));
+            .where(eq(bookings.sessionId, sessionId))
+            .returning({ id: bookings.id });
+          for (const b of cancelledBookings) {
+            const { insertSchedulingEvent: insertCancel } = await import("@/lib/realtime/outbox");
+            await insertCancel(tx as never, {
+              orgId: session.orgId,
+              teacherId: session.teacherId,
+              actorId: ctx.userId,
+              type: "booking.cancelled",
+              aggregateType: "booking",
+              aggregateId: b.id,
+            });
+          }
         }
 
         const { insertSchedulingEvent } = await import("@/lib/realtime/outbox");

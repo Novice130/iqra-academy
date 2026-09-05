@@ -34,6 +34,9 @@ import {
   NotFoundError,
 } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { notify } from "@/lib/notify";
 import {
   CONSECUTIVE_GAP_MS,
@@ -243,6 +246,37 @@ export async function POST(request: NextRequest) {
           .where(eq(sessions.id, merge.id))
           .returning();
 
+        // The absorbed row is a cancellation for everyone booked on it: their
+        // class no longer happens at this time. Emit one booking.cancelled per
+        // moved booking plus session.changed for both rows, in the same
+        // transaction as the move itself.
+        for (const b of moving) {
+          await insertSchedulingEvent(tx, {
+            orgId: ctx.orgId,
+            teacherId: keep.teacherId,
+            actorId: ctx.userId,
+            type: "booking.cancelled",
+            aggregateType: "booking",
+            aggregateId: b.id,
+          });
+        }
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: keep.teacherId,
+          actorId: ctx.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: merge.id,
+        });
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: keep.teacherId,
+          actorId: ctx.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: keep.id,
+        });
+
         const teacher = await tx.query.users.findFirst({
           where: eq(users.id, keep.teacherId),
           columns: { id: true, name: true, timezone: true },
@@ -325,6 +359,8 @@ export async function POST(request: NextRequest) {
           sessionId: result.survivor.id,
         });
       }
+
+      afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
 
       return NextResponse.json({
         session: result.survivor,
@@ -442,6 +478,36 @@ export async function DELETE(request: NextRequest) {
           .where(eq(sessions.id, absorbed.id))
           .returning();
 
+        // Un-merge is the reverse: the restored row happens again (bookings
+        // move back onto it), so each moved booking gets booking.created and
+        // both rows get session.changed, atomically with the move.
+        for (const bookingId of movedBookingIds) {
+          await insertSchedulingEvent(tx, {
+            orgId: ctx.orgId,
+            teacherId: survivor.teacherId,
+            actorId: ctx.userId,
+            type: "booking.created",
+            aggregateType: "booking",
+            aggregateId: bookingId,
+          });
+        }
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: survivor.teacherId,
+          actorId: ctx.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: absorbed.id,
+        });
+        await insertSchedulingEvent(tx, {
+          orgId: ctx.orgId,
+          teacherId: survivor.teacherId,
+          actorId: ctx.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: survivor.id,
+        });
+
         // The survivor's type was derived from a roster that has just
         // changed, so derive it again — it is a billing fact, and deriving it
         // is what keeps it honest when students were added since.
@@ -523,6 +589,8 @@ export async function DELETE(request: NextRequest) {
           sessionId: result.restored.id,
         });
       }
+
+      afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
 
       return NextResponse.json({ session: result.restored, from: result.survivor });
     } catch (error) {

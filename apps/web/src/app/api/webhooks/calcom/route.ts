@@ -12,6 +12,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
 import { eq, and, sql } from "drizzle-orm";
 import { users, sessions, bookings } from "@/db/schema";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { verifyCalcomWebhook, mapCalcomEventType } from "@/lib/calcom";
 import type { CalcomWebhookPayload } from "@/lib/calcom";
 
@@ -94,7 +97,7 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
   }
 
   // Create session + booking in a transaction
-  await db.transaction(async (tx) => {
+  const created = await db.transaction(async (tx) => {
     const [session] = await tx.insert(sessions).values({
       orgId,
       teacherId: teacher.id,
@@ -107,25 +110,48 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
       calcomEventId: String(payload.id),
     }).returning();
 
-    await tx.insert(bookings).values({
+    const [booking] = await tx.insert(bookings).values({
       orgId,
       userId,
       sessionId: session.id,
       status: "CONFIRMED",
       calcomBookingId: String(payload.id),
+    }).returning({ id: bookings.id });
+
+    await insertSchedulingEvent(tx, {
+      orgId,
+      teacherId: teacher.id,
+      actorId: userId,
+      type: "session.changed",
+      aggregateType: "session",
+      aggregateId: session.id,
     });
+    await insertSchedulingEvent(tx, {
+      orgId,
+      teacherId: teacher.id,
+      actorId: userId,
+      type: "booking.created",
+      aggregateType: "booking",
+      aggregateId: booking.id,
+    });
+    const result = { orgId, teacherId: teacher.id, sessionId: session.id, bookingId: booking.id };
+    return result;
   });
+  if (created) {
+    const c = created;
+    afterResponse(drainOutbox({ orgId: c.orgId }).catch(() => {}));
+  }
 }
 
 /** Cancels a booking when Cal.com booking is cancelled */
 async function handleBookingCancelled(event: CalcomWebhookPayload) {
   const calcomBookingId = String(event.payload.id);
 
-  // Update all bookings with this calcom ID
-  await db
+  const cancelled = await db
     .update(bookings)
     .set({ status: "CANCELLED", cancelledAt: new Date() })
-    .where(eq(bookings.calcomBookingId, calcomBookingId));
+    .where(eq(bookings.calcomBookingId, calcomBookingId))
+    .returning({ id: bookings.id, orgId: bookings.orgId, sessionId: bookings.sessionId });
 
   // Find affected sessions
   const affectedBookings = await db
@@ -133,6 +159,7 @@ async function handleBookingCancelled(event: CalcomWebhookPayload) {
     .from(bookings)
     .where(eq(bookings.calcomBookingId, calcomBookingId));
 
+  const sessionEvents: { orgId: string; teacherId: string; sessionId: string }[] = [];
   for (const b of affectedBookings) {
     const [result] = await db
       .select({ count: sql<number>`count(*)::int` })
@@ -140,11 +167,59 @@ async function handleBookingCancelled(event: CalcomWebhookPayload) {
       .where(and(eq(bookings.sessionId, b.sessionId), eq(bookings.status, "CONFIRMED")));
 
     if ((result?.count ?? 0) === 0) {
-      await db
+      const [session] = await db
         .update(sessions)
         .set({ status: "CANCELLED" })
-        .where(eq(sessions.id, b.sessionId));
+        .where(eq(sessions.id, b.sessionId))
+        .returning({ id: sessions.id, orgId: sessions.orgId, teacherId: sessions.teacherId });
+      if (session) {
+        sessionEvents.push({ orgId: session.orgId, teacherId: session.teacherId, sessionId: session.id });
+      }
     }
+  }
+
+  // Outbox rows own the realtime fan-out; one transaction per aggregate keeps
+  // the cancel visible even when nothing else in the webhook mutates.
+  const byOrg = new Map<string, { orgId: string; teacherId: string; bookingIds: string[]; sessionIds: string[] }>();
+  for (const b of cancelled) {
+    const session = await db.query.sessions.findFirst({
+      where: eq(sessions.id, b.sessionId),
+      columns: { teacherId: true },
+    });
+    if (!session) continue;
+    const entry = byOrg.get(b.orgId) ?? { orgId: b.orgId, teacherId: session.teacherId, bookingIds: [], sessionIds: [] };
+    entry.bookingIds.push(b.id);
+    byOrg.set(b.orgId, entry);
+  }
+  for (const s of sessionEvents) {
+    const entry = byOrg.get(s.orgId) ?? { orgId: s.orgId, teacherId: s.teacherId, bookingIds: [], sessionIds: [] };
+    entry.sessionIds.push(s.sessionId);
+    byOrg.set(s.orgId, entry);
+  }
+  for (const entry of byOrg.values()) {
+    await db.transaction(async (tx) => {
+      for (const bookingId of entry.bookingIds) {
+        await insertSchedulingEvent(tx, {
+          orgId: entry.orgId,
+          teacherId: entry.teacherId,
+          actorId: entry.teacherId,
+          type: "booking.cancelled",
+          aggregateType: "booking",
+          aggregateId: bookingId,
+        });
+      }
+      for (const sessionId of entry.sessionIds) {
+        await insertSchedulingEvent(tx, {
+          orgId: entry.orgId,
+          teacherId: entry.teacherId,
+          actorId: entry.teacherId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: sessionId,
+        });
+      }
+    });
+    afterResponse(drainOutbox({ orgId: entry.orgId }).catch(() => {}));
   }
 }
 
@@ -157,12 +232,26 @@ async function handleBookingRescheduled(event: CalcomWebhookPayload) {
   });
 
   if (booking) {
-    await db
+    const [session] = await db
       .update(sessions)
       .set({
         scheduledStart: new Date(event.payload.startTime),
         scheduledEnd: new Date(event.payload.endTime),
       })
-      .where(eq(sessions.id, booking.sessionId));
+      .where(eq(sessions.id, booking.sessionId))
+      .returning({ id: sessions.id, orgId: sessions.orgId, teacherId: sessions.teacherId });
+    if (session) {
+      await db.transaction(async (tx) => {
+        await insertSchedulingEvent(tx, {
+          orgId: session.orgId,
+          teacherId: session.teacherId,
+          actorId: session.teacherId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: session.id,
+        });
+      });
+      afterResponse(drainOutbox({ orgId: session.orgId }).catch(() => {}));
+    }
   }
 }

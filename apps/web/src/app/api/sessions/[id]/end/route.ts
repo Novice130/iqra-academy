@@ -40,7 +40,7 @@ export async function POST(
 
       const endedAt = new Date();
 
-      if (session.status === "IN_PROGRESS" || session.status === "SCHEDULED") {
+      if (session.status === "IN_PROGRESS") {
         await db.transaction(async (tx) => {
           await tx
             .update(sessions)

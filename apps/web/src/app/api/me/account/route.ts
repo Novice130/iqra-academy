@@ -51,6 +51,9 @@ import {
 import { requireAuth } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
+import { insertSchedulingEvent } from "@/lib/realtime/outbox";
+import { drainOutbox } from "@/lib/realtime/outbox-publisher";
+import { afterResponse } from "@/lib/after-response";
 import { notify, getAdminRecipients } from "@/lib/notify";
 
 const schema = z.object({
@@ -140,11 +143,14 @@ export async function DELETE(request: NextRequest) {
             )
           );
 
+        const cancelledBookings: { id: string }[] = [];
         if (upcoming.length > 0) {
-          await tx
+          const cancelled = await tx
             .update(bookings)
             .set({ status: "CANCELLED", cancelledAt: now })
-            .where(inArray(bookings.id, upcoming.map((b) => b.id)));
+            .where(inArray(bookings.id, upcoming.map((b) => b.id)))
+            .returning({ id: bookings.id });
+          cancelledBookings.push(...cancelled);
 
           // 2. A class nobody is left booked on is cancelled too. The "is
           //    anybody else on it" test is a NOT EXISTS inside the same
@@ -184,6 +190,23 @@ export async function DELETE(request: NextRequest) {
           .set({ name: "Removed", notes: null, dateOfBirth: null })
           .where(eq(studentProfiles.userId, me.id));
 
+        for (const b of cancelledBookings) {
+          const session = await tx.query.sessions.findFirst({
+            where: eq(sessions.id, upcoming.find((u) => u.id === b.id)!.sessionId),
+            columns: { teacherId: true },
+          });
+          if (session) {
+            await insertSchedulingEvent(tx, {
+              orgId: me.orgId,
+              teacherId: session.teacherId,
+              actorId: me.id,
+              type: "booking.cancelled",
+              aggregateType: "booking",
+              aggregateId: b.id,
+            });
+          }
+        }
+
         // 5. The account itself. The email has to stay unique — it is half of
         //    a unique index with the org — so the id goes in it, and
         //    `.invalid` is the TLD reserved by RFC 2606 precisely so that
@@ -206,8 +229,12 @@ export async function DELETE(request: NextRequest) {
         await tx.delete(accounts).where(eq(accounts.userId, me.id));
         await tx.delete(authSessions).where(eq(authSessions.userId, me.id));
 
-        return { me, cancelledClasses: upcoming.length };
+        return { me, orgId: me.orgId, cancelledClasses: upcoming.length };
       });
+
+      if (result.cancelledClasses > 0) {
+        afterResponse(drainOutbox({ orgId: result.orgId }).catch(() => {}));
+      }
 
       await logAudit({
         orgId: result.me.orgId,

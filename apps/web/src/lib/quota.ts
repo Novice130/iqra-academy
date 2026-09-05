@@ -282,13 +282,13 @@ export async function consumeQuota(
     // Webinars and ad-hoc sessions may not consume quota
     if (!session.consumesQuota) {
       // Create the booking without checking quota
-      await tx.insert(bookings).values({
+      const [booking] = await tx.insert(bookings).values({
         orgId,
         userId,
         studentProfileId,
         sessionId,
         status: "CONFIRMED",
-      });
+      }).returning({ id: bookings.id });
 
       if (session.teacherId) {
         await insertSchedulingEvent(tx, {
@@ -297,7 +297,7 @@ export async function consumeQuota(
           actorId: userId,
           type: "booking.created",
           aggregateType: "booking",
-          aggregateId: sessionId,
+          aggregateId: booking.id,
         });
       }
 
@@ -336,13 +336,13 @@ export async function consumeQuota(
     }
 
     // Create the booking
-    await tx.insert(bookings).values({
+    const [booking] = await tx.insert(bookings).values({
       orgId,
       userId,
       studentProfileId,
       sessionId,
       status: "CONFIRMED",
-    });
+    }).returning({ id: bookings.id });
 
     if (session.teacherId) {
       await insertSchedulingEvent(tx, {
@@ -351,7 +351,7 @@ export async function consumeQuota(
         actorId: userId,
         type: "booking.created",
         aggregateType: "booking",
-        aggregateId: sessionId,
+        aggregateId: booking.id,
       });
     }
 

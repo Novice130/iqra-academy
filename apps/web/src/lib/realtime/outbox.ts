@@ -9,7 +9,6 @@ export interface OutboxEventParams {
   type: SchedulingEventType;
   aggregateType: string;
   aggregateId?: string | null;
-  version?: number;
 }
 
 /**
@@ -17,6 +16,13 @@ export interface OutboxEventParams {
  *
  * Guarantees that business mutations (availability, time-off, bookings, sessions)
  * commit atomically with the outbox event before any delivery takes place.
+ *
+ * Versioning is deliberately eventId-scoped, not per-aggregate: the hook
+ * deduplicates by eventId and treats a redelivered row as the same event.
+ * `version` stays in the protocol (always 1) for forward compatibility —
+ * see AI2 Phase 4 review for the waiver. Do not invent per-aggregate
+ * sequence numbers here: without an atomic counter per aggregate they would
+ * be racy and worse than useless.
  */
 export async function insertSchedulingEvent(
   tx: any,
@@ -33,7 +39,7 @@ export async function insertSchedulingEvent(
       type: params.type,
       aggregateType: params.aggregateType,
       aggregateId: params.aggregateId ?? null,
-      version: params.version ?? 1,
+      version: 1,
     })
     .returning();
 

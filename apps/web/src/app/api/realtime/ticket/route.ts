@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { withHttpDb } from '@/lib/db';
 import { requireAuth } from '@/lib/rbac';
-import { createRealtimeTicket } from '@/lib/realtime/ticket';
+import { createRealtimeTicket, getRealtimeSecret } from '@/lib/realtime/ticket';
 
 export const dynamic = 'force-dynamic';
 
@@ -9,8 +9,10 @@ export async function POST(request: NextRequest) {
   return withHttpDb(async () => {
     const auth = await requireAuth(request);
     if (auth instanceof NextResponse) return auth;
-    const secret = process.env.REALTIME_SECRET;
-    if (!secret) {
+    let secret: string;
+    try {
+      secret = getRealtimeSecret();
+    } catch {
       return NextResponse.json({ error: 'Realtime is not configured.' }, { status: 503 });
     }
     const ticket = await createRealtimeTicket(

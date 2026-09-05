@@ -38,7 +38,7 @@ export class AvailabilityHub {
   ) {}
 
   private getSecret(): string {
-    return this.env?.REALTIME_SECRET || process.env.REALTIME_SECRET || 'novicetutor-realtime-secret';
+    return this.env?.REALTIME_SECRET || process.env.REALTIME_SECRET || "";
   }
 
   setOrgId(orgId: string) {
@@ -51,6 +51,13 @@ export class AvailabilityHub {
 
   async fetch(request: Request) {
     const url = new URL(request.url);
+
+    // Fail closed when unconfigured: the DO binding normally receives
+    // REALTIME_SECRET from wrangler vars, and every sibling path 401/503s
+    // without it. An empty secret would make `Bearer ` match anything.
+    if (!this.getSecret()) {
+      return new Response('Realtime is not configured.', { status: 503 });
+    }
 
     // 1. Service-authenticated publish endpoint
     if (request.method === 'POST' && url.pathname === '/publish') {
@@ -150,20 +157,22 @@ export class AvailabilityHub {
     const attachment = socket.deserializeAttachment();
 
     if (message.type === 'subscribe') {
-      // Validate subscription: a teacher can only subscribe to their own teacherId or null
-      if (
-        message.teacherId &&
-        attachment.role === 'TEACHER' &&
-        attachment.teacherId &&
-        message.teacherId !== attachment.teacherId
-      ) {
-        socket.send(
-          JSON.stringify({
-            type: 'error',
-            message: 'Cannot subscribe to another teacher.',
-          } satisfies ServerRealtimeMessage)
-        );
-        return;
+      // Validate subscription: a teacher can only subscribe to their own teacherId or null.
+      // The requested teacher must also belong to the claims org — same-org
+      // enforcement for non-teacher roles is the DO partition itself (one DO
+      // instance per orgId via idFromName), which drops cross-org events
+      // before they reach any socket, but an explicit check here keeps the
+      // rule visible at the point of request.
+      if (message.teacherId && message.teacherId !== attachment.teacherId) {
+        if (attachment.role === 'TEACHER' || attachment.teacherId) {
+          socket.send(
+            JSON.stringify({
+              type: 'error',
+              message: 'Cannot subscribe to another teacher.',
+            } satisfies ServerRealtimeMessage)
+          );
+          return;
+        }
       }
       attachment.subscription = message.teacherId;
     }

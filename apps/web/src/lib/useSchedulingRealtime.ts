@@ -193,7 +193,11 @@ export function useSchedulingRealtime(
             return;
           }
 
-          // Scheduling Event Message
+          // Scheduling Event Message. Deduplication is by eventId: each
+          // outbox row is one event, redelivered verbatim on retry, so a
+          // repeat eventId is the same event, not a newer version of it.
+          // `version` stays in the protocol for forward compatibility but
+          // is not a per-aggregate sequence (see lib/realtime/outbox.ts).
           const scheduleMsg = msg as SchedulingEventMessage;
           if (scheduleMsg.eventId) {
             // Deduplicate by eventId

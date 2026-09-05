@@ -11,10 +11,29 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSchedulingRealtime } from '@/lib/useSchedulingRealtime';
 
-const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
+type DayOfWeekName =
+  | 'SUNDAY' | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY' | 'FRIDAY' | 'SATURDAY';
+
+const DAY_ORDER: Record<DayOfWeekName, number> = {
+  SUNDAY: 0, MONDAY: 1, TUESDAY: 2, WEDNESDAY: 3, THURSDAY: 4, FRIDAY: 5, SATURDAY: 6,
+};
+
+function dayLabel(dayOfWeek: number | string): string {
+  if (typeof dayOfWeek === 'number') return DAY_NAMES[dayOfWeek] || `Day ${dayOfWeek}`;
+  const idx = DAY_ORDER[dayOfWeek as DayOfWeekName];
+  if (idx === undefined) return `Day ${dayOfWeek}`;
+  return DAY_NAMES[idx];
+}
+
+function dayIndex(dayOfWeek: number | string): number {
+  if (typeof dayOfWeek === 'number') return dayOfWeek;
+  return DAY_ORDER[dayOfWeek as DayOfWeekName] ?? 99;
+}
 
 interface SlotDiff {
-  dayOfWeek: number;
+  dayOfWeek: number | string;
   startTime: string;
   endTime: string;
   timezone?: string;
@@ -43,7 +62,8 @@ function formatSlots(slots?: SlotDiff[]) {
 
   // Sort by dayOfWeek, then startTime
   const sorted = [...slots].sort((a, b) => {
-    if (a.dayOfWeek !== b.dayOfWeek) return a.dayOfWeek - b.dayOfWeek;
+    const dayDiff = dayIndex(a.dayOfWeek) - dayIndex(b.dayOfWeek);
+    if (dayDiff !== 0) return dayDiff;
     return a.startTime.localeCompare(b.startTime);
   });
 
@@ -51,7 +71,7 @@ function formatSlots(slots?: SlotDiff[]) {
     <ul className="space-y-1 text-xs">
       {sorted.map((s, idx) => (
         <li key={idx} className="flex justify-between py-1 border-b border-white/10 last:border-0">
-          <span className="font-medium text-neutral-300">{DAYS[s.dayOfWeek] || `Day ${s.dayOfWeek}`}</span>
+          <span className="font-medium text-neutral-300">{dayLabel(s.dayOfWeek)}</span>
           <span className="text-neutral-400">
             {s.startTime} – {s.endTime}
           </span>
@@ -99,16 +119,19 @@ export default function TeacherAvailabilityModal() {
   const handleAcknowledge = async () => {
     if (!notification) return;
     setAcknowledging(true);
-    dismissedIds.current.add(notification.id);
     try {
-      await fetch(`/api/notifications/${notification.id}/read`, {
+      const res = await fetch(`/api/notifications/${notification.id}/read`, {
         method: 'POST',
       });
+      // Only hide on a confirmed ack: a dropped request leaves the popup up
+      // so the teacher still sees the schedule change on the next poll.
+      if (!res.ok) return;
+      dismissedIds.current.add(notification.id);
+      setNotification(null);
     } catch {
-      // Best-effort
+      // Best-effort: keep the notification visible so it reappears.
     } finally {
       setAcknowledging(false);
-      setNotification(null);
     }
   };
 

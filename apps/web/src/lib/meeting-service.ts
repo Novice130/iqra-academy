@@ -260,7 +260,7 @@ export async function createInstantMeeting(params: {
     });
 
     if (profiles.length > 0) {
-      await tx.insert(bookings).values(
+      const inserted = await tx.insert(bookings).values(
         profiles.map((p) => ({
           id: createId(),
           orgId,
@@ -269,15 +269,15 @@ export async function createInstantMeeting(params: {
           sessionId,
           status: "CONFIRMED" as const,
         }))
-      );
-      for (const p of profiles) {
+      ).returning({ id: bookings.id });
+      for (const b of inserted) {
         await insertSchedulingEvent(tx, {
           orgId,
           teacherId,
           actorId: teacherId,
           type: "booking.created",
           aggregateType: "booking",
-          aggregateId: p.id,
+          aggregateId: b.id,
         });
       }
     }

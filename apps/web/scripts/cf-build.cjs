@@ -147,23 +147,31 @@ if (buildResult.status === 0) {
   }
 }
 
-// Ensure AvailabilityHub Durable Object is exported from .open-next/worker.js
+// Ensure AvailabilityHub Durable Object is exported from .open-next/worker.js.
+// esbuild ships with @opennextjs/cloudflare (hoisted to the repo root), so
+// `npx esbuild` resolves without a direct dependency; the resolve step below
+// fails the build loudly instead of silently shipping a worker without the
+// DO export when it cannot.
 function patchWorkerExports() {
   const workerFile = path.join(root, ".open-next", "worker.js");
   if (fs.existsSync(workerFile)) {
     const hubDistDir = path.join(root, ".open-next", "cloudflare-templates");
     fs.mkdirSync(hubDistDir, { recursive: true });
     const hubBundlePath = path.join(hubDistDir, "AvailabilityHub.js");
-    
+
     console.log("🔨 Bundling AvailabilityHub Durable Object for Cloudflare worker...");
-    spawnSync("npx", [
+    const bundle = spawnSync("npx", [
       "esbuild",
       path.join(root, "src/realtime/AvailabilityHub.ts"),
       "--bundle",
       "--format=esm",
-      "--platform=node",
+      "--platform=neutral",
       `--outfile=${hubBundlePath}`,
     ], { stdio: "inherit", shell: true });
+    if (bundle.status !== 0 || !fs.existsSync(hubBundlePath)) {
+      console.error("❌ AvailabilityHub bundle failed — the worker would deploy without its realtime DO export.");
+      process.exit(1);
+    }
 
     let content = fs.readFileSync(workerFile, "utf8");
     if (!content.includes("export { AvailabilityHub }")) {

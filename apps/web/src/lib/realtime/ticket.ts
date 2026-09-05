@@ -8,18 +8,32 @@ function key(secret: string) {
   return new TextEncoder().encode(secret);
 }
 
-export async function createRealtimeTicket(claims: RealtimeClaims, secret: string) {
+/**
+ * Service secret shared by the ticket issuer, the DO publish endpoint, and
+ * the drain trigger. Fail-closed: every caller 401/503s without it, so a
+ * missing env var is a loud outage rather than an open door. The test suite
+ * sets REALTIME_SECRET explicitly (see realtime.spec.ts).
+ */
+export function getRealtimeSecret(): string {
+  const secret = process.env.REALTIME_SECRET;
+  if (!secret) {
+    throw new Error("Realtime is not configured: set REALTIME_SECRET.");
+  }
+  return secret;
+}
+
+export async function createRealtimeTicket(claims: RealtimeClaims, secret?: string) {
   return new SignJWT(claims as unknown as Record<string, unknown>)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuer(issuer)
     .setAudience(audience)
     .setIssuedAt()
     .setExpirationTime('2m')
-    .sign(key(secret));
+    .sign(key(secret ?? getRealtimeSecret()));
 }
 
-export async function verifyRealtimeTicket(ticket: string, secret: string): Promise<RealtimeClaims> {
-  const { payload } = await jwtVerify(ticket, key(secret), { issuer, audience });
+export async function verifyRealtimeTicket(ticket: string, secret?: string): Promise<RealtimeClaims> {
+  const { payload } = await jwtVerify(ticket, key(secret ?? getRealtimeSecret()), { issuer, audience });
   if (
     typeof payload.userId !== 'string' ||
     typeof payload.orgId !== 'string' ||

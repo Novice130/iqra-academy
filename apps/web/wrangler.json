@@ -33,6 +33,15 @@
       "new_classes": ["AvailabilityHub"]
     }
   ],
+  // Outbox retry sweeper. Per-request afterResponse drains cover the happy
+  // path, but a failed publish must not wait for the next unrelated mutation:
+  // this cron hits the service-authed drain route every minute, which retries
+  // unpublished rows (attempts < 5) and dead-letters the rest. The route
+  // returns { published, failed, deadLettered } for the alert in Phase 11
+  // monitoring; REALTIME_SECRET must be set as a worker secret/var.
+  "triggers": {
+    "crons": ["*/1 * * * *"]
+  },
   // Workers Logs. Without this an "exceeded resource limits" (1102) burst
   // leaves nothing behind but request counts in analytics — the August 6/7
   // outages had to be traced by guessing at paths. Sampling stays at 1 so a
