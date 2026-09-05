@@ -14,17 +14,55 @@ import 'shell/web_shell.dart';
 import 'shell/push.dart';
 import 'shell/incoming_call.dart';
 
+/// Target web application URL.
+///
+/// Supported build configurations:
+///   - Production: `https://novicetutor.com` (default)
+///   - Staging:    `https://staging.novicetutor.com`
+///   - Android Sim:`http://10.0.2.2:3000`
+///   - iOS Sim:    `http://localhost:3000`
+///
+/// Pass at build/run time via:
+///   `flutter build apk --dart-define=APP_URL=https://novicetutor.com`
 const appUrl = String.fromEnvironment(
   'APP_URL',
   defaultValue: 'https://novicetutor.com',
 );
 
+/// Validates that [url] is a non-empty, well-formed http or https URI.
+/// Fails fast with [ArgumentError] if the environment string is missing or malformed.
+Uri validateAppUrl(String url) {
+  final trimmed = url.trim();
+  if (trimmed.isEmpty) {
+    throw ArgumentError.value(
+      url,
+      'APP_URL',
+      'APP_URL cannot be empty. Pass --dart-define=APP_URL=https://novicetutor.com',
+    );
+  }
+  final uri = Uri.tryParse(trimmed);
+  if (uri == null ||
+      !uri.hasScheme ||
+      (!uri.isScheme('https') && !uri.isScheme('http')) ||
+      uri.host.isEmpty) {
+    throw ArgumentError.value(
+      url,
+      'APP_URL',
+      'APP_URL must be a valid http or https URL (e.g. https://novicetutor.com or http://10.0.2.2:3000)',
+    );
+  }
+  return uri;
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Validate APP_URL fail-fast before initializing services
+  final targetOrigin = validateAppUrl(appUrl);
+
   // Answering a call has to work with no WebView on screen, so the call
   // service needs to know which origin the session cookie belongs to.
-  CallService.instance.appOrigin = Uri.parse(appUrl);
+  CallService.instance.appOrigin = targetOrigin;
 
   // Firebase is optional at this stage: without
   // android/app/google-services.json — or ios/Runner/GoogleService-Info.plist —

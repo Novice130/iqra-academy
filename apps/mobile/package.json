@@ -3,8 +3,8 @@
   "private": true,
   "scripts": {
     "dev": "flutter run",
-    "build": "echo 'Skipping flutter build inside automated CI'",
-    "lint": "echo 'Skipping flutter lint'",
+    "build": "flutter build apk --debug",
+    "lint": "flutter analyze",
     "analyze": "flutter analyze",
     "test": "flutter test"
   }

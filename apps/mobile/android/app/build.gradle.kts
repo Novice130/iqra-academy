@@ -59,6 +59,14 @@ android {
                 this.storePassword = storePassword
                 this.keyAlias = keyAlias
                 this.keyPassword = keyPassword
+            } else {
+                val isReleaseTask = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+                if (isReleaseTask) {
+                    throw GradleException(
+                        "Release build requires valid android/key.properties and release keystore. " +
+                        "Create android/key.properties with storeFile, storePassword, keyAlias, and keyPassword."
+                    )
+                }
             }
         }
     }

@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:novice_tutor/main.dart';
 import 'package:novice_tutor/shell/web_shell.dart';
 
+import 'package:novice_tutor/shell/screen_share.dart';
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -22,39 +24,39 @@ void main() {
       }
     });
 
+    test('validateAppUrl accepts valid schemes and hosts', () {
+      expect(validateAppUrl('https://novicetutor.com').toString(), equals('https://novicetutor.com'));
+      expect(validateAppUrl('https://staging.novicetutor.com').toString(), equals('https://staging.novicetutor.com'));
+      expect(validateAppUrl('http://10.0.2.2:3000').toString(), equals('http://10.0.2.2:3000'));
+      expect(validateAppUrl('http://localhost:3000').toString(), equals('http://localhost:3000'));
+    });
+
+    test('validateAppUrl fails fast on empty or invalid inputs', () {
+      expect(() => validateAppUrl(''), throwsArgumentError);
+      expect(() => validateAppUrl('   '), throwsArgumentError);
+      expect(() => validateAppUrl('ftp://novicetutor.com'), throwsArgumentError);
+      expect(() => validateAppUrl('novicetutor.com'), throwsArgumentError);
+      expect(() => validateAppUrl('https://'), throwsArgumentError);
+    });
+
     test('validates internal vs foreign host origins strictly', () {
       final appOrigin = Uri.parse('https://novicetutor.com');
 
-      bool isInternal(Uri? url) {
-        if (url == null) return false;
-        final host = url.host;
-        return host == appOrigin.host ||
-            host.endsWith('.${appOrigin.host}') ||
-            host == 'meet.novicetutor.com';
-      }
-
       // Valid same-origin and subdomain links
-      expect(isInternal(Uri.parse('https://novicetutor.com/dashboard/session/cuid123')), isTrue);
-      expect(isInternal(Uri.parse('https://meet.novicetutor.com/join/cuid123')), isTrue);
-      expect(isInternal(Uri.parse('https://app.novicetutor.com/dashboard')), isTrue);
-      expect(isInternal(Uri.parse('https://novicetutor.com/join/123456?role=guest')), isTrue);
+      expect(isInternalUrl(Uri.parse('https://novicetutor.com/dashboard/session/cuid123'), appOrigin), isTrue);
+      expect(isInternalUrl(Uri.parse('https://meet.novicetutor.com/join/cuid123'), appOrigin), isTrue);
+      expect(isInternalUrl(Uri.parse('https://app.novicetutor.com/dashboard'), appOrigin), isTrue);
+      expect(isInternalUrl(Uri.parse('https://novicetutor.com/join/123456?role=guest'), appOrigin), isTrue);
 
       // Malicious or third-party links must be rejected
-      expect(isInternal(Uri.parse('https://evil.com/phish')), isFalse);
-      expect(isInternal(Uri.parse('https://novicetutor.com.evil.com/phish')), isFalse);
-      expect(isInternal(Uri.parse('https://accounts.google.com/o/oauth2/auth')), isFalse);
-      expect(isInternal(Uri.parse('https://checkout.stripe.com/pay')), isFalse);
-      expect(isInternal(null), isFalse);
+      expect(isInternalUrl(Uri.parse('https://evil.com/phish'), appOrigin), isFalse);
+      expect(isInternalUrl(Uri.parse('https://novicetutor.com.evil.com/phish'), appOrigin), isFalse);
+      expect(isInternalUrl(Uri.parse('https://accounts.google.com/o/oauth2/auth'), appOrigin), isFalse);
+      expect(isInternalUrl(Uri.parse('https://checkout.stripe.com/pay'), appOrigin), isFalse);
+      expect(isInternalUrl(null, appOrigin), isFalse);
     });
 
     test('session ID validator strictly accepts cuid2 format only', () {
-      bool isValidSessionId(Object? value) {
-        return value is String &&
-            value.isNotEmpty &&
-            value.length <= 64 &&
-            RegExp(r'^[a-z0-9]+$').hasMatch(value);
-      }
-
       expect(isValidSessionId('clx123abc456'), isTrue);
       expect(isValidSessionId('1234567890'), isTrue);
       expect(isValidSessionId(''), isFalse);
@@ -62,6 +64,17 @@ void main() {
       expect(isValidSessionId('<script>alert(1)</script>'), isFalse);
       expect(isValidSessionId('session; DROP TABLE sessions;'), isFalse);
       expect(isValidSessionId('UPPERCASE_NOT_CUID'), isFalse);
+      expect(isValidSessionId(12345), isFalse);
+      expect(isValidSessionId(null), isFalse);
+    });
+  });
+
+  group('ScreenShareService Tests', () {
+    test('stop() safely cleans up when not sharing', () async {
+      final service = ScreenShareService.instance;
+      expect(service.isSharing, isFalse);
+      await service.stop();
+      expect(service.isSharing, isFalse);
     });
   });
 

@@ -52,7 +52,17 @@ test.describe('Phase 9 — Native iOS and Android Parity', () => {
     expect(content).toContain('application/json');
   });
 
-  test('android build.gradle.kts enforces release signing without debug fallback', async () => {
+  test('serves application/json content-type for .well-known endpoints', async ({ request }) => {
+    const aasaRes = await request.get('/.well-known/apple-app-site-association');
+    expect(aasaRes.status()).toBe(200);
+    expect(aasaRes.headers()['content-type']).toContain('application/json');
+
+    const assetlinksRes = await request.get('/.well-known/assetlinks.json');
+    expect(assetlinksRes.status()).toBe(200);
+    expect(assetlinksRes.headers()['content-type']).toContain('application/json');
+  });
+
+  test('android build.gradle.kts enforces release signing and throws on missing keystore in release tasks', async () => {
     const gradlePath = path.join(mobileRoot, 'android/app/build.gradle.kts');
     const content = fs.readFileSync(gradlePath, 'utf8');
 
@@ -60,9 +70,10 @@ test.describe('Phase 9 — Native iOS and Android Parity', () => {
     const releaseBlock = content.match(/release\s*\{([\s\S]*?)\}/)?.[1] || '';
     expect(releaseBlock).not.toContain('signingConfigs.getByName("debug")');
     expect(releaseBlock).toContain('signingConfig = signingConfigs.getByName("release")');
+    expect(content).toContain('throw GradleException');
   });
 
-  test('iOS Runner.entitlements configures Associated Domains and APNs', async () => {
+  test('iOS Runner.entitlements configures Associated Domains and parameterized APNs', async () => {
     const entitlementsPath = path.join(mobileRoot, 'ios/Runner/Runner.entitlements');
     expect(fs.existsSync(entitlementsPath)).toBe(true);
 
@@ -70,6 +81,23 @@ test.describe('Phase 9 — Native iOS and Android Parity', () => {
     expect(content).toContain('applinks:novicetutor.com');
     expect(content).toContain('applinks:www.novicetutor.com');
     expect(content).toContain('aps-environment');
+    expect(content).toContain('$(APS_ENVIRONMENT)');
+  });
+
+  test('iOS xcconfig defines APS_ENVIRONMENT and GoogleAuth fallbacks', async () => {
+    const debugPath = path.join(mobileRoot, 'ios/Flutter/Debug.xcconfig');
+    const releasePath = path.join(mobileRoot, 'ios/Flutter/Release.xcconfig');
+
+    const debugContent = fs.readFileSync(debugPath, 'utf8');
+    const releaseContent = fs.readFileSync(releasePath, 'utf8');
+
+    expect(debugContent).toContain('APS_ENVIRONMENT = development');
+    expect(debugContent).toContain('GOOGLE_IOS_CLIENT_ID =');
+    expect(debugContent).toContain('GOOGLE_REVERSED_CLIENT_ID =');
+
+    expect(releaseContent).toContain('APS_ENVIRONMENT = production');
+    expect(releaseContent).toContain('GOOGLE_IOS_CLIENT_ID =');
+    expect(releaseContent).toContain('GOOGLE_REVERSED_CLIENT_ID =');
   });
 
   test('iOS project.pbxproj references Runner.entitlements in all build configurations', async () => {

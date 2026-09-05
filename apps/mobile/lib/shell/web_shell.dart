@@ -70,6 +70,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   static const _pipChannel = MethodChannel('novicetutor/pip');
   static const _deepLinkChannel = MethodChannel('novicetutor/deeplink');
   StreamSubscription<String>? _deepLinks;
+  String? _pendingDeepLink;
 
   /// Watches for a load that starts and then goes nowhere.
   ///
@@ -172,6 +173,10 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
         targetUri = parsed;
       } else {
         targetUri = _appOrigin.resolve(pathOrUrl);
+      }
+      if (_controller == null) {
+        _pendingDeepLink = targetUri.toString();
+        return;
       }
       _controller?.loadUrl(urlRequest: URLRequest(url: WebUri.uri(targetUri)));
     } catch (_) {
@@ -344,13 +349,7 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
   /// True for URLs the WebView should keep. Everything else goes to the
   /// system browser — notably accounts.google.com, which refuses to render
   /// OAuth inside a WebView at all ("disallowed_useragent").
-  bool _isInternal(Uri? url) {
-    if (url == null) return false;
-    final host = url.host;
-    return host == _appOrigin.host ||
-        host.endsWith('.${_appOrigin.host}') ||
-        host == 'meet.novicetutor.com';
-  }
+  bool _isInternal(Uri? url) => isInternalUrl(url, _appOrigin);
 
   Future<void> _openExternally(Uri url) async {
     await launchUrl(url, mode: LaunchMode.externalApplication);
@@ -451,6 +450,11 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
           onWebViewCreated: (c) {
             _controller = c;
             _registerScreenShareHandlers(c);
+            final pending = _pendingDeepLink;
+            if (pending != null) {
+              _pendingDeepLink = null;
+              c.loadUrl(urlRequest: URLRequest(url: WebUri(pending)));
+            }
           },
           onLoadStart: (controller, url) => _startStallTimer(),
           // Any progress at all means the connection is alive, so the stall
@@ -636,4 +640,24 @@ class _WebShellState extends State<WebShell> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+/// True for URLs the WebView should keep. Everything else goes to the
+/// system browser — notably accounts.google.com, which refuses to render
+/// OAuth inside a WebView at all ("disallowed_useragent").
+bool isInternalUrl(Uri? url, Uri appOrigin) {
+  if (url == null) return false;
+  final host = url.host;
+  if (host.isEmpty) return false;
+  return host == appOrigin.host ||
+      host.endsWith('.${appOrigin.host}') ||
+      host == 'meet.novicetutor.com';
+}
+
+/// Strictly validates session identifiers (cuid2 / alphanumeric token format).
+bool isValidSessionId(Object? value) {
+  return value is String &&
+      value.isNotEmpty &&
+      value.length <= 64 &&
+      RegExp(r'^[a-z0-9]+$').hasMatch(value);
 }
