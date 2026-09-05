@@ -84,22 +84,42 @@ export default async function AdminTeacherSchedulesPage({ searchParams }: Props)
     // 2. Fetch all availability, time-off, and sessions for these teachers concurrently
     const [availabilityRows, timeOffRows, sessionRows] = await Promise.all([
       db.query.teacherAvailability.findMany({
-        where: inArray(teacherAvailability.teacherId, teacherIds),
+        where: isSuperAdmin
+          ? inArray(teacherAvailability.teacherId, teacherIds)
+          : and(
+              eq(teacherAvailability.orgId, orgId),
+              inArray(teacherAvailability.teacherId, teacherIds)
+            ),
       }),
       db.query.teacherTimeOff.findMany({
-        where: and(
-          inArray(teacherTimeOff.teacherId, teacherIds),
-          gte(teacherTimeOff.endsAt, weekStart),
-          lte(teacherTimeOff.startsAt, weekEnd)
-        ),
+        where: isSuperAdmin
+          ? and(
+              inArray(teacherTimeOff.teacherId, teacherIds),
+              gte(teacherTimeOff.endsAt, weekStart),
+              lte(teacherTimeOff.startsAt, weekEnd)
+            )
+          : and(
+              eq(teacherTimeOff.orgId, orgId),
+              inArray(teacherTimeOff.teacherId, teacherIds),
+              gte(teacherTimeOff.endsAt, weekStart),
+              lte(teacherTimeOff.startsAt, weekEnd)
+            ),
       }),
       db.query.sessions.findMany({
-        where: and(
-          inArray(sessions.teacherId, teacherIds),
-          gte(sessions.scheduledStart, weekStart),
-          lte(sessions.scheduledStart, weekEnd),
-          isNull(sessions.mergedIntoId)
-        ),
+        where: isSuperAdmin
+          ? and(
+              inArray(sessions.teacherId, teacherIds),
+              gte(sessions.scheduledStart, weekStart),
+              lte(sessions.scheduledStart, weekEnd),
+              isNull(sessions.mergedIntoId)
+            )
+          : and(
+              eq(sessions.orgId, orgId),
+              inArray(sessions.teacherId, teacherIds),
+              gte(sessions.scheduledStart, weekStart),
+              lte(sessions.scheduledStart, weekEnd),
+              isNull(sessions.mergedIntoId)
+            ),
         with: {
           bookings: {
             with: {

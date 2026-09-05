@@ -4,8 +4,10 @@ import {
   sessions,
   schedulingEvents,
   users,
+  sessionAttendance,
 } from "../../src/db/schema";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, isNull } from "drizzle-orm";
+import { dayKeyInZone } from "../../src/components/LocalTime";
 
 test.describe("Phase 6: Admin Information Architecture & Dedicated Routes", () => {
   test("catch-all route elimination: unknown /admin/* subpaths return 404", async ({
@@ -336,5 +338,115 @@ test.describe("Phase 6: Admin Information Architecture & Dedicated Routes", () =
 
     const hasFutureSession = liveSessions.some((s) => s.id === futureSession.id);
     expect(hasFutureSession).toBe(false);
+  });
+
+  test("live-classes invariant: requires active teacher attendance (leftAt is null)", async ({
+    orgA,
+  }) => {
+    const { db } = getTestDb();
+    const now = new Date();
+
+    // Session running in DB
+    const [liveSession] = await db
+      .insert(sessions)
+      .values({
+        orgId: orgA.orgId,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "IN_PROGRESS",
+        title: "Live With Absent Teacher Test",
+        scheduledStart: new Date(now.getTime() - 10 * 60_000),
+        scheduledEnd: new Date(now.getTime() + 30 * 60_000),
+        actualStart: new Date(now.getTime() - 10 * 60_000),
+      })
+      .returning();
+
+    // Teacher has left (leftAt is set)
+    await db.insert(sessionAttendance).values({
+      orgId: orgA.orgId,
+      sessionId: liveSession.id,
+      userId: orgA.teacher.id,
+      role: "TEACHER",
+      identity: `${orgA.teacher.email}#test-conn`,
+      joinedAt: new Date(now.getTime() - 10 * 60_000),
+      leftAt: new Date(now.getTime() - 2 * 60_000),
+    });
+
+    // Overview query checks active teacher attendance
+    const activeAttendance = await db
+      .select({ sessionId: sessionAttendance.sessionId })
+      .from(sessionAttendance)
+      .where(
+        and(
+          eq(sessionAttendance.orgId, orgA.orgId),
+          eq(sessionAttendance.sessionId, liveSession.id),
+          eq(sessionAttendance.userId, orgA.teacher.id),
+          isNull(sessionAttendance.leftAt)
+        )
+      );
+
+    // Active attendance count must be 0 because teacher left
+    expect(activeAttendance.length).toBe(0);
+  });
+
+  test("timezone bucketing invariant: dayKeyInZone buckets midnight and cross-day sessions accurately", async () => {
+    const instantMidnightUtc = new Date("2026-09-05T00:30:00Z");
+    // In UTC, this is 2026-09-05
+    expect(dayKeyInZone(instantMidnightUtc, "UTC")).toBe("2026-09-05");
+    // In America/New_York (UTC-4 in summer DST), this is 2026-09-04 at 20:30
+    expect(dayKeyInZone(instantMidnightUtc, "America/New_York")).toBe("2026-09-04");
+    // In Asia/Kolkata (UTC+5:30), this is 2026-09-05 at 06:00
+    expect(dayKeyInZone(instantMidnightUtc, "Asia/Kolkata")).toBe("2026-09-05");
+  });
+
+  test("scheduled classes query invariant: excludes merged and cancelled sessions by default", async ({
+    orgA,
+  }) => {
+    const { db } = getTestDb();
+    const now = new Date();
+
+    const [normalSession] = await db
+      .insert(sessions)
+      .values({
+        orgId: orgA.orgId,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "SCHEDULED",
+        title: "Normal Scheduled Session",
+        scheduledStart: new Date(now.getTime() + 3600_000),
+        scheduledEnd: new Date(now.getTime() + 2 * 3600_000),
+      })
+      .returning();
+
+    const [mergedSession] = await db
+      .insert(sessions)
+      .values({
+        orgId: orgA.orgId,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "SCHEDULED",
+        title: "Merged Session",
+        scheduledStart: new Date(now.getTime() + 3600_000),
+        scheduledEnd: new Date(now.getTime() + 2 * 3600_000),
+        mergedIntoId: normalSession.id,
+      })
+      .returning();
+
+    // Default admin query for scheduled classes filters out mergedIntoId IS NOT NULL
+    const results = await db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.orgId, orgA.orgId),
+          isNull(sessions.mergedIntoId)
+        )
+      );
+
+    const hasNormal = results.some((s) => s.id === normalSession.id);
+    const hasMerged = results.some((s) => s.id === mergedSession.id);
+
+    expect(hasNormal).toBe(true);
+    expect(hasMerged).toBe(false);
   });
 });

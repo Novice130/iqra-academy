@@ -93,10 +93,27 @@ export async function PATCH(
         throw new ForbiddenError("Only the teacher or an admin can update this session.");
       }
 
-      const allowedStatuses = ["SCHEDULED", "CANCELLED", "COMPLETED"];
+      const allowedStatuses = ["SCHEDULED", "IN_PROGRESS", "CANCELLED", "COMPLETED"];
       if (body.status && !allowedStatuses.includes(body.status)) {
         return NextResponse.json(
           { error: `Invalid status. Allowed: ${allowedStatuses.join(", ")}` },
+          { status: 400 }
+        );
+      }
+
+      const newStart = body.scheduledStart ? new Date(body.scheduledStart) : undefined;
+      const newEnd = body.scheduledEnd ? new Date(body.scheduledEnd) : undefined;
+      if ((newStart && isNaN(newStart.getTime())) || (newEnd && isNaN(newEnd.getTime()))) {
+        return NextResponse.json(
+          { error: "Invalid date format for scheduledStart or scheduledEnd." },
+          { status: 400 }
+        );
+      }
+      const effectiveStart = newStart ?? new Date(session.scheduledStart);
+      const effectiveEnd = newEnd ?? new Date(session.scheduledEnd);
+      if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
+        return NextResponse.json(
+          { error: "scheduledEnd must be after scheduledStart." },
           { status: 400 }
         );
       }
@@ -106,6 +123,8 @@ export async function PATCH(
         if (body.status) updateData.status = body.status;
         if (body.title) updateData.title = body.title;
         if (body.teacherId && isAdmin) updateData.teacherId = body.teacherId;
+        if (newStart) updateData.scheduledStart = effectiveStart;
+        if (newEnd) updateData.scheduledEnd = effectiveEnd;
 
         await tx.update(sessions).set(updateData).where(eq(sessions.id, sessionId));
 
@@ -149,6 +168,8 @@ export async function PATCH(
         session: {
           id: sessionId,
           status: body.status || session.status,
+          scheduledStart: newStart ? effectiveStart.toISOString() : session.scheduledStart,
+          scheduledEnd: newEnd ? effectiveEnd.toISOString() : session.scheduledEnd,
         },
       });
     } catch (error) {

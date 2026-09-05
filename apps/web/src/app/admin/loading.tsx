@@ -5,7 +5,9 @@
 
 export default function AdminLoading() {
   return (
-    <div className="space-y-8 animate-pulse">
+    <div className="space-y-8 animate-pulse" role="status" aria-live="polite">
+      <span className="sr-only">Loading admin dashboard...</span>
+
       {/* Header Skeleton */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
         <div className="space-y-2">
@@ -18,16 +20,16 @@ export default function AdminLoading() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
-          <div className="h-9 w-44 rounded-xl bg-[var(--border)]" />
+          <div className="h-9 w-36 rounded-xl bg-[var(--border)]" />
           <div className="h-9 w-44 rounded-xl bg-[var(--border)] opacity-75" />
           <div className="h-9 w-28 rounded-xl bg-[var(--border)] opacity-75" />
           <div className="h-9 w-32 rounded-xl bg-[var(--border)] opacity-75" />
         </div>
       </div>
 
-      {/* 6 Stat Cards Skeleton */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
-        {[...Array(6)].map((_, i) => (
+      {/* 5 Stat Cards Skeleton */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+        {[...Array(5)].map((_, i) => (
           <div
             key={i}
             className="p-4 sm:p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] flex flex-col justify-between h-24"
@@ -68,13 +70,21 @@ export default function AdminLoading() {
         </div>
       </section>
 
-      {/* Scheduled Classes Matrix Skeleton */}
-      <section className="rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div className="h-5 w-48 rounded bg-[var(--border)]" />
-          <div className="h-8 w-64 rounded-lg bg-[var(--border)]" />
+      {/* Quick Management Tools Skeleton */}
+      <section className="space-y-4">
+        <div className="h-5 w-48 rounded bg-[var(--border)]" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <div
+              key={i}
+              className="p-5 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] space-y-2 h-36"
+            >
+              <div className="w-8 h-8 rounded-lg bg-[var(--border)]" />
+              <div className="h-4 w-32 rounded bg-[var(--border)]" />
+              <div className="h-3 w-48 rounded bg-[var(--border)] opacity-60" />
+            </div>
+          ))}
         </div>
-        <div className="h-64 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)]" />
       </section>
     </div>
   );

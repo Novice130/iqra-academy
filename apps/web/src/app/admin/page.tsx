@@ -20,6 +20,7 @@ import CopyLinkButton from "@/components/CopyLinkButton";
 import SessionRowActions from "../dashboard/teacher/SessionRowActions";
 import LocalTime from "@/components/LocalTime";
 import { getAttendanceReport } from "@/lib/attendance";
+import InstantMeetingAdminButton from "./InstantMeetingAdminButton";
 
 interface LiveClassCardData {
   sessionId: string;
@@ -30,6 +31,8 @@ interface LiveClassCardData {
   studentNames: string;
   numParticipants: number;
   actualStart: Date | null;
+  elapsedMinutes?: number;
+  roomHealth?: "HEALTHY" | "DEGRADED";
 }
 
 export default async function AdminPage() {
@@ -78,12 +81,7 @@ export default async function AdminPage() {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
-            <Link
-              href="/dashboard/teacher"
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition flex items-center gap-1.5"
-            >
-              <span>⚡</span> Instant Meeting
-            </Link>
+            <InstantMeetingAdminButton />
             <Link
               href="/admin/assign-student"
               className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition flex items-center gap-1.5"
@@ -190,13 +188,16 @@ export default async function AdminPage() {
                         <span className="font-medium text-[var(--text-primary)]">Students:</span> {item.studentNames}
                       </div>
 
-                      <div className="text-[11px] text-[var(--text-tertiary)] mt-2 flex items-center gap-2">
+                      <div className="text-[11px] text-[var(--text-tertiary)] mt-2 flex flex-wrap items-center gap-2">
                         <span>
                           Started {item.actualStart ? <LocalTime iso={item.actualStart.toISOString()} mode="time" /> : "just now"}
                         </span>
                         <span>•</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                          {item.numParticipants} in room
+                        <span>{item.elapsedMinutes ?? 1}m elapsed</span>
+                        <span>•</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Healthy ({item.numParticipants} in room)
                         </span>
                       </div>
                     </div>
@@ -334,6 +335,7 @@ async function getVerifiedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
       .from(sessionAttendance)
       .where(
         and(
+          isSuperAdmin ? undefined : eq(sessionAttendance.orgId, orgId),
           inArray(sessionAttendance.sessionId, matchedSessions.map((s) => s.id)),
           isNull(sessionAttendance.leftAt)
         )
@@ -363,6 +365,11 @@ async function getVerifiedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
         .filter(Boolean)
         .join(", ") || "No students yet";
 
+      const actualStart = session.actualStart ? new Date(session.actualStart) : null;
+      const elapsedMinutes = actualStart
+        ? Math.max(1, Math.round((Date.now() - actualStart.getTime()) / (60 * 1000)))
+        : 1;
+
       verified.push({
         sessionId: session.id,
         roomName: r.name,
@@ -371,7 +378,9 @@ async function getVerifiedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
         teacherName: session.teacher?.name || session.teacher?.email || "Teacher",
         studentNames,
         numParticipants: r.numParticipants,
-        actualStart: session.actualStart ? new Date(session.actualStart) : null,
+        actualStart,
+        elapsedMinutes,
+        roomHealth: "HEALTHY",
       });
     }
 

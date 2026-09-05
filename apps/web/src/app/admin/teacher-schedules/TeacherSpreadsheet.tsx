@@ -11,7 +11,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import LocalTime, { formatInZone, useViewerTimeZone } from "@/components/LocalTime";
+import LocalTime, { dayKeyInZone, useViewerTimeZone } from "@/components/LocalTime";
 
 export interface TeacherScheduleData {
   id: string;
@@ -43,11 +43,10 @@ const HOURS = [
   6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
 ];
 
-function formatHour(h: number) {
-  if (h === 0) return "12 AM";
-  if (h === 12) return "12 PM";
-  return h > 12 ? `${h - 12} PM` : `${h} AM`;
-}
+const HALF_HOUR_SLOTS = HOURS.flatMap((h) => [
+  { hour: h, minute: 0, label: `${String(h).padStart(2, "0")}:00` },
+  { hour: h, minute: 30, label: `${String(h).padStart(2, "0")}:30` },
+]);
 
 export default function TeacherSpreadsheet({
   teachers,
@@ -62,6 +61,7 @@ export default function TeacherSpreadsheet({
   const viewerZone = useViewerTimeZone();
   const [search, setSearch] = useState("");
   const [selectedMobileDay, setSelectedMobileDay] = useState(0);
+  const [viewMode, setViewMode] = useState<"summary" | "half-hour">("summary");
 
   // Compute 7 days of this week starting from weekStartIso
   const weekDays = useMemo(() => {
@@ -143,14 +143,28 @@ export default function TeacherSpreadsheet({
           </span>
         </div>
 
-        {/* Search and CSV Export */}
-        <div className="flex items-center gap-2.5">
+        {/* Search, View Mode, Print, and CSV Export */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            type="button"
+            onClick={() => setViewMode((v) => (v === "summary" ? "half-hour" : "summary"))}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition cursor-pointer"
+          >
+            {viewMode === "summary" ? "⏱️ Detailed Slot Grid" : "📋 Summary View"}
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition cursor-pointer no-print"
+          >
+            🖨️ Print View
+          </button>
           <input
             type="text"
             placeholder="Search teacher..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="px-3 py-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 w-48"
+            className="px-3 py-1.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 w-44"
           />
           <button
             onClick={handleExportCsv}
@@ -175,9 +189,9 @@ export default function TeacherSpreadsheet({
                     key={idx}
                     className="p-3 text-center border-r border-[var(--border)] last:border-0 min-w-[200px]"
                   >
-                    <div>{day.toLocaleDateString(undefined, { weekday: "short" })}</div>
+                    <div>{new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: viewerZone || undefined }).format(day)}</div>
                     <div className="text-[11px] text-[var(--text-tertiary)] font-normal">
-                      {day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                      {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: viewerZone || undefined }).format(day)}
                     </div>
                   </th>
                 ))}
@@ -205,16 +219,12 @@ export default function TeacherSpreadsheet({
 
                   {/* 7 Day Columns */}
                   {weekDays.map((day, dayIdx) => {
+                    const dayKey = dayKeyInZone(day, viewerZone);
                     const dayOfWeek = day.getDay(); // 0-6
-                    const dayStart = new Date(day);
-                    dayStart.setHours(0, 0, 0, 0);
-                    const dayEnd = new Date(day);
-                    dayEnd.setHours(23, 59, 59, 999);
 
-                    // Sessions on this day
+                    // Sessions on this day in viewer zone
                     const daySessions = teacher.sessions.filter((s) => {
-                      const start = new Date(s.scheduledStart);
-                      return start >= dayStart && start <= dayEnd;
+                      return dayKeyInZone(s.scheduledStart, viewerZone) === dayKey;
                     });
 
                     // Availability declared for this weekday
@@ -223,6 +233,10 @@ export default function TeacherSpreadsheet({
                     );
 
                     // Time-off overlapping this day
+                    const dayStart = new Date(day);
+                    dayStart.setHours(0, 0, 0, 0);
+                    const dayEnd = new Date(day);
+                    dayEnd.setHours(23, 59, 59, 999);
                     const dayTimeOff = teacher.timeOff.filter((to) => {
                       const s = new Date(to.startsAt);
                       const e = new Date(to.endsAt);
@@ -243,84 +257,137 @@ export default function TeacherSpreadsheet({
                             : "bg-transparent"
                         }`}
                       >
-                        {/* Time Off Indicator */}
-                        {hasTimeOff && (
-                          <div className="mb-2 p-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-semibold flex items-center gap-1">
-                            <span>🏖️</span>
-                            <span>Time Off</span>
-                          </div>
-                        )}
-
-                        {/* Availability Shading Badge */}
-                        {hasAvailability && !hasTimeOff && (
-                          <div className="mb-2 text-[10px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center justify-between">
-                            <span>
-                              🟢 {dayAvailabilities.map((a) => `${a.startTime}-${a.endTime}`).join(", ")}
-                            </span>
-                            <Link
-                              href={`/admin/assign-student?teacherId=${teacher.id}`}
-                              className="text-[10px] font-semibold text-[var(--accent)] hover:underline"
-                              title="Assign student in open availability"
-                            >
-                              + Assign
-                            </Link>
-                          </div>
-                        )}
-
-                        {/* Scheduled Classes Blocks */}
-                        {daySessions.length > 0 ? (
-                          <div className="space-y-1.5">
-                            {daySessions.map((session) => {
-                              const isLive = session.status === "IN_PROGRESS";
+                        {viewMode === "half-hour" ? (
+                          <div className="space-y-1 max-h-[380px] overflow-y-auto pr-1">
+                            {HALF_HOUR_SLOTS.map((slot) => {
+                              const matchingSession = daySessions.find((s) => {
+                                const start = new Date(s.scheduledStart);
+                                const slotDate = new Date(day);
+                                slotDate.setHours(slot.hour, slot.minute, 0, 0);
+                                return Math.abs(start.getTime() - slotDate.getTime()) < 25 * 60 * 1000;
+                              });
+                              const isAvailable = dayAvailabilities.some((a) => {
+                                return slot.label >= a.startTime && slot.label < a.endTime;
+                              });
+                              const isLive = matchingSession?.status === "IN_PROGRESS";
                               return (
-                                <Link
-                                  key={session.id}
-                                  href={`/dashboard/session/${session.id}`}
-                                  className={`block p-2 rounded-xl text-white text-[11px] leading-tight shadow-xs transition hover:scale-[1.02] ${
-                                    isLive
-                                      ? "bg-emerald-600 ring-2 ring-red-500"
-                                      : "bg-[var(--accent)] hover:opacity-90"
+                                <div
+                                  key={slot.label}
+                                  className={`px-1.5 py-1 rounded-md text-[10px] flex items-center justify-between border ${
+                                    matchingSession
+                                      ? isLive
+                                        ? "bg-emerald-600/30 border-red-500/50 text-white"
+                                        : "bg-[var(--accent)]/20 border-[var(--accent)]/40 text-[var(--text-primary)]"
+                                      : isAvailable && !hasTimeOff
+                                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                      : hasTimeOff
+                                      ? "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400"
+                                      : "bg-transparent border-transparent text-zinc-500"
                                   }`}
                                 >
-                                  <div className="flex items-center justify-between gap-1">
-                                    <span className="font-bold truncate">{session.studentNames}</span>
-                                    {isLive && (
-                                      <span className="relative flex h-2 w-2 shrink-0">
-                                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                                        <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="text-[10px] opacity-90 mt-0.5 flex items-center justify-between">
-                                    <span>
-                                      {new Date(session.scheduledStart).toLocaleTimeString([], {
-                                        hour: "numeric",
-                                        minute: "2-digit",
-                                      })}
-                                    </span>
-                                    <span className="uppercase text-[9px] bg-white/20 px-1 rounded">
-                                      {session.track}
-                                    </span>
-                                  </div>
-                                </Link>
+                                  <span className="font-mono text-[9px] text-zinc-400">{slot.label}</span>
+                                  {matchingSession ? (
+                                    <Link
+                                      href={`/dashboard/session/${matchingSession.id}`}
+                                      className="truncate font-semibold max-w-[120px] hover:underline"
+                                    >
+                                      {matchingSession.studentNames}
+                                    </Link>
+                                  ) : hasTimeOff ? (
+                                    <span className="italic text-[9px]">Off</span>
+                                  ) : isAvailable ? (
+                                    <Link
+                                      href={`/admin/assign-student?teacherId=${teacher.id}&date=${dayKey}&time=${slot.label}`}
+                                      className="font-semibold text-emerald-600 dark:text-emerald-400 hover:underline text-[9px]"
+                                    >
+                                      + Assign
+                                    </Link>
+                                  ) : (
+                                    <span className="text-[9px] text-zinc-600 opacity-40">—</span>
+                                  )}
+                                </div>
                               );
                             })}
                           </div>
-                        ) : hasAvailability && !hasTimeOff ? (
-                          <div
-                            onClick={() =>
-                              router.push(
-                                `/admin/assign-student?teacherId=${teacher.id}&date=${day.toISOString().slice(0, 10)}`
-                              )
-                            }
-                            className="h-16 rounded-xl border border-dashed border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-[11px] font-medium cursor-pointer hover:bg-emerald-500/10 transition"
-                          >
-                            + Click to assign
-                          </div>
                         ) : (
-                          <div className="h-12 flex items-center justify-center text-[11px] text-[var(--text-tertiary)] italic">
-                            No slots
-                          </div>
+                          <>
+                            {/* Time Off Indicator */}
+                            {hasTimeOff && (
+                              <div className="mb-2 p-1.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-[10px] font-semibold flex items-center gap-1">
+                                <span>🏖️</span>
+                                <span>Time Off</span>
+                              </div>
+                            )}
+
+                            {/* Availability Shading Badge */}
+                            {hasAvailability && !hasTimeOff && (
+                              <div className="mb-2 text-[10px] text-emerald-700 dark:text-emerald-400 font-medium flex items-center justify-between">
+                                <span>
+                                  🟢 {dayAvailabilities.map((a) => `${a.startTime}-${a.endTime}`).join(", ")}
+                                </span>
+                                <Link
+                                  href={`/admin/assign-student?teacherId=${teacher.id}`}
+                                  className="text-[10px] font-semibold text-[var(--accent)] hover:underline"
+                                  title="Assign student in open availability"
+                                >
+                                  + Assign
+                                </Link>
+                              </div>
+                            )}
+
+                            {/* Scheduled Classes Blocks */}
+                            {daySessions.length > 0 ? (
+                              <div className="space-y-1.5">
+                                {daySessions.map((session) => {
+                                  const isLive = session.status === "IN_PROGRESS";
+                                  return (
+                                    <Link
+                                      key={session.id}
+                                      href={`/dashboard/session/${session.id}`}
+                                      className={`block p-2 rounded-xl text-white text-[11px] leading-tight shadow-xs transition hover:scale-[1.02] ${
+                                        isLive
+                                          ? "bg-emerald-600 ring-2 ring-red-500"
+                                          : "bg-[var(--accent)] hover:opacity-90"
+                                      }`}
+                                    >
+                                      <div className="flex items-center justify-between gap-1">
+                                        <span className="font-bold truncate">{session.studentNames}</span>
+                                        {isLive && (
+                                          <span className="relative flex h-2 w-2 shrink-0">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+                                            <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500" />
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[10px] opacity-90 mt-0.5 flex items-center justify-between">
+                                        <span>
+                                          <LocalTime iso={session.scheduledStart} mode="time" />
+                                        </span>
+                                        <span className="uppercase text-[9px] bg-white/20 px-1 rounded">
+                                          {session.track}
+                                        </span>
+                                      </div>
+                                    </Link>
+                                  );
+                                })}
+                              </div>
+                            ) : hasAvailability && !hasTimeOff ? (
+                              <div
+                                onClick={() =>
+                                  router.push(
+                                    `/admin/assign-student?teacherId=${teacher.id}&date=${dayKey}`
+                                  )
+                                }
+                                className="h-16 rounded-xl border border-dashed border-emerald-500/30 flex items-center justify-center text-emerald-600 dark:text-emerald-400 text-[11px] font-medium cursor-pointer hover:bg-emerald-500/10 transition"
+                              >
+                                + Click to assign
+                              </div>
+                            ) : (
+                              <div className="h-12 flex items-center justify-center text-[11px] text-[var(--text-tertiary)] italic">
+                                No slots
+                              </div>
+                            )}
+                          </>
                         )}
                       </td>
                     );
@@ -346,9 +413,9 @@ export default function TeacherSpreadsheet({
                   : "bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border)]"
               }`}
             >
-              <div>{day.toLocaleDateString(undefined, { weekday: "short" })}</div>
+              <div>{new Intl.DateTimeFormat("en-US", { weekday: "short", timeZone: viewerZone || undefined }).format(day)}</div>
               <div className="text-[10px] opacity-75">
-                {day.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                {new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: viewerZone || undefined }).format(day)}
               </div>
             </button>
           ))}
@@ -358,14 +425,10 @@ export default function TeacherSpreadsheet({
         <div className="space-y-3">
           {filteredTeachers.map((teacher) => {
             const activeDay = weekDays[selectedMobileDay];
-            const dayStart = new Date(activeDay);
-            dayStart.setHours(0, 0, 0, 0);
-            const dayEnd = new Date(activeDay);
-            dayEnd.setHours(23, 59, 59, 999);
+            const activeDayKey = dayKeyInZone(activeDay, viewerZone);
 
             const daySessions = teacher.sessions.filter((s) => {
-              const start = new Date(s.scheduledStart);
-              return start >= dayStart && start <= dayEnd;
+              return dayKeyInZone(s.scheduledStart, viewerZone) === activeDayKey;
             });
 
             return (
@@ -410,6 +473,15 @@ export default function TeacherSpreadsheet({
           })}
         </div>
       </div>
+
+      <style jsx global>{`
+        @media print {
+          .no-print, header, nav, aside { display: none !important; }
+          body { background: white !important; color: black !important; }
+          table { width: 100% !important; border-collapse: collapse !important; font-size: 8pt !important; }
+          th, td { border: 1px solid #ccc !important; padding: 4px !important; }
+        }
+      `}</style>
     </div>
   );
 }

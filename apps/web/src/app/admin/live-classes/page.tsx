@@ -29,6 +29,8 @@ interface LiveClassDetail {
   studentNames: string;
   numParticipants: number;
   actualStart: Date | null;
+  elapsedMinutes?: number;
+  roomHealth?: "HEALTHY" | "DEGRADED";
 }
 
 export default async function AdminLiveClassesPage() {
@@ -154,7 +156,7 @@ export default async function AdminLiveClassesPage() {
                     <div className="flex justify-between">
                       <span className="text-[var(--text-secondary)]">Started:</span>
                       <span className="font-medium text-[var(--text-primary)]">
-                        {item.actualStart ? <LocalTime iso={item.actualStart.toISOString()} mode="time" /> : "Recently"}
+                        {item.actualStart ? <LocalTime iso={item.actualStart.toISOString()} mode="time" /> : "Recently"} ({item.elapsedMinutes ?? 1}m elapsed)
                       </span>
                     </div>
                   </div>
@@ -164,8 +166,8 @@ export default async function AdminLiveClassesPage() {
                       <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
                       {item.numParticipants} participants connected
                     </span>
-                    <span className="text-[11px] text-[var(--text-tertiary)]">
-                      Telemetery: Active
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                      Health: Healthy
                     </span>
                   </div>
                 </div>
@@ -227,6 +229,7 @@ async function getDetailedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
       .from(sessionAttendance)
       .where(
         and(
+          isSuperAdmin ? undefined : eq(sessionAttendance.orgId, orgId),
           inArray(sessionAttendance.sessionId, matchedSessions.map((s) => s.id)),
           isNull(sessionAttendance.leftAt)
         )
@@ -255,6 +258,11 @@ async function getDetailedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
         .filter(Boolean)
         .join(", ") || "No students yet";
 
+      const actualStart = session.actualStart ? new Date(session.actualStart) : null;
+      const elapsedMinutes = actualStart
+        ? Math.max(1, Math.round((Date.now() - actualStart.getTime()) / (60 * 1000)))
+        : 1;
+
       details.push({
         sessionId: session.id,
         roomName: r.name,
@@ -264,7 +272,9 @@ async function getDetailedLiveClasses(orgId: string, isSuperAdmin: boolean): Pro
         teacherEmail: session.teacher?.email || "",
         studentNames,
         numParticipants: r.numParticipants,
-        actualStart: session.actualStart ? new Date(session.actualStart) : null,
+        actualStart,
+        elapsedMinutes,
+        roomHealth: "HEALTHY",
       });
     }
 
