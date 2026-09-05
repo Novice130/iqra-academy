@@ -58,5 +58,11 @@ export default defineConfig({
         url: "http://localhost:3000/login",
         reuseExistingServer: !process.env.CI,
         timeout: 180_000,
+        env: {
+          DATABASE_URL: process.env.DATABASE_URL || "postgresql://user:pass@localhost:5432/db",
+          ALLOW_LOCAL_DB_SCRIPTS: process.env.ALLOW_LOCAL_DB_SCRIPTS || "1",
+          REALTIME_SECRET: process.env.REALTIME_SECRET || "test-realtime-secret-32-chars-min-playwright",
+          BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "dummy-secret-for-build-and-lint-validation-32chars",
+        },
       },
 });

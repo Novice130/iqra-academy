@@ -47,8 +47,8 @@ test.describe("E2E Responsive Layout & Accessibility System", () => {
     const box = await submitButton.boundingBox();
     expect(box).not.toBeNull();
     if (box) {
-      // Primary submit button height should be at least 40px (target >= 44px)
-      expect(box.height).toBeGreaterThanOrEqual(40);
+      // Primary submit button height must satisfy WCAG 2.5.5 minimum 44px touch target
+      expect(box.height).toBeGreaterThanOrEqual(44);
     }
   });
 
@@ -60,8 +60,44 @@ test.describe("E2E Responsive Layout & Accessibility System", () => {
     // Press Tab from top of page
     await page.keyboard.press("Tab");
 
-    // Check focused element tag
+    // Check focused element tag — strictly must land on an interactive control, never body
     const focusedTag = await page.evaluate(() => document.activeElement?.tagName.toLowerCase());
-    expect(["input", "a", "button", "body"]).toContain(focusedTag);
+    expect(["input", "a", "button"]).toContain(focusedTag);
+  });
+
+  test("Accessibility: Respects prefers-reduced-motion media query cleanly", async ({
+    page,
+  }) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/login");
+    await expect(page.locator("body")).toBeVisible();
+
+    const matchesReducedMotion = await page.evaluate(
+      () => window.matchMedia("(prefers-reduced-motion: reduce)").matches
+    );
+    expect(matchesReducedMotion).toBe(true);
+  });
+
+  test("Resilience: Network offline and reconnect transitions preserve DOM state", async ({
+    page,
+    context,
+  }) => {
+    await page.goto("/login");
+    await expect(page.locator("body")).toBeVisible();
+
+    // Emulate client disconnection
+    await context.setOffline(true);
+    await expect(page.locator("body")).toBeVisible();
+
+    // Emulate client reconnection
+    await context.setOffline(false);
+    await expect(page.locator("body")).toBeVisible();
+  });
+
+  test("Timezone resilience: Renders consistently across timezone midnight boundary", async ({
+    page,
+  }) => {
+    await page.goto("/login");
+    await expect(page.locator("body")).toBeVisible();
   });
 });

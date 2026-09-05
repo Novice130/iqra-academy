@@ -175,6 +175,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  min-height: 44px;
   padding: 10px 20px;
   font-size: 0.9375rem;
   font-weight: 600;
@@ -202,6 +203,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
+  min-height: 44px;
   padding: 10px 20px;
   font-size: 0.9375rem;
   font-weight: 500;

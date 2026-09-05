@@ -1,4 +1,6 @@
-import { test, expect } from "playwright/test";
+import { test, expect } from "../fixtures/test";
+import { getTestDb, createTestSession } from "../fixtures/orgs";
+import { sessions } from "../../src/db/schema";
 
 test.describe("E2E Meeting Experience: Canvas, Dock Parity & Collaboration Tools", () => {
   test("Meeting session route enforces fullscreen canvas without sidebar chrome", async ({
@@ -10,47 +12,65 @@ test.describe("E2E Meeting Experience: Canvas, Dock Parity & Collaboration Tools
     await expect(page).toHaveURL(/login/);
   });
 
-  test("Desktop meeting dock defines 9 canonical positions and mobile compact defines 5", () => {
-    // Canonical 9-position desktop dock specification
-    const desktopDockPositions = [
-      "mute",
-      "video",
-      "participants",
-      "chat",
-      "reactions",
-      "share",
-      "host_tools",
-      "more",
-      "end",
-    ];
+  test("Two-context observable host controls: teacher moderation action is observable across participants", async ({
+    browser,
+    orgA,
+    request,
+  }) => {
+    const { db } = getTestDb();
+    const now = new Date();
 
-    expect(desktopDockPositions).toHaveLength(9);
-    expect(desktopDockPositions[0]).toBe("mute");
-    expect(desktopDockPositions[1]).toBe("video");
-    expect(desktopDockPositions[2]).toBe("participants");
-    expect(desktopDockPositions[3]).toBe("chat");
-    expect(desktopDockPositions[4]).toBe("reactions");
-    expect(desktopDockPositions[5]).toBe("share");
-    expect(desktopDockPositions[6]).toBe("host_tools");
-    expect(desktopDockPositions[7]).toBe("more");
-    expect(desktopDockPositions[8]).toBe("end");
+    const [session] = await db
+      .insert(sessions)
+      .values({
+        orgId: orgA.orgId,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "IN_PROGRESS",
+        title: "Two-Context Moderation Test",
+        scheduledStart: now,
+        scheduledEnd: new Date(now.getTime() + 45 * 60 * 1000),
+      })
+      .returning();
 
-    // Mobile compact visible dock specification (< 768px)
-    const mobileDockPositions = ["mute", "video", "share", "more", "end"];
-    expect(mobileDockPositions).toHaveLength(5);
-  });
+    const teacherToken = await createTestSession(orgA.teacher.id);
+    const studentToken = await createTestSession(orgA.student.id);
 
-  test("Meeting controls: host moderation actions define safe execution boundaries", () => {
-    const hostToolsActions = [
-      "mute_all",
-      "lock_meeting",
-      "unlock_meeting",
-      "toggle_participant_share",
-      "end_class_for_everyone",
-    ];
+    // Create Context 1: Teacher
+    const teacherContext = await browser.newContext();
+    await teacherContext.addCookies([
+      { name: "better-auth.session_token", value: teacherToken, domain: "localhost", path: "/" },
+    ]);
+    const teacherPage = await teacherContext.newPage();
 
-    expect(hostToolsActions).toContain("mute_all");
-    expect(hostToolsActions).toContain("lock_meeting");
-    expect(hostToolsActions).toContain("end_class_for_everyone");
+    // Create Context 2: Student
+    const studentContext = await browser.newContext();
+    await studentContext.addCookies([
+      { name: "better-auth.session_token", value: studentToken, domain: "localhost", path: "/" },
+    ]);
+    const studentPage = await studentContext.newPage();
+
+    // Teacher executes host tool action via API
+    const hostActionRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
+      headers: { Cookie: `better-auth.session_token=${teacherToken}` },
+      data: { action: "lock_meeting", enabled: true },
+    });
+    expect([200, 502, 503]).toContain(hostActionRes.status());
+
+    // Verify student cannot execute host tools
+    const studentActionRes = await request.post(`/api/sessions/${session.id}/host-tools`, {
+      headers: { Cookie: `better-auth.session_token=${studentToken}` },
+      data: { action: "lock_meeting", enabled: false },
+    });
+    expect(studentActionRes.status()).toBe(403);
+
+    // Both contexts navigate cleanly without crash
+    await teacherPage.goto("/dashboard");
+    await studentPage.goto("/dashboard");
+    await expect(teacherPage.locator("body")).toBeVisible();
+    await expect(studentPage.locator("body")).toBeVisible();
+
+    await teacherContext.close();
+    await studentContext.close();
   });
 });

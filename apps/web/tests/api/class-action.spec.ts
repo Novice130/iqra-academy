@@ -370,4 +370,23 @@ test.describe("Phase 5: Class Action Button & Navigation Responsiveness", () => 
     expect(adminLive.isHost).toBe(false);
     expect(adminLive.label).toBe("Observe Live");
   });
+
+  test("Instant meeting action semantics require 'Instant Meeting', never 'Start Class'", () => {
+    const instantSession: ClassActionSession = {
+      id: "sess-instant-1",
+      origin: "INSTANT",
+      status: "IN_PROGRESS",
+      scheduledStart: baseNow,
+      scheduledEnd: new Date(baseNow.getTime() + 45 * 60 * 1000),
+    };
+
+    const actionState = getClassActionState(
+      instantSession,
+      { userId: "teacher-1", role: "TEACHER" },
+      baseNow
+    );
+
+    // Rejoining an instant meeting is Rejoin Class, not Start Class
+    expect(actionState.label).toBe("Rejoin Class");
+  });
 });

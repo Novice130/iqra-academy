@@ -6,9 +6,6 @@ import {
   users,
   teacherTimeOff,
   breakoutSets,
-  breakoutRooms,
-  breakoutAssignments,
-  whiteboards,
 } from "../../src/db/schema";
 import { eq, and } from "drizzle-orm";
 
@@ -181,38 +178,54 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
     const { db } = getTestDb();
     const adminAToken = await createTestSession(orgA.admin.id);
 
-    // Verify existing super admin user or find them
-    const superAdmin = await db.query.users.findFirst({
+    // Verify existing super admin user or seed them if running on fresh DB
+    let superAdmin = await db.query.users.findFirst({
       where: eq(users.email, "syedamer130@gmail.com"),
     });
 
-    if (superAdmin) {
-      // 1. Admin tries to demote super admin to TEACHER
-      const demoteTeacher = await request.patch("/api/admin/users", {
-        headers: { Cookie: `better-auth.session_token=${adminAToken}` },
-        data: {
-          userId: superAdmin.id,
-          role: "TEACHER",
-        },
-      });
-      expect([403, 404]).toContain(demoteTeacher.status());
-
-      // 2. Admin tries to demote super admin to STUDENT
-      const demoteStudent = await request.patch("/api/admin/users", {
-        headers: { Cookie: `better-auth.session_token=${adminAToken}` },
-        data: {
-          userId: superAdmin.id,
-          role: "STUDENT",
-        },
-      });
-      expect([403, 404]).toContain(demoteStudent.status());
-
-      // 3. Admin tries to delete super admin
-      const deleteRes = await request.delete(`/api/admin/users?userId=${superAdmin.id}`, {
-        headers: { Cookie: `better-auth.session_token=${adminAToken}` },
-      });
-      expect([403, 404]).toContain(deleteRes.status());
+    if (!superAdmin) {
+      const [seeded] = await db
+        .insert(users)
+        .values({
+          email: "syedamer130@gmail.com",
+          name: "Syed Amer",
+          role: "SUPER_ADMIN",
+          orgId: orgA.orgId,
+          emailVerified: true,
+          timezone: "America/New_York",
+        })
+        .returning();
+      superAdmin = seeded;
     }
+
+    expect(superAdmin).toBeDefined();
+    expect(superAdmin.role).toBe("SUPER_ADMIN");
+
+    // 1. Admin tries to demote super admin to TEACHER
+    const demoteTeacher = await request.patch("/api/admin/users", {
+      headers: { Cookie: `better-auth.session_token=${adminAToken}` },
+      data: {
+        userId: superAdmin.id,
+        role: "TEACHER",
+      },
+    });
+    expect([403, 404]).toContain(demoteTeacher.status());
+
+    // 2. Admin tries to demote super admin to STUDENT
+    const demoteStudent = await request.patch("/api/admin/users", {
+      headers: { Cookie: `better-auth.session_token=${adminAToken}` },
+      data: {
+        userId: superAdmin.id,
+        role: "STUDENT",
+      },
+    });
+    expect([403, 404]).toContain(demoteStudent.status());
+
+    // 3. Admin tries to delete super admin
+    const deleteRes = await request.delete(`/api/admin/users?userId=${superAdmin.id}`, {
+      headers: { Cookie: `better-auth.session_token=${adminAToken}` },
+    });
+    expect([403, 404]).toContain(deleteRes.status());
 
     // 4. Admin tries to POST a user with super admin email to re-create or hijack
     const hijackRes = await request.post("/api/admin/users", {
@@ -224,6 +237,12 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       },
     });
     expect([403, 400]).toContain(hijackRes.status());
+
+    // Invariant: superAdmin still exists and role remains SUPER_ADMIN
+    const persisted = await db.query.users.findFirst({
+      where: eq(users.email, "syedamer130@gmail.com"),
+    });
+    expect(persisted?.role).toBe("SUPER_ADMIN");
   });
 
   // ---------------------------------------------------------------------------
@@ -302,6 +321,8 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       })
       .returning();
 
+    const sessionsCountBefore = (await db.query.sessions.findMany({ where: eq(sessions.orgId, orgA.orgId) })).length;
+
     // Attempt to assign a new class that overlaps (10:15 - 10:45)
     const overlappingStart = new Date(tomorrow.getTime() + 15 * 60 * 1000).toISOString();
 
@@ -319,6 +340,10 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
     expect(res.status()).toBe(400);
     const body = await res.json();
     expect(body.error || body.message).toMatch(/already has a scheduled class/i);
+
+    // Rollback verification: Total session row count is strictly unchanged
+    const sessionsCountAfter = (await db.query.sessions.findMany({ where: eq(sessions.orgId, orgA.orgId) })).length;
+    expect(sessionsCountAfter).toBe(sessionsCountBefore);
 
     // Verify no orphaned session was created
     const orphanedSessions = await db.query.sessions.findMany({
@@ -362,6 +387,8 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       reason: "Medical Leave",
     });
 
+    const sessionsCountBefore = (await db.query.sessions.findMany({ where: eq(sessions.orgId, orgA.orgId) })).length;
+
     // Attempt to assign a class during that time-off window
     const targetStart = new Date(twoDaysAhead.getTime() + 2 * 3600 * 1000).toISOString();
 
@@ -379,6 +406,10 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
     expect(res.status()).toBe(400);
     const body = await res.json();
     expect(body.error || body.message).toMatch(/time off/i);
+
+    // Rollback verification: Total session row count is strictly unchanged
+    const sessionsCountAfter = (await db.query.sessions.findMany({ where: eq(sessions.orgId, orgA.orgId) })).length;
+    expect(sessionsCountAfter).toBe(sessionsCountBefore);
   });
 
   test("Assign Student: Cross-org profile and teacher mismatch returns 403", async ({
@@ -423,6 +454,7 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
   test("Room-wide volume: Only assigned teacher can set global volume; student receives 403", async ({
     request,
     orgA,
+    orgB,
   }) => {
     const { db } = getTestDb();
     const now = new Date();
@@ -440,35 +472,53 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       })
       .returning();
 
-    // 1. Student attempts to set volume
+    // 1. Student attempts to set volume -> 403
     const studentToken = await createTestSession(orgA.student.id);
     const studentRes = await request.post(`/api/sessions/${session.id}/volume`, {
       headers: { Cookie: `better-auth.session_token=${studentToken}` },
       data: {
-        participantIdentity: "guest-user",
+        identity: "guest-user",
         volume: 0.5,
       },
     });
     expect(studentRes.status()).toBe(403);
 
-    // 2. Assigned teacher sets room-wide volume
+    // 2. Cross-org teacher attempts to set volume -> 403 or 404
+    const teacherBToken = await createTestSession(orgB.teacher.id);
+    const crossRes = await request.post(`/api/sessions/${session.id}/volume`, {
+      headers: { Cookie: `better-auth.session_token=${teacherBToken}` },
+      data: {
+        identity: "guest-user",
+        volume: 0.5,
+      },
+    });
+    expect([403, 404]).toContain(crossRes.status());
+
+    // 3. Assigned teacher sets room-wide volume -> 200 or 502/503 if LiveKit cloud connection is mocked
     const teacherToken = await createTestSession(orgA.teacher.id);
     const teacherRes = await request.post(`/api/sessions/${session.id}/volume`, {
       headers: { Cookie: `better-auth.session_token=${teacherToken}` },
       data: {
-        participantIdentity: "guest-user",
+        identity: "guest-user",
         volume: 0.8,
       },
     });
-    // Server route handles volume update or returns 200/502/503 if LiveKit cloud connection is mocked
     expect([200, 502, 503]).toContain(teacherRes.status());
+    if (teacherRes.status() === 200) {
+      const body = await teacherRes.json();
+      expect(body.success).toBe(true);
+      expect(body.identity).toBe("guest-user");
+      expect(body.volume).toBe(0.8);
+    }
   });
 
   // ---------------------------------------------------------------------------
   // 5. Collaboration Models & Breakout Tenant Invariants
   // ---------------------------------------------------------------------------
-  test("Collaboration models: breakout sets and whiteboards maintain relational integrity", async ({
+  test("Collaboration models: breakout lifecycle and whiteboard access enforce RBAC and tenant isolation", async ({
+    request,
     orgA,
+    orgB,
   }) => {
     const { db } = getTestDb();
     const now = new Date();
@@ -486,61 +536,223 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       })
       .returning();
 
-    // 1. Create Breakout Set
-    const [bSet] = await db
-      .insert(breakoutSets)
+    const teacherAToken = await createTestSession(orgA.teacher.id);
+    const studentAToken = await createTestSession(orgA.student.id);
+    const teacherBToken = await createTestSession(orgB.teacher.id);
+
+    // 1. Cross-org teacher cannot create breakout rooms on Session A
+    const crossCreateRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherBToken}` },
+      data: {
+        action: "create",
+        rooms: [{ title: "Room 1 - Tajweed Practice" }],
+      },
+    });
+    expect([403, 404]).toContain(crossCreateRes.status());
+
+    // 2. Student A (non-host) cannot create breakout rooms
+    const studentCreateRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${studentAToken}` },
+      data: {
+        action: "create",
+        rooms: [{ title: "Student Illegal Room" }],
+      },
+    });
+    expect(studentCreateRes.status()).toBe(403);
+
+    // 3. Assigned Teacher A creates breakout rooms (HTTP CRUD)
+    const createRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+      data: {
+        action: "create",
+        rooms: [
+          { title: "Room 1 - Tajweed Practice" },
+          { title: "Room 2 - Hifz Practice" },
+        ],
+      },
+    });
+    expect(createRes.status()).toBe(200);
+    const createBody = await createRes.json();
+    expect(createBody.success).toBe(true);
+    expect(createBody.rooms).toHaveLength(2);
+    const room1Id = createBody.rooms[0].id;
+
+    // 4. GET breakouts: Same-org viewer can read; cross-org viewer denied
+    const getBreakoutsA = await request.get(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+    });
+    expect(getBreakoutsA.status()).toBe(200);
+    const getBreakoutsBody = await getBreakoutsA.json();
+    expect(getBreakoutsBody.set).not.toBeNull();
+    expect(getBreakoutsBody.set.status).toBe("DRAFT");
+
+    const getBreakoutsB = await request.get(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherBToken}` },
+    });
+    expect([403, 404]).toContain(getBreakoutsB.status());
+
+    // 5. Open breakouts: Teacher A opens; cross-org denied
+    const crossOpenRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherBToken}` },
+      data: { action: "open" },
+    });
+    expect([403, 404]).toContain(crossOpenRes.status());
+
+    const openRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+      data: { action: "open" },
+    });
+    expect(openRes.status()).toBe(200);
+    const openBody = await openRes.json();
+    expect(openBody.success).toBe(true);
+    expect(openBody.status).toBe("OPEN");
+
+    // 6. Assign student A to Room 1
+    const assignRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+      data: {
+        action: "assign",
+        assignments: [
+          { roomId: room1Id, userId: orgA.student.id, participantIdentity: `student-${orgA.student.id}` },
+        ],
+      },
+    });
+    expect(assignRes.status()).toBe(200);
+    const assignBody = await assignRes.json();
+    expect(assignBody.success).toBe(true);
+    expect(assignBody.assigned).toBe(1);
+
+    // 7. Student A requests move-token for assigned Room 1
+    const tokenRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${studentAToken}` },
+      data: {
+        action: "move-token",
+        roomId: room1Id,
+      },
+    });
+    expect(tokenRes.status()).toBe(200);
+    const tokenBody = await tokenRes.json();
+    expect(tokenBody.token).toBeTruthy();
+    expect(tokenBody.roomId).toBe(room1Id);
+
+    // 8. Close breakouts
+    const closeRes = await request.post(`/api/sessions/${session.id}/breakouts`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+      data: { action: "close" },
+    });
+    expect(closeRes.status()).toBe(200);
+    const closeBody = await closeRes.json();
+    expect(closeBody.success).toBe(true);
+    expect(closeBody.status).toBe("CLOSED");
+
+    // 9. Whiteboard: GET ticket
+    const wbResA = await request.get(`/api/sessions/${session.id}/whiteboard`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+    });
+    expect(wbResA.status()).toBe(200);
+    const wbBodyA = await wbResA.json();
+    expect(wbBodyA.ticket).toBeTruthy();
+    expect(wbBodyA.boardId).toBe("main");
+
+    const wbResB = await request.get(`/api/sessions/${session.id}/whiteboard`, {
+      headers: { Cookie: `better-auth.session_token=${teacherBToken}` },
+    });
+    expect([403, 404]).toContain(wbResB.status());
+
+    // 10. Whiteboard: Host controls
+    const lockRes = await request.post(`/api/sessions/${session.id}/whiteboard`, {
+      headers: { Cookie: `better-auth.session_token=${teacherAToken}` },
+      data: { locked: true },
+    });
+    expect(lockRes.status()).toBe(200);
+
+    const studentLockRes = await request.post(`/api/sessions/${session.id}/whiteboard`, {
+      headers: { Cookie: `better-auth.session_token=${studentAToken}` },
+      data: { locked: false },
+    });
+    expect(studentLockRes.status()).toBe(403);
+
+    // Relational integrity check in DB
+    const dbSets = await db.query.breakoutSets.findMany({ where: eq(breakoutSets.sessionId, session.id) });
+    expect(dbSets.length).toBeGreaterThan(0);
+    expect(dbSets[0].orgId).toBe(orgA.orgId);
+  });
+
+  test("Cross-org session routes matrix: All session endpoints deny cross-tenant callers", async ({
+    request,
+    orgA,
+    orgB,
+  }) => {
+    const { db } = getTestDb();
+    const now = new Date();
+
+    const [sessionA] = await db
+      .insert(sessions)
       .values({
         orgId: orgA.orgId,
-        sessionId: session.id,
-        status: "OPEN",
-        openedAt: now,
+        teacherId: orgA.teacher.id,
+        type: "INDIVIDUAL",
+        status: "IN_PROGRESS",
+        title: "Cross-Org Matrix Session",
+        scheduledStart: now,
+        scheduledEnd: new Date(now.getTime() + 30 * 60 * 1000),
       })
       .returning();
 
-    expect(bSet.orgId).toBe(orgA.orgId);
-    expect(bSet.sessionId).toBe(session.id);
+    const teacherBToken = await createTestSession(orgB.teacher.id);
+    const studentBToken = await createTestSession(orgB.student.id);
 
-    // 2. Create Breakout Room
-    const [bRoom] = await db
-      .insert(breakoutRooms)
-      .values({
-        orgId: orgA.orgId,
-        breakoutSetId: bSet.id,
-        title: "Room 1 - Tajweed Practice",
-        videoRoomName: `breakout-${bSet.id}-1`,
-        sortOrder: 1,
-      })
-      .returning();
+    const headersTeacherB = { Cookie: `better-auth.session_token=${teacherBToken}` };
+    const headersStudentB = { Cookie: `better-auth.session_token=${studentBToken}` };
 
-    expect(bRoom.title).toBe("Room 1 - Tajweed Practice");
+    // 1. Join endpoint denies cross-org teacher and student
+    const joinResT = await request.get(`/api/sessions/${sessionA.id}/join`, { headers: headersTeacherB });
+    expect([403, 404]).toContain(joinResT.status());
+    const joinResS = await request.get(`/api/sessions/${sessionA.id}/join`, { headers: headersStudentB });
+    expect([403, 404]).toContain(joinResS.status());
 
-    // 3. Create Breakout Assignment
-    const [assignment] = await db
-      .insert(breakoutAssignments)
-      .values({
-        orgId: orgA.orgId,
-        breakoutRoomId: bRoom.id,
-        participantIdentity: `student-${orgA.student.id}`,
-        userId: orgA.student.id,
-        joinedAt: now,
-      })
-      .returning();
+    // 2. Guests listing and admission denies cross-org
+    const guestsGet = await request.get(`/api/sessions/${sessionA.id}/guests`, { headers: headersTeacherB });
+    expect([403, 404]).toContain(guestsGet.status());
+    const guestsPost = await request.post(`/api/sessions/${sessionA.id}/guests`, {
+      headers: headersTeacherB,
+      data: { requestId: "req-1", action: "admit" },
+    });
+    expect([403, 404]).toContain(guestsPost.status());
 
-    expect(assignment.breakoutRoomId).toBe(bRoom.id);
+    // 3. Spotlight denies cross-org
+    const spotRes = await request.post(`/api/sessions/${sessionA.id}/spotlight`, {
+      headers: headersTeacherB,
+      data: { identity: "user-1" },
+    });
+    expect([403, 404]).toContain(spotRes.status());
 
-    // 4. Create Whiteboard row
-    const [whiteboard] = await db
-      .insert(whiteboards)
-      .values({
-        orgId: orgA.orgId,
-        sessionId: session.id,
-        boardId: `board-${session.id}`,
-        durableObjectKey: `do-wb-${session.id}`,
-      })
-      .returning();
+    // 4. Mute-participant denies cross-org
+    const muteRes = await request.post(`/api/sessions/${sessionA.id}/mute-participant`, {
+      headers: headersTeacherB,
+      data: { identity: "user-1", trackSource: "microphone" },
+    });
+    expect([403, 404]).toContain(muteRes.status());
 
-    expect(whiteboard.boardId).toBe(`board-${session.id}`);
-    expect(whiteboard.orgId).toBe(orgA.orgId);
+    // 5. Participant management denies cross-org
+    const partRes = await request.post(`/api/sessions/${sessionA.id}/participant`, {
+      headers: headersTeacherB,
+      data: { identity: "user-1", action: "remove" },
+    });
+    expect([403, 404]).toContain(partRes.status());
+
+    // 6. End session denies cross-org
+    const endRes = await request.post(`/api/sessions/${sessionA.id}/end`, {
+      headers: headersTeacherB,
+      data: { reason: "test" },
+    });
+    expect([403, 404]).toContain(endRes.status());
+
+    // 7. Screen token denies cross-org
+    const screenRes = await request.post(`/api/sessions/${sessionA.id}/screen-token`, {
+      headers: headersTeacherB,
+    });
+    expect([403, 404]).toContain(screenRes.status());
   });
 
   // ---------------------------------------------------------------------------

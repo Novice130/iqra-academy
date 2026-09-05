@@ -1,5 +1,5 @@
-import { test, expect } from "playwright/test";
-import { getClassActionState } from "../../src/lib/class-action";
+import { test, expect } from "../fixtures/test";
+import { createTestSession } from "../fixtures/orgs";
 
 test.describe("E2E Student Journey: Authentication, Protected Routes & Class Entry", () => {
   test("Unauthenticated navigation redirects protected student routes to /login", async ({
@@ -98,59 +98,37 @@ test.describe("E2E Student Journey: Authentication, Protected Routes & Class Ent
     expect(hasJoinForm).toBeGreaterThan(0);
   });
 
-  test("Class Action State logic enforces T-60 transition for students", () => {
-    const now = new Date("2026-09-05T12:00:00Z");
-
-    // 1. T-65 minutes: UPCOMING countdown state, no blue action
-    const tMinus65 = new Date(now.getTime() + 65 * 60 * 1000);
-    const stateUpcoming = getClassActionState(
+  test("Authenticated student dashboard and schedule journey: renders progress and week grid", async ({
+    page,
+    context,
+    orgA,
+    baseURL,
+  }) => {
+    const token = await createTestSession(orgA.student.id);
+    const domain = baseURL ? new URL(baseURL).hostname : "localhost";
+    await context.addCookies([
       {
-        id: "sess-1",
-        status: "SCHEDULED",
-        scheduledStart: tMinus65,
-        scheduledEnd: new Date(tMinus65.getTime() + 30 * 60 * 1000),
+        name: "better-auth.session_token",
+        value: token,
+        domain,
+        path: "/",
       },
-      { userId: "student-1", role: "STUDENT" },
-      now
-    );
+    ]);
 
-    expect(stateUpcoming.state).toBe("UPCOMING");
-    expect(stateUpcoming.disabled).toBe(true);
-    expect(stateUpcoming.label).toBe("Upcoming");
-    expect(stateUpcoming.countdownText).toMatch(/Starts in/i);
+    // 1. Visit Student Dashboard
+    await page.goto("/dashboard");
+    await expect(page).toHaveURL(/\/dashboard/);
+    await expect(page.locator("body")).toBeVisible();
 
-    // 2. T-55 minutes: READY state, prominent blue action button with "Join Class"
-    const tMinus55 = new Date(now.getTime() + 55 * 60 * 1000);
-    const stateReady = getClassActionState(
-      {
-        id: "sess-1",
-        status: "SCHEDULED",
-        scheduledStart: tMinus55,
-        scheduledEnd: new Date(tMinus55.getTime() + 30 * 60 * 1000),
-      },
-      { userId: "student-1", role: "STUDENT" },
-      now
-    );
+    // 2. Visit Student Schedule
+    await page.goto("/dashboard/schedule");
+    await expect(page).toHaveURL(/\/dashboard\/schedule/);
+    await expect(page.locator("body")).toBeVisible();
+    await expect(page.locator("button, a").filter({ hasText: /today|week|next|prev/i }).first()).toBeVisible();
 
-    expect(stateReady.state).toBe("READY");
-    expect(stateReady.disabled).toBe(false);
-    expect(stateReady.label).toBe("Join Class");
-    expect(stateReady.actionUrl).toBe("/dashboard/session/sess-1");
-
-    // 3. LIVE state: "Join Live Class"
-    const stateLive = getClassActionState(
-      {
-        id: "sess-1",
-        status: "IN_PROGRESS",
-        scheduledStart: new Date(now.getTime() - 10 * 60 * 1000),
-        scheduledEnd: new Date(now.getTime() + 20 * 60 * 1000),
-      },
-      { userId: "student-1", role: "STUDENT" },
-      now
-    );
-
-    expect(stateLive.state).toBe("LIVE");
-    expect(stateLive.disabled).toBe(false);
-    expect(stateLive.label).toBe("Join Live Class");
+    // 3. Visit Progress
+    await page.goto("/dashboard/progress");
+    await expect(page).toHaveURL(/\/dashboard\/progress/);
+    await expect(page.locator("body")).toBeVisible();
   });
 });

@@ -46,6 +46,7 @@ export interface ClassActionSession {
   title?: string | null;
   track?: string | null;
   videoRoomName?: string | null;
+  origin?: string | null;
 }
 
 export interface ClassActionViewer {
@@ -246,7 +247,8 @@ export function getClassActionState(
 
   // READY (within join window T-60 to T+180)
   if (isTeacher) {
-    return { state, label: "Start Class", actionUrl, disabled: false, isHost: true, durationText };
+    const label = session.origin === "INSTANT" ? "Instant Meeting" : "Start Class";
+    return { state, label, actionUrl, disabled: false, isHost: true, durationText };
   }
   if (isAdmin) {
     return { state, label: "Observe Live", actionUrl, disabled: false, isHost: false, durationText };

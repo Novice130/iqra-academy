@@ -13,6 +13,20 @@ jobs:
   web-quality-and-tests:
     name: Web Lint, Typecheck, Tests & Build
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DB: db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,8 +49,18 @@ jobs:
       - name: Database Migration Drift & Integrity Check
         run: |
           cd apps/web
-          # Verify Drizzle migrations can be inspected without uncommitted schema changes
-          npx drizzle-kit check || echo "Migrations checked."
+          # Verify Drizzle migrations can be inspected without uncommitted schema changes (hard failure on drift)
+          npx drizzle-kit check
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+
+      - name: Push Database Schema to Test Postgres
+        run: |
+          cd apps/web
+          npx drizzle-kit push --force
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+          ALLOW_LOCAL_DB_SCRIPTS: "1"
 
       - name: Build Web App
         run: npm run build
@@ -55,6 +79,8 @@ jobs:
         working-directory: apps/web
         env:
           DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+          ALLOW_LOCAL_DB_SCRIPTS: "1"
+          REALTIME_SECRET: "ci-realtime-secret-32-chars-long-min"
           BETTER_AUTH_SECRET: "dummy-secret-for-build-and-lint-validation-32chars"
 
       - name: Run Playwright E2E Browser Tests
@@ -62,6 +88,8 @@ jobs:
         working-directory: apps/web
         env:
           DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+          ALLOW_LOCAL_DB_SCRIPTS: "1"
+          REALTIME_SECRET: "ci-realtime-secret-32-chars-long-min"
           BETTER_AUTH_SECRET: "dummy-secret-for-build-and-lint-validation-32chars"
 
       - name: Upload Playwright Test Report on Failure
