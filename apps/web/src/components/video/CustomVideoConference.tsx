@@ -39,7 +39,7 @@ import VideoTile, { type TileActions } from './VideoTile';
 import GuestKnockPrompt from './GuestKnockPrompt';
 import ScreenSharePill from './ScreenSharePill';
 import SoloInactivityPrompt from './SoloInactivityPrompt';
-import { useBackgroundEffects, BackgroundEffectsContent, type EffectSelection } from './BackgroundEffects';
+import { useBackgroundEffects, BackgroundEffectsContent, BLUR_DEFAULT_RADIUS, type EffectSelection } from './BackgroundEffects';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import WhiteboardOverlay from './WhiteboardOverlay';
@@ -243,11 +243,15 @@ function computeSlots(
   container: { width: number; height: number },
   box: { width: number; height: number },
   count: number,
-  bottomClearance: number = 96
+  bottomClearance: number = 96,
+  topClearance: number = 64
 ): Slot[] {
   if (count === 0 || container.width === 0 || container.height === 0) return [];
 
-  const usableHeight = Math.max(box.height, container.height - bottomClearance - FLOAT_MARGIN * 2);
+  const usableHeight = Math.max(
+    box.height,
+    container.height - bottomClearance - topClearance - FLOAT_MARGIN * 2
+  );
   const perColumn = Math.max(1, Math.floor((usableHeight + FLOAT_GAP) / (box.height + FLOAT_GAP)));
 
   return Array.from({ length: count }, (_, i) => {
@@ -257,7 +261,7 @@ function computeSlots(
     const top = container.height - bottomClearance - (row + 1) * box.height - row * FLOAT_GAP;
     return {
       left: Math.max(FLOAT_MARGIN, left),
-      top: Math.max(FLOAT_MARGIN, top),
+      top: Math.max(topClearance, top),
     };
   });
 }
@@ -267,11 +271,12 @@ function snapPoint(
   size: { width: number; height: number },
   container: { width: number; height: number },
   bottomClearance: number,
+  topClearance: number = 64,
   otherPositions: Slot[] = []
 ): { left: number; top: number } {
   const minX = FLOAT_MARGIN;
   const maxX = Math.max(minX, container.width - size.width - FLOAT_MARGIN);
-  const minY = FLOAT_MARGIN;
+  const minY = Math.max(FLOAT_MARGIN, topClearance);
   const maxY = Math.max(minY, container.height - bottomClearance - size.height);
 
   let left = Math.max(minX, Math.min(maxX, raw.left));
@@ -379,6 +384,7 @@ function DraggableTile({
   size,
   containerSize,
   bottomClearance,
+  topClearance = 64,
   otherPositions = [],
   onTap,
   onDropAt,
@@ -389,6 +395,7 @@ function DraggableTile({
   size: { width: number; height: number };
   containerSize: { width: number; height: number };
   bottomClearance: number;
+  topClearance?: number;
   otherPositions?: Slot[];
   onTap?: () => void;
   onDropAt?: (point: { left: number; top: number }) => void;
@@ -406,12 +413,13 @@ function DraggableTile({
     moved: 0,
   });
 
-  // Calculate base position clamped above bottom menu clearance
-  const maxY = Math.max(FLOAT_MARGIN, containerSize.height - bottomClearance - size.height);
+  // Calculate base position clamped between topClearance and bottom menu clearance
+  const minY = Math.max(FLOAT_MARGIN, topClearance);
+  const maxY = Math.max(minY, containerSize.height - bottomClearance - size.height);
   const basePos = customPosition
     ? {
         left: Math.max(FLOAT_MARGIN, Math.min(Math.max(FLOAT_MARGIN, containerSize.width - size.width - FLOAT_MARGIN), customPosition.left)),
-        top: Math.max(FLOAT_MARGIN, Math.min(maxY, customPosition.top)),
+        top: Math.max(minY, Math.min(maxY, customPosition.top)),
       }
     : slot;
 
@@ -451,7 +459,7 @@ function DraggableTile({
       return;
     }
     if (dropped && moved >= 8 && containerSize.width > 0 && containerSize.height > 0) {
-      const snapped = snapPoint(dropped, size, containerSize, bottomClearance, otherPositions);
+      const snapped = snapPoint(dropped, size, containerSize, bottomClearance, topClearance, otherPositions);
       onDropAt?.(snapped);
     }
   };
@@ -934,6 +942,7 @@ export default function CustomVideoConference({
   const [customPositions, setCustomPositions] = useState<Record<string, Slot>>({});
   // Constant clearance so the video stage never shifts or resizes when controls appear/hide
   const bottomClearance = 84;
+  const topClearance = 64;
 
   const floatingKeys = floating.map((p) => p.key);
   const orderedKeys = [
@@ -950,7 +959,7 @@ export default function CustomVideoConference({
     });
   }, [floatingKeys.join('|')]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const slots = computeSlots(stageSize, floatBox, orderedKeys.length, bottomClearance);
+  const slots = computeSlots(stageSize, floatBox, orderedKeys.length, bottomClearance, topClearance);
 
   const handleDrop = (key: string, point: { left: number; top: number }) => {
     setCustomPositions((prev) => ({
@@ -1013,6 +1022,7 @@ export default function CustomVideoConference({
               <div
                 className="w-full h-full p-2 sm:p-3"
                 style={{
+                  paddingTop: 'calc(max(14px, env(safe-area-inset-top, 0px)) + 46px)',
                   paddingBottom: 'calc(var(--call-bar-height, 84px) + 12px)',
                 }}
               >
@@ -1025,6 +1035,7 @@ export default function CustomVideoConference({
                   gridTemplateColumns: `repeat(${gridLayout.cols}, minmax(0, 1fr))`,
                   gridTemplateRows: `repeat(${gridLayout.rows}, minmax(0, 1fr))`,
                   gridAutoFlow: 'row',
+                  paddingTop: 'calc(max(14px, env(safe-area-inset-top, 0px)) + 46px)',
                   paddingBottom: 'calc(var(--call-bar-height, 84px) + 12px)',
                 }}
               >
@@ -1105,6 +1116,7 @@ export default function CustomVideoConference({
                   size={floatBox}
                   containerSize={stageSize}
                   bottomClearance={bottomClearance}
+                  topClearance={topClearance}
                   otherPositions={otherPosList}
                   onTap={hasMultipleCameras && p.isLocal ? cycleCamera : undefined}
                   onDropAt={(point) => handleDrop(p.key, point)}
@@ -1595,12 +1607,13 @@ export default function CustomVideoConference({
               viewMode={viewMode}
               onViewModeChange={setViewMode}
               onToggleEffects={() => setEffectsOpen((v) => !v)}
+              effects={effects}
               isBackgroundBlurred={effects.selection.kind === 'blur'}
               onToggleBackgroundBlur={() => {
                 if (effects.selection.kind === 'blur') {
                   effects.select({ kind: 'none' });
                 } else {
-                  effects.select({ kind: 'blur', radius: 16 });
+                  effects.select({ kind: 'blur', radius: BLUR_DEFAULT_RADIUS });
                 }
               }}
               onToggleMeetingInfo={() => setInviteOpen((v) => !v)}

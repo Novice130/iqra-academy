@@ -20,6 +20,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Track } from 'livekit-client';
 import { useRoomContext, useTrackToggle } from '@livekit/components-react';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
@@ -57,6 +58,7 @@ import {
   ZoomHeartReactIcon,
 } from './CallIcons';
 import CallSettingsModal, { type SettingsTab } from './CallSettingsModal';
+import type { BackgroundEffects } from './BackgroundEffects';
 import HostToolsModal from './HostToolsModal';
 import BreakoutPanel from './BreakoutPanel';
 
@@ -81,6 +83,7 @@ export default function CallControlBar({
   viewMode,
   onViewModeChange,
   onToggleEffects,
+  effects,
   isBackgroundBlurred = false,
   onToggleBackgroundBlur,
   onToggleMeetingInfo,
@@ -105,6 +108,7 @@ export default function CallControlBar({
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   onToggleEffects?: () => void;
+  effects?: BackgroundEffects | null;
   isBackgroundBlurred?: boolean;
   onToggleBackgroundBlur?: () => void;
   onToggleMeetingInfo?: () => void;
@@ -1291,11 +1295,14 @@ export default function CallControlBar({
       )}
 
       {/* END / LEAVE CONFIRMATION DIALOG FOR HOST */}
-      {endConfirmOpen && (
+      {endConfirmOpen && typeof document !== 'undefined' && createPortal(
         <>
-          <div className="fixed inset-0 z-[90] bg-black/60 backdrop-blur-sm" onClick={() => setEndConfirmOpen(false)} />
+          <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={() => setEndConfirmOpen(false)} />
           <div
-            className="fixed left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-[91] w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 animate-fadeIn"
+            role="dialog"
+            aria-modal="true"
+            aria-label="End or Leave Class"
+            className="fixed left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-[101] w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 animate-fadeIn"
             style={{
               background: 'rgba(28, 30, 36, 0.96)',
               border: '1px solid rgba(255, 255, 255, 0.18)',
@@ -1336,7 +1343,8 @@ export default function CallControlBar({
               </button>
             </div>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* SETTINGS DIALOG */}
@@ -1347,6 +1355,7 @@ export default function CallControlBar({
           viewMode={viewMode}
           onViewModeChange={onViewModeChange}
           onToggleEffects={onToggleEffects}
+          effects={effects}
           cameras={cameras}
           mics={mics}
           speakers={speakers}

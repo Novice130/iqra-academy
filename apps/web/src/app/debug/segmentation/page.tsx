@@ -25,12 +25,12 @@ import {
   type PipelineSettings,
 } from '@/components/video/segmentation';
 import { DEFAULT_SETTINGS } from '@/components/video/segmentation/SmoothBackgroundTransformer';
-import { WALLPAPERS } from '@/components/video/BackgroundEffects';
+import { WALLPAPERS, BLUR_DEFAULT_RADIUS, BLUR_SLIGHT_RADIUS } from '@/components/video/BackgroundEffects';
 
 const EFFECTS: { label: string; value: BackgroundEffectOptions }[] = [
   { label: 'None', value: { mode: 'disabled' } },
-  { label: 'Slight blur', value: { mode: 'background-blur', blurRadius: 5 } },
-  { label: 'Blur', value: { mode: 'background-blur', blurRadius: 15 } },
+  { label: 'Slight blur', value: { mode: 'background-blur', blurRadius: BLUR_SLIGHT_RADIUS } },
+  { label: 'Blur', value: { mode: 'background-blur', blurRadius: BLUR_DEFAULT_RADIUS } },
   ...WALLPAPERS.map((w) => ({
     label: w.label,
     value: { mode: 'virtual-background', imagePath: w.path } as BackgroundEffectOptions,
@@ -90,6 +90,7 @@ export default function SegmentationBenchPage() {
   const [settings, setSettings] = useState<PipelineSettings>(DEFAULT_SETTINGS);
   const [quality, setQuality] = useState<ModelQuality>('fast');
   const [fps, setFps] = useState(0);
+  const [lastError, setLastError] = useState<string | null>(null);
 
   // `?model=detailed` swaps in the multiclass model, which is the whole reason
   // this override exists: it is the comparison the default was chosen from.
@@ -154,6 +155,51 @@ export default function SegmentationBenchPage() {
     return () => video.cancelVideoFrameCallback(handle);
   }, []);
 
+  /**
+   * Read-only diagnostics from the live transformer: which inference path is
+   * running and on which delegate, how long the last mask took, its size, how
+   * fresh it is, and how fast masks are landing. Polled at 2Hz — cheap enough
+   * to leave on, slow enough not to fight the compositor.
+   */
+  const [diagnostics, setDiagnostics] = useState<{
+    path: string;
+    delegate: string;
+    inferenceMs: string;
+    gapMs: number;
+    maskSize: string;
+    maskAgeMs: string;
+    maskFps: string;
+    ready: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (effect === 0) {
+      setDiagnostics(null);
+      return;
+    }
+    let lastCount = 0;
+    let lastAt = performance.now();
+    const timer = setInterval(() => {
+      const d = processorRef.current?.transformerDiagnostics;
+      if (!d) return;
+      const now = performance.now();
+      const maskFps = ((d.masksAccepted - lastCount) * 1000) / Math.max(1, now - lastAt);
+      lastCount = d.masksAccepted;
+      lastAt = now;
+      setDiagnostics({
+        path: d.path,
+        delegate: d.delegate ?? '—',
+        inferenceMs: d.masksAccepted > 0 ? `${d.lastInferenceMs.toFixed(1)} ms` : '—',
+        gapMs: d.inferenceGapMs,
+        maskSize: d.lastMaskSize ? `${d.lastMaskSize.width}×${d.lastMaskSize.height}` : '—',
+        maskAgeMs: d.lastMaskTime > 0 ? `${Math.max(0, Math.round(now - d.lastMaskTime))} ms` : '—',
+        maskFps: d.masksAccepted > 0 ? `${maskFps.toFixed(1)}/s` : '—',
+        ready: d.lastMaskTime > 0 && now - d.lastMaskTime <= 750 ? 'fresh' : 'stale',
+      });
+    }, 500);
+    return () => clearInterval(timer);
+  }, [effect, quality]);
+
   const applyEffect = useCallback(
     async (index: number, nextSettings: PipelineSettings) => {
       const track = trackRef.current;
@@ -168,7 +214,15 @@ export default function SegmentationBenchPage() {
           await processorRef.current.switchTo(target);
           await processorRef.current.updateTransformerOptions({ settings: nextSettings });
         } else {
-          const processor = new BackgroundProcessor({ ...target, settings: nextSettings, quality });
+          const processor = new BackgroundProcessor({
+            ...target,
+            settings: nextSettings,
+            quality,
+            // Why here and not in the transformer's own logs: MediaPipe and
+            // WebGL failures otherwise surface nowhere — the bench is where a
+            // real camera meets the real pipeline, so this is where they land.
+            onError: (message) => setLastError(message),
+          });
           await track.setProcessor(processor);
           processorRef.current = processor;
         }
@@ -229,6 +283,25 @@ export default function SegmentationBenchPage() {
           <figcaption className="text-xs text-white/50">Processed · {fps} fps</figcaption>
         </figure>
       </div>
+
+      {diagnostics && (
+        <section aria-label="Pipeline diagnostics" className="rounded-xl border border-white/10 bg-white/[0.04] p-4">
+          <h2 className="text-sm font-semibold text-white/90">Diagnostics</h2>
+          <dl className="mt-2 grid grid-cols-2 gap-x-6 gap-y-1.5 text-xs sm:grid-cols-4">
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Inference path</dt><dd className="font-mono text-white/90">{diagnostics.path}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Delegate</dt><dd className="font-mono text-white/90">{diagnostics.delegate}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Last inference</dt><dd className="font-mono text-white/90">{diagnostics.inferenceMs}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Inference gap</dt><dd className="font-mono text-white/90">{diagnostics.gapMs} ms</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Mask size</dt><dd className="font-mono text-white/90">{diagnostics.maskSize}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Mask age</dt><dd className="font-mono text-white/90">{diagnostics.maskAgeMs}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Mask rate</dt><dd className="font-mono text-white/90">{diagnostics.maskFps}</dd></div>
+            <div className="flex justify-between gap-2"><dt className="text-white/45">Mask state</dt><dd className="font-mono text-white/90">{diagnostics.ready}</dd></div>
+          </dl>
+          {lastError && (
+            <p role="alert" className="mt-2 text-xs text-red-300">Last error: {lastError}</p>
+          )}
+        </section>
+      )}
 
       <section className="space-y-3">
         <div className="flex flex-wrap gap-2">

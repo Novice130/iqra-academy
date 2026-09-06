@@ -254,8 +254,11 @@ export const DEFAULT_SETTINGS: PipelineSettings = {
   lightWrap: 0.18,
 };
 
-/** How much the background is downscaled before being blurred (2 = 360p/540p for crisp Gaussian blur). */
-const BLUR_DOWNSCALE = 2;
+/** How much the background is downscaled before blurring (4 = 180p-class working set for creamy bokeh). */
+const BLUR_DOWNSCALE = 4;
+
+/** Two H+V gaussian iterations (four passes) approximate the wide creamy kernel Zoom uses. */
+const BLUR_ITERATIONS = 2;
 
 export type BackgroundMode =
   | { kind: 'blur'; radius: number }
@@ -461,9 +464,16 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
         bindTextureUniform(programs.copy, 'u_texture', 0, frameTexture);
         drawTo(a);
 
+        // The blur is computed at 1/BLUR_DOWNSCALE resolution and iterated, so
+        // the sigma is expressed in working-set texels, not output pixels: a
+        // radius of 18 lands around sigma 4.5 per pass, and two iterations
+        // stack into the wide creamy kernel Zoom ships.
         const sigma = Math.max(0.5, mode.radius / BLUR_DOWNSCALE);
-        blurPass(a.texture, b, sigma, [1, 0]);
-        blurPass(b.texture, a, sigma, [0, 1]);
+        // Each iteration reads the previous pass's output: a -> b -> a.
+        for (let i = 0; i < BLUR_ITERATIONS; i++) {
+          blurPass(a.texture, b, sigma, [1, 0]);
+          blurPass(b.texture, a, sigma, [0, 1]);
+        }
         background = a.texture;
       } else {
         const frameAspect = canvas.width / canvas.height;
@@ -478,12 +488,17 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
         }
       }
 
+      // Fail closed: with no fresh mask there is nothing truthful to composite,
+      // so draw the (blurred or wallpaper) background fullscreen instead of
+      // handing the raw room back. The caller decides when this applies.
       if (privacyFallback) {
         bindQuad(programs.copyOutput);
         bindTextureUniform(programs.copyOutput, 'u_texture', 0, background);
         drawTo(null);
+        gl.flush();
         return true;
       }
+
       if (!maskBlur) return false;
 
       bindQuad(programs.composite);
@@ -495,6 +510,7 @@ export function createPipeline(canvas: OffscreenCanvas | HTMLCanvasElement) {
       gl.uniform2f(gl.getUniformLocation(programs.composite, 'u_bgScale'), scale[0], scale[1]);
       gl.uniform2f(gl.getUniformLocation(programs.composite, 'u_bgOffset'), offset[0], offset[1]);
       drawTo(null);
+      gl.flush();
       return true;
     },
 

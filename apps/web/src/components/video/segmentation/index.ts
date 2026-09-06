@@ -63,6 +63,15 @@ export class BackgroundProcessor extends ProcessorWrapper<
   async switchTo(options: BackgroundEffectOptions) {
     await this.updateTransformerOptions(toTransformerOptions(options));
   }
+
+  /**
+   * The bench's diagnostics overlay reads through here. `transformer` is the
+   * instance ProcessorWrapper routes `updateTransformerOptions` to, so this is
+   * live numbers, not a copy.
+   */
+  get transformerDiagnostics() {
+    return this.transformer.diagnostics;
+  }
 }
 
 export function createBackgroundProcessor(options: BackgroundEffectOptions): BackgroundProcessor {

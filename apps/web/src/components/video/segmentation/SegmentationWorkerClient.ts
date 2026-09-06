@@ -16,6 +16,8 @@ export class SegmentationWorkerClient {
   private worker: Worker | null = null;
   private busy = false;
   private closed = false;
+  /** GPU vs CPU, as reported by the worker's ready message. Null until init resolves. */
+  delegate: 'GPU' | 'CPU' | null = null;
 
   constructor(
     private readonly quality: ModelQuality,
@@ -38,6 +40,7 @@ export class SegmentationWorkerClient {
         if (message.type === 'ready') {
           clearTimeout(timer);
           worker.removeEventListener('message', handleMessage);
+          this.delegate = message.delegate;
           resolve();
         } else if (message.type === 'error' && message.fatal) {
           clearTimeout(timer);

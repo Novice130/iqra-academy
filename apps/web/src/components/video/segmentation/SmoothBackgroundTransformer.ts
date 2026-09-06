@@ -10,6 +10,15 @@
  * DEFAULT_QUALITY for why the other one lost. Both are asked for *confidence*
  * masks rather than category masks; what channel 0 then means differs between
  * them, which `transform` sorts out.
+ *
+ * Inference runs in a Web Worker (`segmentation.worker.ts`) wherever Workers
+ * exist, because segmenting a 720p frame on the main thread every ~66ms is what
+ * used to stall compositing and read as "noise". The main-thread segmenter is
+ * strictly a fallback for environments where the worker cannot start. Both
+ * paths infer on a dedicated 256x144 downscale canvas — never on the shared
+ * output canvas, and never via a shared WebGL texture: the mask crosses into
+ * the pipeline as a plain Uint8Array, so neither MediaPipe's GL state nor ours
+ * can clobber the other.
  */
 
 import * as vision from '@mediapipe/tasks-vision';
@@ -123,6 +132,26 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   private acceptedSequence = 0;
   private lastMaskTime = 0;
   private workerFailureReported = false;
+  /**
+   * Read-only numbers for the `/debug/segmentation` bench overlay. Updated on
+   * the hot path (a few assignments per accepted mask) so they stay cheap.
+   */
+  readonly diagnostics = {
+    /** 'worker' when the off-thread path is live, 'main' for the fallback, 'none' before init. */
+    path: 'none' as 'none' | 'worker' | 'main',
+    /** GPU vs CPU, as reported by whichever inference path is live. */
+    delegate: null as 'GPU' | 'CPU' | null,
+    /** Wall-clock ms of the last accepted mask (worker round-trip or main-thread call). */
+    lastInferenceMs: 0,
+    /** Current throttle gap between inference passes. */
+    inferenceGapMs: 66,
+    /** Width/height of the last accepted mask. */
+    lastMaskSize: null as { width: number; height: number } | null,
+    /** When the last mask landed (performance.now). The bench derives freshness from this. */
+    lastMaskTime: 0,
+    /** Monotonic count of accepted masks — the bench derives mask-fps from its slope. */
+    masksAccepted: 0,
+  };
 
   constructor(options: SmoothBackgroundOptions) {
     super();
@@ -158,6 +187,8 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         );
         await worker.init();
         this.worker = worker;
+        this.diagnostics.path = 'worker';
+        this.diagnostics.delegate = worker.delegate;
         return;
       } catch (error) {
         console.warn('Background worker unavailable, using reduced main-thread inference', error);
@@ -180,14 +211,19 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         outputCategoryMask: false,
         outputConfidenceMasks: true,
       });
-    } catch {
+      this.diagnostics.path = 'main';
+      this.diagnostics.delegate = 'GPU';
+    } catch (gpuErr) {
+      console.warn('GPU segmentation unavailable, falling back to CPU delegate', gpuErr);
       this.segmenter = await vision.ImageSegmenter.createFromOptions(fileSet, {
-        baseOptions: { modelAssetPath: MODELS[this.quality] },
+        baseOptions: { modelAssetPath: MODELS[this.quality], delegate: 'CPU' },
         canvas,
         runningMode: 'VIDEO',
         outputCategoryMask: false,
         outputConfidenceMasks: true,
       });
+      this.diagnostics.path = 'main';
+      this.diagnostics.delegate = 'CPU';
     }
   }
 
@@ -213,6 +249,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.lastMaskTime = performance.now();
     this.adaptInferenceGap(mask.durationMs);
     this.pipeline.updateMask(mask.data, mask.width, mask.height, mask.invert);
+    this.diagnostics.lastInferenceMs = mask.durationMs;
+    this.diagnostics.lastMaskSize = { width: mask.width, height: mask.height };
+    this.diagnostics.lastMaskTime = this.lastMaskTime;
+    this.diagnostics.masksAccepted += 1;
   }
 
   private adaptInferenceGap(durationMs: number) {
@@ -221,6 +261,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     } else if (durationMs < 12 && this.inferenceGapMs > 66) {
       this.inferenceGapMs = Math.max(66, this.inferenceGapMs - 3);
     }
+    this.diagnostics.inferenceGapMs = this.inferenceGapMs;
   }
 
   async init({ outputCanvas, inputElement: inputVideo }: VideoTransformerInitOptions) {
@@ -253,22 +294,31 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.acceptedSequence = 0;
     this.lastMaskTime = 0;
     this.isInferring = false;
+    this.diagnostics.lastMaskTime = 0;
+    this.diagnostics.lastMaskSize = null;
+    this.diagnostics.masksAccepted = 0;
     this.pipeline?.destroy();
     this.pipeline = createPipeline(opts.outputCanvas);
     this.canvas = opts.outputCanvas;
     this.inputVideo = opts.inputElement;
     this.isDisabled = false;
+    // The worker survives a restart: the generation bump above invalidates its
+    // in-flight masks, and the next ones land on the fresh pipeline. The
+    // main-thread segmenter holds no per-canvas state worth rebuilding either.
     await this.applyMode();
     if (this.options.settings) this.pipeline?.setSettings(this.options.settings);
   }
 
   async destroy() {
     this.isDisabled = true;
+    this.isInferring = false;
     this.generation += 1;
     this.worker?.close();
     this.worker = null;
-    await this.segmenter?.close();
-    this.segmenter = undefined;
+    if (this.segmenter) {
+      try { this.segmenter.close(); } catch {}
+      this.segmenter = undefined;
+    }
     this.pipeline?.destroy();
     this.pipeline = null;
     this.background?.image.close();
@@ -279,9 +329,40 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   }
 
   async update(options: SmoothBackgroundOptions) {
+    const prevQuality = this.quality;
     this.options = { ...this.options, ...options };
+    if (options.quality && options.quality !== prevQuality) {
+      this.quality = options.quality;
+      await this.reinitializeInference();
+    }
     if (options.settings) this.pipeline?.setSettings(options.settings);
     await this.applyMode();
+  }
+
+  /**
+   * Tears down whichever inference path is live and builds it again for the
+   * current quality. Only the bench switches quality mid-stream, but without
+   * this the switch silently kept segmenting with the old model.
+   */
+  private async reinitializeInference() {
+    this.generation += 1;
+    this.acceptedSequence = 0;
+    this.lastMaskTime = 0;
+    this.isInferring = false;
+    this.diagnostics.path = 'none';
+    this.diagnostics.delegate = null;
+    this.diagnostics.lastMaskTime = 0;
+    this.diagnostics.lastMaskSize = null;
+    this.diagnostics.masksAccepted = 0;
+    this.worker?.close();
+    this.worker = null;
+    if (this.segmenter) {
+      try { this.segmenter.close(); } catch {}
+      this.segmenter = undefined;
+    }
+    this.workerFailureReported = false;
+    this.setupInferenceCanvas();
+    await this.initializeInference();
   }
 
   /** Pushes the current blur/wallpaper choice down into the pipeline. */
@@ -361,8 +442,13 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
           const data = new Uint8Array(mask.getAsUint8Array());
           this.acceptedSequence = sequence;
           this.lastMaskTime = performance.now();
-          this.adaptInferenceGap(performance.now() - startedAt);
+          const durationMs = performance.now() - startedAt;
+          this.adaptInferenceGap(durationMs);
           this.pipeline.updateMask(data, mask.width, mask.height, masks.length > 1);
+          this.diagnostics.lastInferenceMs = durationMs;
+          this.diagnostics.lastMaskSize = { width: mask.width, height: mask.height };
+          this.diagnostics.lastMaskTime = this.lastMaskTime;
+          this.diagnostics.masksAccepted += 1;
         } finally {
           result.close();
           this.isInferring = false;
@@ -379,14 +465,23 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     // whether anything at all was enqueued, `passedThrough` is whether the
     // *incoming* frame was the thing enqueued — in which case the stream owns
     // it now and closing it here would pull it out from under the encoder.
+    let handled = false;
     let passedThrough = false;
     const passThrough = () => {
       controller.enqueue(frame);
+      handled = true;
       passedThrough = true;
     };
 
     try {
       if (!(frame instanceof VideoFrame) || frame.codedWidth === 0 || frame.codedHeight === 0) {
+        return;
+      }
+
+      // Resolution floor: below 320p wide, WebRTC is already degrading hard and
+      // segmentation costs more than it hides. Pass through to break the spiral.
+      if (frame.displayWidth < 320) {
+        passThrough();
         return;
       }
 
@@ -407,6 +502,10 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
         this.requestInference(frame, now);
       }
 
+      // Fail closed: until a fresh mask exists (first frame, worker starting,
+      // camera just covered) draw the blurred scene rather than the raw room.
+      // `render` with privacyFallback draws the blur fullscreen and still
+      // returns true, so the encoder keeps getting composited frames.
       const maskIsFresh = this.pipeline.ready && now - this.lastMaskTime <= 750;
       if (this.pipeline.render(frame, !maskIsFresh)) {
         controller.enqueue(
@@ -415,14 +514,13 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
             duration: frame.duration ?? undefined,
           })
         );
+        handled = true;
       } else {
         passThrough();
       }
     } catch (err) {
       console.error('Background effect frame failed', err);
-      if (!passedThrough) {
-        passThrough();
-      }
+      if (!handled) passThrough();
     } finally {
       if (!passedThrough) frame.close();
     }

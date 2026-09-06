@@ -8,6 +8,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Track } from 'livekit-client';
 import { useRoomContext, useLocalParticipant } from '@livekit/components-react';
 import {
@@ -20,6 +21,7 @@ import {
   StatsBarChartIcon,
 } from './CallIcons';
 import type { ViewMode } from './CallControlBar';
+import { BackgroundEffectsContent, type BackgroundEffects } from './BackgroundEffects';
 
 export type SettingsTab = 'general' | 'audio' | 'video' | 'backgrounds' | 'statistics' | 'about';
 
@@ -29,6 +31,8 @@ interface CallSettingsModalProps {
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   onToggleEffects?: () => void;
+  /** Same live hook instance the call owns — lets this tab share it instead of duplicating it. */
+  effects?: BackgroundEffects | null;
   cameras: MediaDeviceInfo[];
   mics: MediaDeviceInfo[];
   speakers: MediaDeviceInfo[];
@@ -173,6 +177,7 @@ export default function CallSettingsModal({
   viewMode = 'gallery',
   onViewModeChange,
   onToggleEffects,
+  effects,
   cameras,
   mics,
   speakers,
@@ -307,6 +312,11 @@ export default function CallSettingsModal({
     };
   }, [room]);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
   const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'general', label: 'General', icon: LayoutIcon },
     { id: 'video', label: 'Video', icon: CameraIcon },
@@ -316,14 +326,19 @@ export default function CallSettingsModal({
     { id: 'about', label: 'About', icon: InfoIcon },
   ];
 
-  return (
+  if (!mounted || typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
       <div
-        className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm animate-fadeIn"
+        className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm animate-fadeIn"
         onClick={onClose}
       />
       <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[81] w-full sm:max-w-2xl rounded-t-[32px] sm:rounded-3xl shadow-2xl animate-fadeIn overflow-hidden flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Settings"
+        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[101] w-full sm:max-w-2xl rounded-t-[32px] sm:rounded-3xl shadow-2xl animate-fadeIn overflow-hidden flex flex-col"
         style={{
           background: 'rgba(24, 26, 32, 0.96)',
           backdropFilter: 'blur(36px) saturate(180%)',
@@ -331,6 +346,7 @@ export default function CallSettingsModal({
           border: '1px solid rgba(255, 255, 255, 0.18)',
           boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)',
           height: 'min(86vh, 620px)',
+          maxHeight: 'calc(100dvh - 32px)',
         }}
       >
         {/* Header */}
@@ -372,7 +388,7 @@ export default function CallSettingsModal({
         {/* Desktop Container: Left Rail + Content Area */}
         <div className="flex flex-1 min-h-0">
           {/* Desktop Left Rail */}
-          <div className="hidden sm:flex flex-col w-44 border-r border-white/10 p-3 space-y-1 shrink-0">
+          <div className="hidden sm:flex flex-col w-44 border-r border-white/10 p-3 space-y-1 shrink-0 overflow-y-auto">
             {tabs.map((tab) => {
               const active = activeTab === tab.id;
               const Icon = tab.icon;
@@ -701,16 +717,24 @@ export default function CallSettingsModal({
                 <p className="text-xs text-white/50">
                   Select background blur or spiritual mosque and classroom backdrops for privacy during Quran lessons.
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClose();
-                    onToggleEffects?.();
-                  }}
-                  className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-500 text-white cursor-pointer transition shadow-md"
-                >
-                  ✨ Open Background Effects Drawer
-                </button>
+                {/* The same live swatch grid as the in-call drawer, driven by the
+                    call's effects hook — works standalone, no drawer needed. */}
+                {effects ? (
+                  <div className="-mx-3">
+                    <BackgroundEffectsContent effects={effects} />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onToggleEffects?.();
+                    }}
+                    className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-500 text-white cursor-pointer transition shadow-md"
+                  >
+                    ✨ Open Background Effects Drawer
+                  </button>
+                )}
               </div>
             )}
 
@@ -777,6 +801,7 @@ export default function CallSettingsModal({
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

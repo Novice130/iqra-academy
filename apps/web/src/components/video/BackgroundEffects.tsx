@@ -48,6 +48,16 @@ export type EffectSelection =
   | { kind: 'blur'; radius: number }
   | { kind: 'image'; id: string };
 
+/**
+ * Single source of truth for blur strength, shared by the in-call panel, the
+ * pre-join picker, and the control-bar quick toggle. These used to disagree
+ * (panel 5/15 vs toggle 16), which read as "the toggle does nothing".
+ */
+export const BLUR_SLIGHT_RADIUS = 6;
+export const BLUR_DEFAULT_RADIUS = 18;
+export const BLUR_MIN_RADIUS = 6;
+export const BLUR_MAX_RADIUS = 30;
+
 export interface BackgroundEffects {
   supported: boolean;
   busy: boolean;
@@ -353,13 +363,13 @@ export function BackgroundEffectsContent({
         <Swatch
           label="Slight blur"
           active={selection.kind === 'blur' && selection.radius <= 6}
-          onClick={() => handlePick({ kind: 'blur', radius: 5 })}
+          onClick={() => handlePick({ kind: 'blur', radius: BLUR_SLIGHT_RADIUS })}
           style={{ background: 'linear-gradient(135deg,#3d4149,#5a606b)' }}
         />
         <Swatch
           label="Blur"
           active={selection.kind === 'blur' && selection.radius > 6}
-          onClick={() => handlePick({ kind: 'blur', radius: 15 })}
+          onClick={() => handlePick({ kind: 'blur', radius: BLUR_DEFAULT_RADIUS })}
           style={{ background: 'linear-gradient(135deg,#4a4f59,#7c838f)' }}
         />
         {WALLPAPERS.map((w) => (
@@ -372,6 +382,24 @@ export function BackgroundEffectsContent({
           />
         ))}
       </div>
+      {selection.kind === 'blur' && (
+        <div className="mt-3 px-1">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-[11px] font-semibold text-white/60">Blur strength</span>
+            <span className="text-[11px] font-mono text-white/60">{selection.radius}</span>
+          </div>
+          <input
+            type="range"
+            min={BLUR_MIN_RADIUS}
+            max={BLUR_MAX_RADIUS}
+            step={1}
+            value={selection.radius}
+            onChange={(e) => handlePick({ kind: 'blur', radius: Number(e.target.value) })}
+            className="w-full accent-[#0A84FF] h-1 bg-white/20 rounded-lg cursor-pointer"
+            aria-label="Blur strength"
+          />
+        </div>
+      )}
     </div>
   );
 }
