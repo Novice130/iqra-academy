@@ -18,6 +18,28 @@ import { shouldHidePricing, subscriptionLabel } from "@/lib/pricing-visibility";
 import LocalTime from "@/components/LocalTime";
 import ClassActionButton from "@/components/ClassActionButton";
 
+function safeIso(d: Date | string | null | undefined): string {
+  if (!d) return new Date().toISOString();
+  try {
+    const date = typeof d === "string" ? new Date(d) : d;
+    if (Number.isNaN(date.getTime())) return new Date().toISOString();
+    return date.toISOString();
+  } catch {
+    return new Date().toISOString();
+  }
+}
+
+function safeDateFormat(d: Date | string | null | undefined, fmt: string, fallback: string): string {
+  if (!d) return fallback;
+  try {
+    const date = typeof d === "string" ? new Date(d) : d;
+    if (Number.isNaN(date.getTime())) return fallback;
+    return format(date, fmt);
+  } catch {
+    return fallback;
+  }
+}
+
 export default async function DashboardPage() {
   return withHttpDb(async () => {
     const headersList = await headers();
@@ -54,40 +76,59 @@ export default async function DashboardPage() {
     });
 
     // 2. Fetch Next Upcoming Class
-    const upcomingBookings = await db
-      .select()
-      .from(bookings)
-      .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
-      .innerJoin(users, eq(sessions.teacherId, users.id))
-      .where(
-        and(
-          eq(bookings.userId, user.id),
-          eq(bookings.status, "CONFIRMED"),
-          gte(sessions.scheduledStart, new Date())
+    let upcoming: any = null;
+    try {
+      const upcomingBookings = await db
+        .select()
+        .from(bookings)
+        .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
+        .innerJoin(users, eq(sessions.teacherId, users.id))
+        .where(
+          and(
+            eq(bookings.userId, user.id),
+            eq(bookings.status, "CONFIRMED"),
+            gte(sessions.scheduledStart, new Date())
+          )
         )
-      )
-      .orderBy(asc(sessions.scheduledStart))
-      .limit(1);
+        .orderBy(asc(sessions.scheduledStart))
+        .limit(1);
 
-    const upcoming = upcomingBookings[0];
+      upcoming = upcomingBookings[0];
+    } catch (e) {
+      console.warn("Failed to fetch upcoming session:", e);
+    }
 
     // 3. Get Subscription & Quota
-    const subscription = await db.query.subscriptions.findFirst({
-      where: and(eq(subscriptions.userId, user.id), eq(subscriptions.status, "ACTIVE")),
-      with: { plan: true },
-    });
+    let subscription: any = null;
+    try {
+      subscription = await db.query.subscriptions.findFirst({
+        where: and(eq(subscriptions.userId, user.id), eq(subscriptions.status, "ACTIVE")),
+        with: { plan: true },
+      });
+    } catch (e) {
+      console.warn("Failed to fetch subscription:", e);
+    }
 
-    const quota = subscription
-      ? await getQuotaStatus(subscription.id, user.id, dbUser?.orgId || "")
-      : { used: 0, totalAllowed: 0, remaining: 0 };
+    let quota = { used: 0, totalAllowed: 0, remaining: 0 };
+    if (subscription) {
+      try {
+        quota = await getQuotaStatus(subscription.id, user.id, dbUser?.orgId || "");
+      } catch (e) {
+        console.warn("Failed to compute quota status:", e);
+      }
+    }
 
     // 4. Calculate total sessions completed
-    const [sessionCount] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(bookings)
-      .where(and(eq(bookings.userId, user.id), eq(bookings.status, "COMPLETED")));
-
-    const totalCompleted = sessionCount?.count ?? 0;
+    let totalCompleted = 0;
+    try {
+      const [sessionCount] = await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(bookings)
+        .where(and(eq(bookings.userId, user.id), eq(bookings.status, "COMPLETED")));
+      totalCompleted = sessionCount?.count ?? 0;
+    } catch (e) {
+      console.warn("Failed to count completed sessions:", e);
+    }
 
     // 5. Track counts and student profile progress
     let totalLessonsMap: Record<string, number> = {};
@@ -149,13 +190,15 @@ export default async function DashboardPage() {
               <div>
                 <div className="badge badge-accent mb-3">Upcoming</div>
                 <h2 className="text-lg font-semibold mb-1" style={{ color: "var(--text-primary)" }}>
-                  {upcoming.sessions.track ? (upcoming.sessions.track.charAt(0) + upcoming.sessions.track.slice(1).toLowerCase()) : "Quran Class"} — {upcoming.sessions.title || "Lesson"}
+                  {typeof upcoming.sessions?.track === "string" && upcoming.sessions.track.length > 0
+                    ? (upcoming.sessions.track.charAt(0).toUpperCase() + upcoming.sessions.track.slice(1).toLowerCase())
+                    : "Quran Class"} — {upcoming.sessions?.title || "Lesson"}
                 </h2>
                 <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
                   Ustadh {upcoming.users?.name || "Teacher"} • 30 min
                 </p>
                 <p className="text-xs mt-2" style={{ color: "var(--text-tertiary)" }}>
-                  <LocalTime iso={upcoming.sessions.scheduledStart.toISOString()} mode="weekday-time" withZone />
+                  <LocalTime iso={safeIso(upcoming.sessions?.scheduledStart)} mode="weekday-time" withZone />
                 </p>
               </div>
               <ClassActionButton
@@ -186,13 +229,25 @@ export default async function DashboardPage() {
             <StatCard
               label="Subscription"
               value={subscriptionLabel(!!subscription)}
-              sub={subscription ? `Renews ${format(subscription.currentPeriodEnd, "MMM d")}` : "Contact us to start"}
+              sub={
+                subscription
+                  ? `Renews ${safeDateFormat(subscription.currentPeriodEnd, "MMM d", "soon")}`
+                  : "Contact us to start"
+              }
             />
           ) : (
             <StatCard
               label="Next bill"
-              value={subscription ? `$${subscription.plan.priceInCents / 100}` : "--"}
-              sub={subscription ? format(subscription.currentPeriodEnd, "MMM d") : "No plan"}
+              value={
+                subscription?.plan?.priceInCents != null
+                  ? `$${subscription.plan.priceInCents / 100}`
+                  : "--"
+              }
+              sub={
+                subscription
+                  ? safeDateFormat(subscription.currentPeriodEnd, "MMM d", "Active")
+                  : "No plan"
+              }
             />
           )}
         </div>
@@ -226,8 +281,12 @@ export default async function DashboardPage() {
                 return (
                   <ProfileCard
                     key={profile.id}
-                    name={profile.name}
-                    track={profile.track.charAt(0) + profile.track.slice(1).toLowerCase()}
+                    name={profile.name || "Student"}
+                    track={
+                      typeof profile.track === "string" && profile.track.length > 0
+                        ? (profile.track.charAt(0).toUpperCase() + profile.track.slice(1).toLowerCase())
+                        : "Nazira"
+                    }
                     lesson={latestRecord?.lesson?.title || "Beginning track..."}
                     progress={progressPct}
                   />
@@ -274,12 +333,13 @@ function ProfileCard({
 }: {
   name: string; track: string; lesson: string; progress: number; weekly?: string;
 }) {
+  const initial = (name && name.length > 0) ? name[0].toUpperCase() : "S";
   return (
     <div className="card p-5">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-semibold text-white" style={{ background: "var(--accent)" }}>
-            {name[0]}
+            {initial}
           </div>
           <div>
             <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>{name}</div>

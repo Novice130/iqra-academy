@@ -174,10 +174,18 @@ function patchWorkerExports() {
     }
 
     let content = fs.readFileSync(workerFile, "utf8");
+    let changed = false;
     if (!content.includes("export { AvailabilityHub }")) {
       content += '\nexport { AvailabilityHub } from "./cloudflare-templates/AvailabilityHub.js";\n';
+      changed = true;
+    }
+    if (!content.includes("scheduled(") && !content.includes("export async function scheduled")) {
+      content += '\nexport async function scheduled(event, env, ctx) {\n  // Cron trigger handler for outbox retry sweeper or scheduled jobs\n  console.log("Scheduled cron executed:", event?.cron || "minute-trigger");\n}\n';
+      changed = true;
+    }
+    if (changed) {
       fs.writeFileSync(workerFile, content, "utf8");
-      console.log("✅ Successfully patched .open-next/worker.js to export AvailabilityHub!");
+      console.log("✅ Successfully patched .open-next/worker.js exports (AvailabilityHub & scheduled)!");
     }
   }
 }

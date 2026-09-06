@@ -46,7 +46,7 @@ export default function DashboardError({
           </button>
           <button
             onClick={() => {
-              window.location.href = '/dashboard';
+              window.location.reload();
             }}
             className="px-4 py-2.5 rounded-xl text-xs font-medium transition-colors cursor-pointer"
             style={{
