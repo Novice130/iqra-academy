@@ -162,11 +162,11 @@ function patchWorkerExports() {
     console.log("🔨 Bundling AvailabilityHub Durable Object for Cloudflare worker...");
     const bundle = spawnSync("npx", [
       "esbuild",
-      path.join(root, "src/realtime/AvailabilityHub.ts"),
+      `"${path.join(root, "src/realtime/AvailabilityHub.ts")}"`,
       "--bundle",
       "--format=esm",
       "--platform=neutral",
-      `--outfile=${hubBundlePath}`,
+      `--outfile="${hubBundlePath}"`,
     ], { stdio: "inherit", shell: true });
     if (bundle.status !== 0 || !fs.existsSync(hubBundlePath)) {
       console.error("❌ AvailabilityHub bundle failed — the worker would deploy without its realtime DO export.");

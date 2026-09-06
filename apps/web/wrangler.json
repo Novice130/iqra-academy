@@ -30,7 +30,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["AvailabilityHub"]
+      "new_sqlite_classes": ["AvailabilityHub"]
     }
   ],
   // Outbox retry sweeper. Per-request afterResponse drains cover the happy
