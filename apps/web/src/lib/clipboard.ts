@@ -21,17 +21,16 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
     }
   }
 
-  // 2. Fallback: DOM range selection + execCommand('copy')
-  // Note: iOS Safari / WebKit drops copy if readonly or disabled is set on textarea.
+  // 2. Fallback: textarea select + execCommand('copy')
   if (typeof document !== 'undefined') {
     try {
       const textarea = document.createElement('textarea');
       textarea.value = text;
-      textarea.contentEditable = 'true';
-      textarea.readOnly = false;
+      // Do not set contentEditable or readOnly to weird values
+      textarea.setAttribute('readonly', '');
       textarea.style.position = 'fixed';
       textarea.style.top = '0';
-      textarea.style.left = '0';
+      textarea.style.left = '-9999px';
       textarea.style.width = '2em';
       textarea.style.height = '2em';
       textarea.style.padding = '0';
@@ -39,20 +38,14 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
       textarea.style.outline = 'none';
       textarea.style.boxShadow = 'none';
       textarea.style.background = 'transparent';
-      textarea.style.fontSize = '16px'; // Prevents auto-zoom in iOS Safari
-      textarea.style.opacity = '0.01';
-      textarea.style.zIndex = '-9999';
+      textarea.style.fontSize = '16px';
       document.body.appendChild(textarea);
 
-      const range = document.createRange();
-      range.selectNodeContents(textarea);
-      const selection = window.getSelection();
-      selection?.removeAllRanges();
-      selection?.addRange(range);
-      textarea.setSelectionRange(0, 999999);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, text.length);
 
       const successful = document.execCommand('copy');
-      selection?.removeAllRanges();
       document.body.removeChild(textarea);
       if (successful) return true;
     } catch (err) {

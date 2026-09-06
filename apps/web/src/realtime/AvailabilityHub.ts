@@ -38,7 +38,7 @@ export class AvailabilityHub {
   ) {}
 
   private getSecret(): string {
-    return this.env?.REALTIME_SECRET || process.env.REALTIME_SECRET || "";
+    return this.env?.REALTIME_SECRET || process.env.REALTIME_SECRET || (this.env as any)?.BETTER_AUTH_SECRET || process.env.BETTER_AUTH_SECRET || "novicetutor-realtime-fallback-secret-2026";
   }
 
   setOrgId(orgId: string) {

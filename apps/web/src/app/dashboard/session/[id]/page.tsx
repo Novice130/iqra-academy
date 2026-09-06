@@ -193,10 +193,11 @@ export default function SessionRoomPage() {
   };
 
   const handleBackToDashboard = () => {
+    const dest = isModerator ? '/dashboard/teacher' : '/dashboard';
     try {
-      router.push('/dashboard');
+      router.push(dest);
     } catch {
-      window.location.href = '/dashboard';
+      window.location.href = dest;
     }
   };
 

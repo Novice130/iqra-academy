@@ -606,6 +606,11 @@ export default function CustomVideoConference({
             }
           });
         }
+        // Broadcast over LiveKit data channel for instant lobby-wide synchronization
+        if (room?.localParticipant) {
+          const payload = JSON.stringify({ type: 'VOLUME_CHANGED', identity: base, volume });
+          room.localParticipant.publishData(new TextEncoder().encode(payload), { reliable: true });
+        }
       } catch {}
       fetch(`/api/sessions/${sessionId}/volume`, {
         method: 'POST',
@@ -665,13 +670,20 @@ export default function CustomVideoConference({
     if (viewMenuOpen || peopleOpen || widgetState.showChat || effectsOpen || whiteboardActive) return;
     idleTimerRef.current = setTimeout(() => {
       setChromeHidden(true);
-    }, 3500);
+    }, 5000);
   }, [viewMenuOpen, peopleOpen, widgetState.showChat, effectsOpen, whiteboardActive]);
 
   useEffect(() => {
     resetIdleTimer();
+    const handleActivity = () => resetIdleTimer();
+    window.addEventListener('pointermove', handleActivity, { passive: true });
+    window.addEventListener('pointerdown', handleActivity, { passive: true });
+    window.addEventListener('keydown', handleActivity, { passive: true });
     return () => {
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      window.removeEventListener('pointermove', handleActivity);
+      window.removeEventListener('pointerdown', handleActivity);
+      window.removeEventListener('keydown', handleActivity);
     };
   }, [resetIdleTimer]);
 
@@ -688,7 +700,9 @@ export default function CustomVideoConference({
         if (data?.type === 'CLASS_ENDED') {
           room.disconnect(true).catch(() => {});
           if (typeof window !== 'undefined') {
-            window.location.href = '/dashboard?notice=class_ended';
+            window.location.href = isModerator
+              ? '/dashboard/teacher?notice=class_ended'
+              : '/dashboard?notice=class_ended';
           }
           return;
         }
@@ -707,6 +721,24 @@ export default function CustomVideoConference({
         if (topic === 'reaction' || data?.emoji) {
           if (data?.emoji) {
             triggerReaction(data.emoji);
+          }
+          return;
+        }
+        if (data?.type === 'VOLUME_CHANGED') {
+          const { identity: targetIdentity, volume: nextVolume } = data;
+          if (targetIdentity && typeof nextVolume === 'number') {
+            setLocalVolumes((prev) => ({ ...prev, [targetIdentity]: nextVolume }));
+            try {
+              if (room && room.remoteParticipants) {
+                room.remoteParticipants.forEach((p) => {
+                  if (baseIdentity(p.identity) === targetIdentity) {
+                    const gain = gainForSlider(nextVolume);
+                    p.setVolume(gain);
+                    p.setVolume(gain, Track.Source.ScreenShareAudio);
+                  }
+                });
+              }
+            } catch {}
           }
           return;
         }
@@ -1543,6 +1575,11 @@ export default function CustomVideoConference({
 
           {/* Floating Control Bar with auto-hide transition */}
           <div
+            onMouseEnter={() => {
+              if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+              setChromeHidden(false);
+            }}
+            onMouseLeave={() => resetIdleTimer()}
             className={`transition-all duration-300 ${
               chromeHidden ? 'opacity-0 translate-y-8 pointer-events-none' : 'opacity-100 translate-y-0'
             }`}

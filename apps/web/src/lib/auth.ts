@@ -86,10 +86,51 @@ export const auth = betterAuth({
   /**
    * Email + password authentication.
    * Email verification disabled for now (until Resend domain is verified).
+   * Uses native node:crypto scrypt to avoid @noble/hashes pure-JS 67MB memory
+   * allocation spike that triggers Cloudflare Worker 1102 (exceeded resource limits).
    */
   emailAndPassword: {
     enabled: true,
     requireEmailVerification: false,
+    password: {
+      hash: async (password: string) => {
+        const crypto = await import("node:crypto");
+        const salt = crypto.randomBytes(16).toString("hex");
+        return new Promise<string>((resolve, reject) => {
+          crypto.scrypt(
+            password.normalize("NFKC"),
+            salt,
+            64,
+            { N: 16384, r: 16, p: 1, maxmem: 64 * 1024 * 1024 },
+            (err, derivedKey) => {
+              if (err) reject(err);
+              else resolve(`${salt}:${derivedKey.toString("hex")}`);
+            }
+          );
+        });
+      },
+      verify: async ({ hash, password }: { hash: string; password: string }) => {
+        const [salt, key] = hash.split(":");
+        if (!salt || !key) return false;
+        const crypto = await import("node:crypto");
+        return new Promise<boolean>((resolve) => {
+          crypto.scrypt(
+            password.normalize("NFKC"),
+            salt,
+            64,
+            { N: 16384, r: 16, p: 1, maxmem: 64 * 1024 * 1024 },
+            (err, derivedKey) => {
+              if (err) resolve(false);
+              else {
+                const keyBuf = Buffer.from(key, "hex");
+                if (derivedKey.length !== keyBuf.length) return resolve(false);
+                resolve(crypto.timingSafeEqual(derivedKey, keyBuf));
+              }
+            }
+          );
+        });
+      },
+    },
   },
 
   databaseHooks: {

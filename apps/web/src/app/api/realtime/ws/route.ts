@@ -33,10 +33,10 @@ export async function GET(request: NextRequest) {
       const doId = hubNamespace.idFromName(claims.orgId);
       const stub = hubNamespace.get(doId);
       // Forward the original request with WebSocket upgrade headers to the partitioned DO
-      return stub.fetch(request as unknown as Request);
+      return await stub.fetch(request as unknown as Request);
     }
-  } catch {
-    // Expected outside of Cloudflare Workers runtime
+  } catch (err) {
+    console.warn("[realtime/ws] Failed to route to AvailabilityHub DO:", err);
   }
 
   // Fallback for non-Cloudflare environments (Next.js dev/testing)

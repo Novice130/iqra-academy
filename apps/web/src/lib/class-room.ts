@@ -57,11 +57,17 @@ export {
  * against the occurrence's start, not against its nearest neighbour, or a
  * dense day would collapse into one enormous "class".
  */
-export function groupIntoOccurrences<T extends { id: string; teacherId: string; scheduledStart: Date | null }>(
+function toMs(d: Date | string | null | undefined): number {
+  if (!d) return 0;
+  const date = typeof d === "string" ? new Date(d) : d;
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+export function groupIntoOccurrences<T extends { id: string; teacherId: string; scheduledStart: Date | string | null }>(
   rows: T[]
 ): { canonical: T; sessions: T[] }[] {
   const ordered = [...rows].sort((a, b) => {
-    const t = (a.scheduledStart?.getTime() ?? 0) - (b.scheduledStart?.getTime() ?? 0);
+    const t = toMs(a.scheduledStart) - toMs(b.scheduledStart);
     return t !== 0 ? t : a.id.localeCompare(b.id);
   });
 
@@ -69,9 +75,9 @@ export function groupIntoOccurrences<T extends { id: string; teacherId: string; 
   const byTeacher = new Map<string, { canonical: T; sessions: T[] }>();
 
   for (const row of ordered) {
-    const start = row.scheduledStart?.getTime() ?? 0;
+    const start = toMs(row.scheduledStart);
     const open = byTeacher.get(row.teacherId);
-    const openStart = open?.canonical.scheduledStart?.getTime() ?? 0;
+    const openStart = toMs(open?.canonical.scheduledStart);
 
     if (open && Math.abs(start - openStart) <= SIBLING_WINDOW_MS) {
       open.sessions.push(row);
@@ -109,7 +115,7 @@ export async function resolveClassRoom(session: SessionRow): Promise<RoomResolut
   // Is this class due? Pure arithmetic on a row we already hold, so it costs
   // nothing and it tells us up front whether the sibling query below can
   // possibly be needed.
-  const start = session.scheduledStart?.getTime() ?? now;
+  const start = toMs(session.scheduledStart) || now;
   const inJoinWindow = now >= start - EARLY_JOIN_MS && now <= start + LATE_JOIN_MS;
 
   // 1. Anything of this teacher's already running wins outright, whether it's

@@ -40,7 +40,10 @@ function safeDateFormat(d: Date | string | null | undefined, fmt: string, fallba
   }
 }
 
-export default async function DashboardPage() {
+export default async function DashboardPage(props: {
+  searchParams?: Promise<{ error?: string }>;
+}) {
+  const searchParams = await props.searchParams;
   return withHttpDb(async () => {
     const headersList = await headers();
     const session = await auth.api.getSession({ headers: headersList });
@@ -56,7 +59,7 @@ export default async function DashboardPage() {
 
     const role = dbUser?.role || "STUDENT";
     
-    if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role)) {
+    if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role) && searchParams?.error !== "unauthorized") {
       redirect("/dashboard/teacher");
     }
 

@@ -69,10 +69,11 @@ export default async function TeacherDashboard() {
   // "onboarded" column: the count *is* the fact, and a flag could disagree
   // with it. Admins are exempt — they land here to watch, not to teach.
   if (!isAdmin) {
-    const [{ n }] = await db
+    const availRes = await db
       .select({ n: count() })
       .from(teacherAvailability)
       .where(eq(teacherAvailability.teacherId, user.id));
+    const n = availRes?.[0]?.n ?? 0;
     if (n === 0) redirect("/dashboard/teacher/availability?onboarding=1");
   }
 
@@ -131,7 +132,7 @@ export default async function TeacherDashboard() {
     }).catch(() => []),
   ]);
 
-  const scheduleRows: ScheduleRow[] = todaySessions.map((s) => ({
+  const scheduleRows: ScheduleRow[] = (todaySessions || []).map((s) => ({
     id: s.id,
     scheduledStart: safeIso(s.scheduledStart) || new Date().toISOString(),
     scheduledEnd: safeIso(s.scheduledEnd),
@@ -140,14 +141,14 @@ export default async function TeacherDashboard() {
     title: s.title,
     track: s.track,
     studentNames:
-      s.bookings.map((b) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student",
+      s.bookings?.map((b) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student",
   }));
 
-  const upcomingCount = todaySessions.filter((s) => s.status === "SCHEDULED").length;
+  const upcomingCount = (todaySessions || []).filter((s) => s.status === "SCHEDULED").length;
 
-  const expected = attendanceReport.reduce((sum, occ) => sum + occ.students.length, 0);
-  const attended = attendanceReport.reduce(
-    (sum, occ) => sum + occ.students.filter((s) => s.status !== "ABSENT").length,
+  const expected = (attendanceReport || []).reduce((sum, occ) => sum + (occ.students?.length || 0), 0);
+  const attended = (attendanceReport || []).reduce(
+    (sum, occ) => sum + (occ.students || []).filter((s) => s.status !== "ABSENT").length,
     0
   );
   const attendanceRate = expected > 0 && attended > 0 ? `${Math.round((attended / expected) * 100)}%` : "--";
@@ -166,9 +167,9 @@ export default async function TeacherDashboard() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Next 48h" value={String(todaySessions.length)} sub="classes" />
-        <StatCard label="This week" value={String(weekCountResult[0].count)} sub="sessions" />
-        <StatCard label="Students" value={String(activeStudentsResult.length)} sub="active" />
+        <StatCard label="Next 48h" value={String(todaySessions?.length ?? 0)} sub="classes" />
+        <StatCard label="This week" value={String(weekCountResult?.[0]?.count ?? 0)} sub="sessions" />
+        <StatCard label="Students" value={String(activeStudentsResult?.length ?? 0)} sub="active" />
         <Link href="/dashboard/attendance" className="block">
           <StatCard
             label="Attendance"

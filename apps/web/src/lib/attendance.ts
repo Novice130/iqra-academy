@@ -105,21 +105,33 @@ export interface AttendanceOccurrence {
  */
 const LATE_THRESHOLD_SECONDS = 5 * 60;
 
+function toMs(d: Date | string | null | undefined): number {
+  if (!d) return 0;
+  const date = typeof d === "string" ? new Date(d) : d;
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function toIso(d: Date | string | null | undefined): string | null {
+  if (!d) return null;
+  const date = typeof d === "string" ? new Date(d) : d;
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
 interface RawAttendance {
   sessionId: string;
   userId: string;
   studentProfileId: string | null;
   role: "TEACHER" | "STUDENT" | "OBSERVER";
-  joinedAt: Date;
-  leftAt: Date | null;
+  joinedAt: Date | string;
+  leftAt: Date | string | null;
   durationSeconds: number | null;
   userName: string | null;
   profileName: string | null;
 }
 
 /** Collapse one person's connections into a single arrival, departure and total. */
-function collapse(rows: RawAttendance[], scheduledStart: Date | null): Omit<AttendancePerson, "name" | "role"> {
-  const sorted = [...rows].sort((a, b) => a.joinedAt.getTime() - b.joinedAt.getTime());
+function collapse(rows: RawAttendance[], scheduledStart: Date | string | null): Omit<AttendancePerson, "name" | "role"> {
+  const sorted = [...rows].sort((a, b) => toMs(a.joinedAt) - toMs(b.joinedAt));
   const first = sorted[0];
   const closed = sorted.filter((r) => r.leftAt);
   const last = closed.length === sorted.length ? closed[closed.length - 1] : null;
@@ -132,14 +144,14 @@ function collapse(rows: RawAttendance[], scheduledStart: Date | null): Omit<Atte
       : null;
 
   const lateBySeconds = scheduledStart
-    ? Math.round((first.joinedAt.getTime() - scheduledStart.getTime()) / 1000)
+    ? Math.round((toMs(first.joinedAt) - toMs(scheduledStart)) / 1000)
     : null;
 
   return {
     userId: first.userId,
     studentProfileId: first.studentProfileId,
-    firstJoinedAt: first.joinedAt.toISOString(),
-    lastLeftAt: last?.leftAt?.toISOString() ?? null,
+    firstJoinedAt: toIso(first.joinedAt),
+    lastLeftAt: toIso(last?.leftAt),
     durationSeconds,
     connections: sorted.length,
     lateBySeconds,
