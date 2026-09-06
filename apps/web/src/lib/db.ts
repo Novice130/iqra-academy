@@ -75,8 +75,10 @@ function createHttpConnection(): { db: Db; pool: null } {
  * server component page that touches the database must call through this.
  */
 export async function withDb<T>(fn: () => Promise<T>): Promise<T> {
-  // Nested calls (e.g. a helper that also wraps itself) reuse the outer pool.
-  if (dbContext.getStore()) {
+  // Nested calls only reuse an existing store IF it has a real pool.
+  // A store created by withHttpDb has pool: null and cannot run transactions.
+  const existingStore = dbContext.getStore();
+  if (existingStore && existingStore.pool) {
     return fn();
   }
 

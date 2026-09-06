@@ -16,7 +16,7 @@ export default async function TeacherLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return withHttpDb(async () => {
+  await withHttpDb(async () => {
     const headersList = await headers();
     const session = await auth.api.getSession({ headers: headersList });
 
@@ -33,7 +33,7 @@ export default async function TeacherLayout({
     if (!["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role)) {
       redirect("/dashboard?error=unauthorized");
     }
-
-    return <>{children}</>;
   });
+
+  return <>{children}</>;
 }

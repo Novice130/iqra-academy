@@ -8,7 +8,7 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import Link from "next/link";
-import { db, withRLS, withDb } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { eq, and, gte, asc, sql } from "drizzle-orm";
 import { studentProfiles, bookings, subscriptions, sessions, users, progressRecords, lessonContent } from "@/db/schema";
 import { getQuotaStatus } from "@/lib/quota";
@@ -19,36 +19,29 @@ import LocalTime from "@/components/LocalTime";
 import ClassActionButton from "@/components/ClassActionButton";
 
 export default async function DashboardPage() {
-  return withDb(async () => {
-  const headersList = await headers();
-  const session = await auth.api.getSession({ headers: headersList });
+  return withHttpDb(async () => {
+    const headersList = await headers();
+    const session = await auth.api.getSession({ headers: headersList });
 
-  if (!session) return null;
+    if (!session) return null;
 
-  const user = session.user;
+    const user = session.user;
 
-  const dbUser = await db.query.users.findFirst({
-    where: eq(users.id, user.id),
-    columns: { role: true, orgId: true },
-  });
+    const dbUser = await db.query.users.findFirst({
+      where: eq(users.id, user.id),
+      columns: { role: true, orgId: true },
+    });
 
-  const role = dbUser?.role || "STUDENT";
-  
-  if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role)) {
-    redirect("/dashboard/teacher");
-  }
+    const role = dbUser?.role || "STUDENT";
+    
+    if (["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"].includes(role)) {
+      redirect("/dashboard/teacher");
+    }
 
-  const firstName = session.user.name?.split(" ")[0] || "there";
+    const firstName = session.user.name?.split(" ")[0] || "there";
 
-  const ctx = {
-    userId: session.user.id,
-    orgId: dbUser?.orgId || '',
-    role: role,
-  };
-
-  return await withRLS(ctx, async (tx) => {
     // 1. Fetch Student Profiles
-    const profiles = await tx.query.studentProfiles.findMany({
+    const profiles = await db.query.studentProfiles.findMany({
       where: eq(studentProfiles.userId, user.id),
       with: {
         progressRecords: {
@@ -61,7 +54,7 @@ export default async function DashboardPage() {
     });
 
     // 2. Fetch Next Upcoming Class
-    const upcomingBookings = await tx
+    const upcomingBookings = await db
       .select()
       .from(bookings)
       .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
@@ -79,17 +72,17 @@ export default async function DashboardPage() {
     const upcoming = upcomingBookings[0];
 
     // 3. Get Subscription & Quota
-    const subscription = await tx.query.subscriptions.findFirst({
+    const subscription = await db.query.subscriptions.findFirst({
       where: and(eq(subscriptions.userId, user.id), eq(subscriptions.status, "ACTIVE")),
       with: { plan: true },
     });
 
     const quota = subscription
-      ? await getQuotaStatus(subscription.id, user.id, ctx.orgId)
+      ? await getQuotaStatus(subscription.id, user.id, dbUser?.orgId || "")
       : { used: 0, totalAllowed: 0, remaining: 0 };
 
     // 4. Calculate total sessions completed
-    const [sessionCount] = await tx
+    const [sessionCount] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(bookings)
       .where(and(eq(bookings.userId, user.id), eq(bookings.status, "COMPLETED")));
@@ -102,7 +95,7 @@ export default async function DashboardPage() {
     const completedMap: Record<string, number> = {};
 
     try {
-      const trackCounts = await tx
+      const trackCounts = await db
         .select({
           track: lessonContent.track,
           total: sql<number>`count(*)::int`,
@@ -114,7 +107,7 @@ export default async function DashboardPage() {
         trackCounts.map((tc) => [tc.track, Number(tc.total) || 1])
       );
 
-      const profileCompletedCounts = await tx
+      const profileCompletedCounts = await db
         .select({
           studentProfileId: progressRecords.studentProfileId,
           count: sql<number>`count(*)::int`,
@@ -252,7 +245,6 @@ export default async function DashboardPage() {
         </div>
       </div>
     );
-  });
   });
 }
 

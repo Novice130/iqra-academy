@@ -17,6 +17,10 @@ export async function GET() {
         );
       `);
       await db.execute(sql`CREATE INDEX IF NOT EXISTS two_factor_user_idx ON two_factor(user_id);`);
+      await db.execute(sql`ALTER TABLE notifications ADD COLUMN IF NOT EXISTS payload jsonb;`);
+      await db.execute(sql`CREATE INDEX IF NOT EXISTS notifications_org_idx ON notifications USING btree (org_id);`);
+      await db.execute(sql`ALTER TABLE session_attendance ADD COLUMN IF NOT EXISTS breakout_room_name text;`);
+      await db.execute(sql`ALTER TABLE session_attendance ADD COLUMN IF NOT EXISTS breakout_context jsonb;`);
       migration = "applied";
     });
   } catch (err: any) {
