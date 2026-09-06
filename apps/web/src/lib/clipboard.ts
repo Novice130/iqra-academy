@@ -7,7 +7,7 @@
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
-  // 1. Try modern navigator.clipboard API first
+  // 1. Try modern navigator.clipboard API first (if in secure context)
   if (
     typeof navigator !== 'undefined' &&
     navigator.clipboard &&
@@ -17,16 +17,18 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
       await navigator.clipboard.writeText(text);
       return true;
     } catch {
-      // Insecure context or permission denied — proceed to fallback below
+      // Insecure origin, iframe permissions policy, or permission denied — proceed to fallback below
     }
   }
 
-  // 2. Fallback: DOM selection + execCommand('copy')
+  // 2. Fallback: DOM range selection + execCommand('copy')
+  // Note: iOS Safari / WebKit drops copy if readonly or disabled is set on textarea.
   if (typeof document !== 'undefined') {
     try {
       const textarea = document.createElement('textarea');
       textarea.value = text;
-      textarea.setAttribute('readonly', '');
+      textarea.contentEditable = 'true';
+      textarea.readOnly = false;
       textarea.style.position = 'fixed';
       textarea.style.top = '0';
       textarea.style.left = '0';
@@ -37,20 +39,33 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
       textarea.style.outline = 'none';
       textarea.style.boxShadow = 'none';
       textarea.style.background = 'transparent';
-      textarea.style.fontSize = '16px';
+      textarea.style.fontSize = '16px'; // Prevents auto-zoom in iOS Safari
       textarea.style.opacity = '0.01';
+      textarea.style.zIndex = '-9999';
       document.body.appendChild(textarea);
 
-      textarea.focus({ preventScroll: true });
-      textarea.select();
-      textarea.setSelectionRange(0, textarea.value.length);
+      const range = document.createRange();
+      range.selectNodeContents(textarea);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      textarea.setSelectionRange(0, 999999);
 
       const successful = document.execCommand('copy');
+      selection?.removeAllRanges();
       document.body.removeChild(textarea);
       if (successful) return true;
     } catch (err) {
       console.warn('execCommand copy failed:', err);
     }
+  }
+
+  // 3. Last-resort fallback: window.prompt so the user is never stuck without copied content
+  if (typeof window !== 'undefined') {
+    try {
+      window.prompt('Copy to clipboard: Press Ctrl+C (or Cmd+C), then press Enter', text);
+      return true;
+    } catch {}
   }
 
   return false;

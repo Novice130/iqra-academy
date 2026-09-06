@@ -17,13 +17,15 @@ import {
   SparklesIcon,
   LayoutIcon,
   InfoIcon,
+  StatsBarChartIcon,
 } from './CallIcons';
 import type { ViewMode } from './CallControlBar';
 
-type SettingsTab = 'general' | 'audio' | 'video' | 'backgrounds' | 'statistics' | 'about';
+export type SettingsTab = 'general' | 'audio' | 'video' | 'backgrounds' | 'statistics' | 'about';
 
 interface CallSettingsModalProps {
   onClose: () => void;
+  initialTab?: SettingsTab;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   onToggleEffects?: () => void;
@@ -34,24 +36,6 @@ interface CallSettingsModalProps {
   onSelectSpeaker?: (id: string) => void;
 }
 
-function LiveMicBar() {
-  const { localParticipant } = useLocalParticipant();
-  const audioTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
-  const level = useLiveAudioLevel(audioTrack ?? undefined);
-  const pct = Math.round(Math.min(1, Math.max(0, level)) * 100);
-  return (
-    <div
-      className="w-full h-2 rounded-full bg-black/40 overflow-hidden"
-      role="meter"
-      aria-label="Microphone input level"
-      aria-valuenow={pct}
-      aria-valuemin={0}
-      aria-valuemax={100}
-    >
-      <div className="h-full bg-emerald-400 transition-[width]" style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
 
 function useLiveAudioLevel(track?: { attach?: (el: HTMLAudioElement) => unknown } | null): number {
   const [level, setLevel] = useState(0);
@@ -105,8 +89,87 @@ function useLiveAudioLevel(track?: { attach?: (el: HTMLAudioElement) => unknown 
   return level;
 }
 
+function LiveCameraPreview({ deviceId, mirror }: { deviceId?: string; mirror: boolean }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    let stream: MediaStream | null = null;
+    let cancelled = false;
+    const start = async () => {
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: deviceId ? { deviceId: { exact: deviceId } } : true,
+          audio: false,
+        });
+        if (!cancelled && videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => {});
+        }
+      } catch (e) {
+        console.warn('Could not start preview camera:', e);
+      }
+    };
+    start();
+    return () => {
+      cancelled = true;
+      if (stream) {
+        stream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [deviceId]);
+
+  return (
+    <div className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black/80 border border-white/10 shadow-lg flex items-center justify-center">
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className={`w-full h-full object-cover transition-transform ${mirror ? '-scale-x-100' : ''}`}
+      />
+    </div>
+  );
+}
+
+function SegmentedAudioMeter({ level }: { level: number }) {
+  const totalSegments = 16;
+  const activeSegments = Math.round(Math.min(1, Math.max(0, level * 2.8)) * totalSegments);
+  return (
+    <div className="flex items-center gap-1 w-full h-2.5">
+      {Array.from({ length: totalSegments }).map((_, i) => (
+        <div
+          key={i}
+          className={`flex-1 h-full rounded-xs transition-colors duration-75 ${
+            i < activeSegments ? 'bg-[#0A84FF] shadow-sm shadow-blue-500/50' : 'bg-white/10'
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
+
+function playTestSpeakerChime() {
+  try {
+    const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+    const ctx = new AC();
+    const notes = [523.25, 659.25, 783.99, 1046.5];
+    notes.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, ctx.currentTime + idx * 0.12);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime + idx * 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + idx * 0.12 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + idx * 0.12);
+      osc.stop(ctx.currentTime + idx * 0.12 + 0.36);
+    });
+  } catch {}
+}
+
 export default function CallSettingsModal({
   onClose,
+  initialTab = 'general',
   viewMode = 'gallery',
   onViewModeChange,
   onToggleEffects,
@@ -117,10 +180,36 @@ export default function CallSettingsModal({
   onSelectSpeaker,
 }: CallSettingsModalProps) {
   const room = useRoomContext();
-  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>(initialTab);
   const [activeCameraId, setActiveCameraId] = useState<string>(() => room.getActiveDevice('videoinput') ?? '');
   const [activeMicId, setActiveMicId] = useState<string>(() => room.getActiveDevice('audioinput') ?? '');
   const [mirrorSelfView, setMirrorSelfView] = useState(true);
+  const [hideNonVideo, setHideNonVideo] = useState(false);
+  const [hideSelfView, setHideSelfView] = useState(false);
+  const [showNamesOnVideo, setShowNamesOnVideo] = useState(true);
+  const [alwaysShowControls, setAlwaysShowControls] = useState(true);
+  const [showProfilePics, setShowProfilePics] = useState(true);
+  const [animateEmojis, setAnimateEmojis] = useState(true);
+  const [spacebarUnmute, setSpacebarUnmute] = useState(true);
+  const [skinTone, setSkinTone] = useState('👍');
+  const [audioMode, setAudioMode] = useState<'noise-removal' | 'isolation' | 'original'>('noise-removal');
+  const [testingSpeaker, setTestingSpeaker] = useState(false);
+  const [speakerVolume, setSpeakerVolume] = useState(100);
+  const [micVolume, setMicVolume] = useState(100);
+
+  const { localParticipant } = useLocalParticipant();
+  const audioTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
+  const liveAudioLevel = useLiveAudioLevel(audioTrack ?? undefined);
+
+  useEffect(() => {
+    if (initialTab) setActiveTab(initialTab);
+  }, [initialTab]);
+
+  const handleTestSpeaker = () => {
+    setTestingSpeaker(true);
+    playTestSpeakerChime();
+    setTimeout(() => setTestingSpeaker(false), 800);
+  };
 
   // Live statistics state — derived from the real RTCStatsReport, never synthesized.
   const [stats, setStats] = useState<{
@@ -220,10 +309,10 @@ export default function CallSettingsModal({
 
   const tabs: { id: SettingsTab; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'general', label: 'General', icon: LayoutIcon },
-    { id: 'audio', label: 'Audio', icon: MicIcon },
     { id: 'video', label: 'Video', icon: CameraIcon },
+    { id: 'audio', label: 'Audio', icon: MicIcon },
     { id: 'backgrounds', label: 'Backgrounds', icon: SparklesIcon },
-    { id: 'statistics', label: 'Statistics', icon: SettingsIcon },
+    { id: 'statistics', label: 'Statistics', icon: StatsBarChartIcon },
     { id: 'about', label: 'About', icon: InfoIcon },
   ];
 
@@ -241,7 +330,7 @@ export default function CallSettingsModal({
           WebkitBackdropFilter: 'blur(36px) saturate(180%)',
           border: '1px solid rgba(255, 255, 255, 0.18)',
           boxShadow: '0 24px 60px rgba(0, 0, 0, 0.75)',
-          height: 'min(82vh, 580px)',
+          height: 'min(86vh, 620px)',
         }}
       >
         {/* Header */}
@@ -270,7 +359,7 @@ export default function CallSettingsModal({
                 onClick={() => setActiveTab(tab.id)}
                 className={`px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
                   active
-                    ? 'bg-blue-600 text-white shadow-md'
+                    ? 'bg-[#0A84FF] text-white shadow-md'
                     : 'bg-white/5 text-white/70 hover:bg-white/10'
                 }`}
               >
@@ -283,7 +372,7 @@ export default function CallSettingsModal({
         {/* Desktop Container: Left Rail + Content Area */}
         <div className="flex flex-1 min-h-0">
           {/* Desktop Left Rail */}
-          <div className="hidden sm:flex flex-col w-48 border-r border-white/10 p-3 space-y-1 shrink-0">
+          <div className="hidden sm:flex flex-col w-44 border-r border-white/10 p-3 space-y-1 shrink-0">
             {tabs.map((tab) => {
               const active = activeTab === tab.id;
               const Icon = tab.icon;
@@ -292,9 +381,9 @@ export default function CallSettingsModal({
                   key={tab.id}
                   type="button"
                   onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-semibold transition cursor-pointer text-left ${
+                  className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition cursor-pointer text-left ${
                     active
-                      ? 'bg-white/15 text-white font-bold shadow-inner'
+                      ? 'bg-[#0A84FF] text-white font-bold shadow-md shadow-blue-500/20'
                       : 'text-white/60 hover:text-white hover:bg-white/5'
                   }`}
                 >
@@ -307,16 +396,81 @@ export default function CallSettingsModal({
 
           {/* Right Main Content Panel */}
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {/* 1. GENERAL TAB */}
             {activeTab === 'general' && (
-              <div className="space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-white mb-1">Stage Layout Mode</h3>
-                  <p className="text-xs text-white/50 mb-3">Choose how video tiles are displayed during Quran recitation.</p>
+              <div className="space-y-5">
+                {/* Meeting Controls Checkbox */}
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={alwaysShowControls}
+                    onChange={(e) => setAlwaysShowControls(e.target.checked)}
+                    className="mt-0.5 rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-white">Always show meeting controls</div>
+                    <div className="text-[11px] text-white/50">Keep the bottom meeting toolbar visible during class</div>
+                  </div>
+                </label>
+
+                {/* Chat Profile Pics Checkbox */}
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={showProfilePics}
+                    onChange={(e) => setShowProfilePics(e.target.checked)}
+                    className="mt-0.5 rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-white">Show participant profile pictures next to their name in meeting chat</div>
+                    <div className="text-[11px] text-white/50">Display profile avatars next to chat messages</div>
+                  </div>
+                </label>
+
+                {/* Reaction Skin Tone */}
+                <div className="pt-2 border-t border-white/10">
+                  <div className="text-xs font-semibold text-white mb-2">Reaction Skin Tone</div>
+                  <div className="flex items-center gap-2">
+                    {['👍', '👍🏻', '👍🏼', '👍🏽', '👍🏾', '👍🏿'].map((tone) => (
+                      <button
+                        key={tone}
+                        type="button"
+                        onClick={() => setSkinTone(tone)}
+                        className={`w-9 h-9 rounded-xl flex items-center justify-center text-lg transition cursor-pointer ${
+                          skinTone === tone
+                            ? 'bg-[#0A84FF]/20 border-2 border-[#0A84FF] scale-110 shadow-md'
+                            : 'bg-white/5 hover:bg-white/10 border border-white/10'
+                        }`}
+                      >
+                        {tone}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Animate Emojis */}
+                <label className="flex items-start gap-3 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={animateEmojis}
+                    onChange={(e) => setAnimateEmojis(e.target.checked)}
+                    className="mt-0.5 rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <div>
+                    <div className="text-xs font-semibold text-white">Animate emojis</div>
+                    <div className="text-[11px] text-white/50">Play smooth burst animation when reactions are triggered</div>
+                  </div>
+                </label>
+
+                {/* Stage Layout Mode */}
+                <div className="pt-2 border-t border-white/10">
+                  <h3 className="text-xs font-semibold text-white mb-1">Stage Layout Mode</h3>
+                  <p className="text-[11px] text-white/50 mb-3">Choose how video tiles are displayed during Quran recitation.</p>
                   <div className="grid grid-cols-3 gap-2.5">
                     {[
                       { id: 'gallery', label: 'Gallery Grid', desc: 'Equal balanced grid' },
                       { id: 'speaker', label: 'Speaker View', desc: 'Teacher or Quran page fills stage' },
-                      { id: 'active', label: 'Active Speaker', desc: 'Tracks active reciting student' },
+                      { id: 'active', label: 'Active Speaker', desc: 'Tracks reciting student' },
                     ].map((item) => {
                       const sel = viewMode === item.id;
                       return (
@@ -326,7 +480,7 @@ export default function CallSettingsModal({
                           onClick={() => onViewModeChange?.(item.id as ViewMode)}
                           className={`p-3 rounded-2xl border text-left transition cursor-pointer ${
                             sel
-                              ? 'bg-blue-600/20 border-blue-500/80 text-white'
+                              ? 'bg-blue-600/20 border-[#0A84FF] text-white'
                               : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
                           }`}
                         >
@@ -337,73 +491,10 @@ export default function CallSettingsModal({
                     })}
                   </div>
                 </div>
-
-                <div className="pt-3 border-t border-white/10">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-bold text-white">Mirror Self Video</div>
-                      <div className="text-[11px] text-white/50">Mirror your camera preview locally</div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setMirrorSelfView((v) => !v)}
-                      className={`w-11 h-6 rounded-full transition-colors p-0.5 cursor-pointer flex items-center ${
-                        mirrorSelfView ? 'bg-blue-600 justify-end' : 'bg-white/20 justify-start'
-                      }`}
-                    >
-                      <span className="w-5 h-5 rounded-full bg-white shadow-md" />
-                    </button>
-                  </div>
-                </div>
               </div>
             )}
 
-            {activeTab === 'audio' && (
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-white mb-1.5">Microphone</label>
-                  <select
-                    value={activeMicId}
-                    onChange={(e) => {
-                      setActiveMicId(e.target.value);
-                      room.switchActiveDevice('audioinput', e.target.value).catch(() => {});
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-2xl text-xs bg-white/5 text-white border border-white/15 focus:outline-none focus:border-blue-400 cursor-pointer"
-                  >
-                    {mics.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId} className="bg-neutral-900 text-white">
-                        {d.label || `Microphone ${d.deviceId.slice(0, 5)}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-white mb-1.5">Speaker / Audio Output</label>
-                  <select
-                    value={audioOutputDeviceId ?? speakers[0]?.deviceId ?? ''}
-                    onChange={(e) => {
-                      onSelectSpeaker?.(e.target.value);
-                      room.switchActiveDevice('audiooutput', e.target.value).catch(() => {});
-                    }}
-                    className="w-full px-3.5 py-2.5 rounded-2xl text-xs bg-white/5 text-white border border-white/15 focus:outline-none focus:border-blue-400 cursor-pointer"
-                  >
-                    {speakers.map((d) => (
-                      <option key={d.deviceId} value={d.deviceId} className="bg-neutral-900 text-white">
-                        {d.label || `Speaker ${d.deviceId.slice(0, 5)}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-white/5 border border-white/10 space-y-1.5">
-                  <div className="text-[11px] text-white/50">Microphone Test Meter</div>
-                  <LiveMicBar />
-                  <p className="text-[10px] text-white/40">Speak into your microphone to verify audio pickup.</p>
-                </div>
-              </div>
-            )}
-
+            {/* 2. VIDEO TAB */}
             {activeTab === 'video' && (
               <div className="space-y-4">
                 <div>
@@ -424,20 +515,191 @@ export default function CallSettingsModal({
                   </select>
                 </div>
 
-                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 text-center space-y-2">
-                  <div className="text-xs font-bold text-white">HD Video Optimized</div>
-                  <p className="text-[11px] text-white/50">
-                    LiveKit WebRTC utilizes adaptive resolution and simulcast to maintain stable crystal-clear video.
-                  </p>
+                {/* Live Camera Preview Box */}
+                <LiveCameraPreview deviceId={activeCameraId} mirror={mirrorSelfView} />
+
+                <div className="space-y-2.5 pt-2">
+                  <label className="flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={mirrorSelfView}
+                      onChange={(e) => setMirrorSelfView(e.target.checked)}
+                      className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-xs text-white/90">Mirror my video</span>
+                  </label>
+
+                  <label className="flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={hideNonVideo}
+                      onChange={(e) => setHideNonVideo(e.target.checked)}
+                      className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-xs text-white/90">Hide Non-video Participants</span>
+                  </label>
+
+                  <label className="flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={hideSelfView}
+                      onChange={(e) => setHideSelfView(e.target.checked)}
+                      className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-xs text-white/90">Hide Self View</span>
+                  </label>
+
+                  <label className="flex items-center gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={showNamesOnVideo}
+                      onChange={(e) => setShowNamesOnVideo(e.target.checked)}
+                      className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                    />
+                    <span className="text-xs text-white/90">Always show participant names on their videos</span>
+                  </label>
                 </div>
               </div>
             )}
 
+            {/* 3. AUDIO TAB */}
+            {activeTab === 'audio' && (
+              <div className="space-y-5">
+                {/* Speaker Section */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-white">Speaker</label>
+                    <button
+                      type="button"
+                      onClick={handleTestSpeaker}
+                      className="px-3 py-1 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/20 text-white transition cursor-pointer"
+                    >
+                      {testingSpeaker ? '🔊 Testing…' : 'Test Speaker'}
+                    </button>
+                  </div>
+                  <select
+                    value={audioOutputDeviceId ?? speakers[0]?.deviceId ?? ''}
+                    onChange={(e) => {
+                      onSelectSpeaker?.(e.target.value);
+                      room.switchActiveDevice('audiooutput', e.target.value).catch(() => {});
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-2xl text-xs bg-white/5 text-white border border-white/15 focus:outline-none focus:border-blue-400 cursor-pointer"
+                  >
+                    {speakers.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId} className="bg-neutral-900 text-white">
+                        {d.label || `Speaker ${d.deviceId.slice(0, 5)}`}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex items-center gap-3 pt-1">
+                    <span className="text-xs text-white/50">Volume:</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={speakerVolume}
+                      onChange={(e) => setSpeakerVolume(Number(e.target.value))}
+                      className="flex-1 accent-[#0A84FF] h-1 bg-white/20 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-white/70 w-8">{speakerVolume}%</span>
+                  </div>
+                </div>
+
+                {/* Microphone Section */}
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-white">Microphone</label>
+                    <span className="text-[11px] text-white/50">Active Input</span>
+                  </div>
+                  <select
+                    value={activeMicId}
+                    onChange={(e) => {
+                      setActiveMicId(e.target.value);
+                      room.switchActiveDevice('audioinput', e.target.value).catch(() => {});
+                    }}
+                    className="w-full px-3.5 py-2.5 rounded-2xl text-xs bg-white/5 text-white border border-white/15 focus:outline-none focus:border-blue-400 cursor-pointer"
+                  >
+                    {mics.map((d) => (
+                      <option key={d.deviceId} value={d.deviceId} className="bg-neutral-900 text-white">
+                        {d.label || `Microphone ${d.deviceId.slice(0, 5)}`}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-[11px] text-white/60">
+                      <span>Input Level:</span>
+                      <span className="text-blue-400 font-mono text-[10px]">Live Audio Pickup</span>
+                    </div>
+                    <SegmentedAudioMeter level={liveAudioLevel} />
+                  </div>
+
+                  <div className="flex items-center gap-3 pt-1">
+                    <span className="text-xs text-white/50">Volume:</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      value={micVolume}
+                      onChange={(e) => setMicVolume(Number(e.target.value))}
+                      className="flex-1 accent-[#0A84FF] h-1 bg-white/20 rounded-lg cursor-pointer"
+                    />
+                    <span className="text-xs font-mono text-white/70 w-8">{micVolume}%</span>
+                  </div>
+                </div>
+
+                {/* Audio Profile / Noise Suppression */}
+                <div className="space-y-2 pt-2 border-t border-white/10">
+                  <div className="text-xs font-bold text-white">Microphone Modes & Noise Suppression</div>
+                  <div className="space-y-1.5">
+                    {[
+                      { id: 'noise-removal', title: 'Noise removal (default)', desc: 'Blocks room background noise, fan hums, and echoes' },
+                      { id: 'isolation', title: 'Personalized audio isolation', desc: 'Focuses entirely on the speaker voice' },
+                      { id: 'original', title: 'Original sound for musicians', desc: 'Disables echo cancellation and noise suppression for high fidelity Quran tajweed' },
+                    ].map((mode) => (
+                      <label
+                        key={mode.id}
+                        className={`flex items-start gap-3 p-2.5 rounded-xl border cursor-pointer transition ${
+                          audioMode === mode.id
+                            ? 'bg-[#0A84FF]/15 border-[#0A84FF] text-white'
+                            : 'bg-white/5 border-white/10 text-white/70 hover:bg-white/10'
+                        }`}
+                      >
+                        <input
+                          type="radio"
+                          name="audioMode"
+                          checked={audioMode === mode.id}
+                          onChange={() => setAudioMode(mode.id as any)}
+                          className="mt-0.5 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                        />
+                        <div>
+                          <div className="text-xs font-semibold text-white">{mode.title}</div>
+                          <div className="text-[10px] text-white/50">{mode.desc}</div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Spacebar to Unmute */}
+                <label className="flex items-center gap-3 cursor-pointer select-none pt-1">
+                  <input
+                    type="checkbox"
+                    checked={spacebarUnmute}
+                    onChange={(e) => setSpacebarUnmute(e.target.checked)}
+                    className="rounded border-white/20 bg-white/10 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span className="text-xs text-white/90">Press and hold SPACE key to temporarily unmute</span>
+                </label>
+              </div>
+            )}
+
+            {/* 4. BACKGROUNDS TAB */}
             {activeTab === 'backgrounds' && (
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-white">Virtual Backgrounds & Blur</h3>
                 <p className="text-xs text-white/50">
-                  Select background blur or spiritual mosque and classroom backdrops for privacy during lessons.
+                  Select background blur or spiritual mosque and classroom backdrops for privacy during Quran lessons.
                 </p>
                 <button
                   type="button"
@@ -445,13 +707,14 @@ export default function CallSettingsModal({
                     onClose();
                     onToggleEffects?.();
                   }}
-                  className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition shadow-md"
+                  className="px-4 py-2.5 rounded-2xl text-xs font-bold bg-[#0A84FF] hover:bg-blue-500 text-white cursor-pointer transition shadow-md"
                 >
                   ✨ Open Background Effects Drawer
                 </button>
               </div>
             )}
 
+            {/* 5. STATISTICS TAB */}
             {activeTab === 'statistics' && (
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-white">Connection Statistics</h3>
@@ -492,11 +755,12 @@ export default function CallSettingsModal({
               </div>
             )}
 
+            {/* 6. ABOUT TAB */}
             {activeTab === 'about' && (
               <div className="space-y-3">
-                <h3 className="text-sm font-bold text-white">Novice Tutor Classroom</h3>
+                <h3 className="text-sm font-bold text-white">Zoom Workplace for Quran LMS</h3>
                 <p className="text-xs text-white/60 leading-relaxed">
-                  Version 2.0.0-parity. Built with Next.js 15, LiveKit Cloud WebRTC, and Drizzle ORM.
+                  Version 2.0.0-parity. Built with Next.js 15, LiveKit Cloud WebRTC, and Apple Liquid Glass design.
                   Designed for secure 1-on-1 and group Quranic education.
                 </p>
                 <div className="pt-2 flex items-center gap-4 text-xs font-medium text-blue-400">

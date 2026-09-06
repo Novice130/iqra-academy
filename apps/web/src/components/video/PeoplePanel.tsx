@@ -10,7 +10,14 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import { RoomEvent, Track } from 'livekit-client';
 import { useLocalParticipant, useRemoteParticipants, useRoomContext } from '@livekit/components-react';
 import { useHostControls, UNMUTE_REQUEST_TOPIC, CAMERA_REQUEST_TOPIC } from './hostControls';
-import { CameraIcon, MicIcon } from './CallIcons';
+import {
+  CameraIcon,
+  CameraOffIcon,
+  MicIcon,
+  MicOffIcon,
+  PopOutIcon,
+  ZoomMoreIcon,
+} from './CallIcons';
 import VolumeSlider from './VolumeSlider';
 import { copyTextToClipboard } from '@/lib/clipboard';
 
@@ -400,12 +407,44 @@ export default function PeoplePanel({
   onClose: () => void;
   handRaisedMap?: Record<string, boolean>;
 }) {
-  const { muteTrack, askToUnmute, askForCamera, removeParticipant, rename } = useHostControls(sessionId);
+  const {
+    muteTrack,
+    askToUnmute,
+    askForCamera,
+    removeParticipant,
+    rename,
+    muteAll,
+    setRoomLocked,
+    setAllowParticipantShare,
+  } = useHostControls(sessionId);
   const { localParticipant } = useLocalParticipant();
   const remotes = useRemoteParticipants();
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  const [isPopOut, setIsPopOut] = useState(false);
+  const [moreFooterOpen, setMoreFooterOpen] = useState(false);
+  const [muteAllSuccess, setMuteAllSuccess] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+
+  const handleMuteAll = async () => {
+    const ok = await muteAll();
+    if (ok) {
+      setMuteAllSuccess(true);
+      setTimeout(() => setMuteAllSuccess(false), 2000);
+    }
+  };
+
+  const handleCopyInvite = async () => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const inviteUrl = `${origin}/join/${joinCode || sessionId}`;
+    const text = `Join my Quran Classroom: ${sessionTitle || 'Class'}\nLink: ${inviteUrl}\nJoin Code: ${joinCode || sessionId}`;
+    const success = await copyTextToClipboard(text);
+    if (success) {
+      setInviteCopied(true);
+      setTimeout(() => setInviteCopied(false), 2000);
+    }
+  };
 
   const allParticipants = useMemo(() => {
     return [localParticipant, ...remotes];
@@ -469,36 +508,50 @@ export default function PeoplePanel({
     <>
       <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-sm" onPointerDown={onClose} onClick={onClose} />
       <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-[84px] sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[71] flex flex-col rounded-3xl overflow-hidden shadow-2xl animate-fadeIn"
+        className={`fixed z-[71] flex flex-col overflow-hidden shadow-2xl transition-all duration-200 ${
+          isPopOut
+            ? 'left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 w-[min(94vw,440px)] max-h-[78vh] rounded-3xl'
+            : 'right-0 top-0 bottom-0 w-full sm:w-84 md:w-92 h-full rounded-l-3xl sm:rounded-none'
+        }`}
         style={{
-          width: 'min(94vw, 440px)',
-          maxHeight: '75vh',
-          background: 'rgba(20, 22, 28, 0.92)',
-          backdropFilter: 'blur(28px) saturate(180%)',
-          WebkitBackdropFilter: 'blur(28px) saturate(180%)',
-          border: '1px solid rgba(255, 255, 255, 0.18)',
-          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+          background: 'rgba(20, 22, 28, 0.94)',
+          backdropFilter: 'blur(32px) saturate(180%)',
+          WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+          borderLeft: '1px solid rgba(255, 255, 255, 0.16)',
+          borderTop: isPopOut ? '1px solid rgba(255, 255, 255, 0.18)' : undefined,
+          borderRight: isPopOut ? '1px solid rgba(255, 255, 255, 0.18)' : undefined,
+          borderBottom: isPopOut ? '1px solid rgba(255, 255, 255, 0.18)' : undefined,
+          boxShadow: '0 24px 60px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
         }}
       >
+        {/* Header */}
         <div
-          className="flex items-center justify-between px-5 h-14 shrink-0"
+          className="flex items-center justify-between px-4 h-13 shrink-0"
           style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.1)' }}
         >
           <div className="flex items-center gap-2">
-            <span className="text-sm font-bold text-white tracking-tight">People in Class</span>
-            <span className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-              {people.length}
-            </span>
+            <span className="text-sm font-bold text-white tracking-tight">Participants</span>
+            <span className="text-xs text-white/50 font-semibold">({people.length})</span>
           </div>
-          <button
-            onClick={onClose}
-            className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer text-white/70 hover:text-white bg-white/10 hover:bg-white/15 transition"
-            aria-label="Close"
-          >
-            ✕
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setIsPopOut((v) => !v)}
+              className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer text-white/70 hover:text-white bg-white/10 hover:bg-white/15 transition"
+              title={isPopOut ? 'Dock to sidebar' : 'Pop out window'}
+            >
+              <PopOutIcon className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={onClose}
+              className="w-7 h-7 rounded-full flex items-center justify-center cursor-pointer text-white/70 hover:text-white bg-white/10 hover:bg-white/15 transition text-xs"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+          </div>
         </div>
 
+        {/* Content List */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
           {isModerator && (
             <InviteGuest
@@ -509,167 +562,260 @@ export default function PeoplePanel({
             />
           )}
 
-        {people.map((p) => {
-          const spotlighted = p.base === baseIdentity(spotlightIdentity);
-          const isRenaming = renamingId === p.identity;
+          {people.map((p) => {
+            const spotlighted = p.base === baseIdentity(spotlightIdentity);
+            const isRenaming = renamingId === p.identity;
 
-          return (
-            <div
-              key={p.identity}
-              className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06] space-y-2"
-            >
-              {isRenaming ? (
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={renameDraft}
-                    autoFocus
-                    onChange={(e) => setRenameDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveRename(p);
-                      if (e.key === 'Escape') setRenamingId(null);
-                    }}
-                    placeholder="Enter display name"
-                    className="flex-1 px-2.5 py-1 text-xs rounded-xl bg-black/50 text-white border border-blue-400 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleSaveRename(p)}
-                    className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-600 text-white cursor-pointer"
-                  >
-                    Save
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setRenamingId(null)}
-                    className="px-2 py-1 rounded-xl text-[11px] bg-white/10 text-white/70 cursor-pointer"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5 flex-wrap">
-                      <span>{p.name}</span>
-                      {p.isLocal && <span className="text-white/40"> (you)</span>}
-                      {p.isTeacher ? (
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                          Host
-                        </span>
-                      ) : p.isGuest ? (
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                          Guest
-                        </span>
-                      ) : (
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-blue-500/20 text-blue-400 border border-blue-500/30">
-                          Student
-                        </span>
-                      )}
-                      {p.handRaised && (
-                        <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 flex items-center gap-0.5 animate-pulse">
-                          ✋ Hand
-                        </span>
-                      )}
-                      {(p.isLocal || isModerator) && (
+            return (
+              <div
+                key={p.identity}
+                className="p-3 rounded-2xl bg-white/[0.04] border border-white/[0.06] space-y-2"
+              >
+                {isRenaming ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={renameDraft}
+                      autoFocus
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveRename(p);
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      placeholder="Enter display name"
+                      className="flex-1 px-2.5 py-1 text-xs rounded-xl bg-black/50 text-white border border-blue-400 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveRename(p)}
+                      className="px-2.5 py-1 rounded-xl text-[11px] font-bold bg-blue-600 text-white cursor-pointer"
+                    >
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRenamingId(null)}
+                      className="px-2 py-1 rounded-xl text-[11px] bg-white/10 text-white/70 cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      {/* User Avatar Circle */}
+                      <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center font-bold text-xs text-white/90 shrink-0 border border-white/10">
+                        {p.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-white truncate flex items-center gap-1.5 flex-wrap">
+                          <span>{p.name}</span>
+                          {p.isLocal && <span className="text-white/40"> (me)</span>}
+                          {p.isTeacher && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                              Host
+                            </span>
+                          )}
+                          {p.isGuest && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                              Guest
+                            </span>
+                          )}
+                          {p.handRaised && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-yellow-500/20 text-yellow-300 border border-yellow-500/30 flex items-center gap-0.5 animate-pulse">
+                              ✋ Hand
+                            </span>
+                          )}
+                          {(p.isLocal || isModerator) && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRenamingId(p.identity);
+                                setRenameDraft(p.name);
+                              }}
+                              className="text-[10px] text-blue-400 hover:text-blue-300 underline cursor-pointer ml-1"
+                            >
+                              Rename
+                            </button>
+                          )}
+                        </div>
+                        <div className="text-[11px] font-medium mt-0.5 flex items-center gap-1.5" style={{ color: p.isSpeaking ? '#6ee7b7' : p.micMuted ? '#fca5a5' : '#94a3b8' }}>
+                          <span>{p.isSpeaking ? 'Speaking' : p.micMuted ? 'Muted' : 'Active'}</span>
+                          {volumes[p.base] != null && volumes[p.base] < 0.98 && (
+                            <span className="text-[10px] px-1 py-0.2 rounded bg-white/10 text-white/70">
+                              🔉 {Math.round((volumes[p.base] ?? 1) * 100)}%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Audio & Video Status Icons */}
+                      <div className="flex items-center gap-1 mr-1">
+                        {p.micMuted ? (
+                          <MicOffIcon className="w-4 h-4 text-red-400" />
+                        ) : (
+                          <MicIcon className="w-4 h-4 text-emerald-400" />
+                        )}
+                        {p.cameraOff ? (
+                          <CameraOffIcon className="w-4 h-4 text-red-400" />
+                        ) : (
+                          <CameraIcon className="w-4 h-4 text-white/70" />
+                        )}
+                      </div>
+
+                      {isModerator && (
                         <button
-                          type="button"
-                          onClick={() => {
-                            setRenamingId(p.identity);
-                            setRenameDraft(p.name);
+                          onClick={() => onSpotlight(spotlighted ? null : p.base)}
+                          className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition"
+                          style={{
+                            background: spotlighted ? '#0A84FF' : 'rgba(255, 255, 255, 0.1)',
+                            color: '#fff',
+                            boxShadow: spotlighted ? '0 2px 8px rgba(10, 132, 255, 0.35)' : 'none',
                           }}
-                          className="text-[10px] text-blue-400 hover:text-blue-300 underline cursor-pointer ml-1"
                         >
-                          Rename
+                          {spotlighted ? '★ Spotlit' : 'Spotlight'}
                         </button>
                       )}
-                    </div>
-                    <div className="text-[11px] font-medium mt-0.5" style={{ color: p.isSpeaking ? '#6ee7b7' : p.micMuted ? '#fca5a5' : '#94a3b8' }}>
-                      {p.isSpeaking ? 'Speaking' : p.micMuted ? 'Muted' : 'Mic Active'}
-                    </div>
-                  </div>
 
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {isModerator && (
-                      <button
-                        onClick={() => onSpotlight(spotlighted ? null : p.base)}
-                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer transition"
-                        style={{
-                          background: spotlighted ? '#007aff' : 'rgba(255, 255, 255, 0.1)',
-                          color: '#fff',
-                          boxShadow: spotlighted ? '0 2px 8px rgba(0, 122, 255, 0.35)' : 'none',
-                        }}
-                      >
-                        {spotlighted ? '★ Spotlit' : 'Spotlight'}
-                      </button>
-                    )}
+                      {!p.isLocal && isModerator &&
+                        (p.micMuted ? (
+                          <button
+                            onClick={() => askToUnmute(p.identity)}
+                            className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-white hover:bg-white/15"
+                          >
+                            Ask unmute
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => p.micSid && muteTrack(p.identity, p.micSid)}
+                            className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-red-600 text-white hover:bg-red-500"
+                          >
+                            Mute
+                          </button>
+                        ))}
 
-                    {!p.isLocal && isModerator &&
-                      (p.micMuted ? (
+                      {!p.isLocal && isModerator && p.cameraOff && (
                         <button
-                          onClick={() => askToUnmute(p.identity)}
+                          onClick={() => askForCamera(p.identity)}
                           className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-white hover:bg-white/15"
                         >
-                          Ask unmute
+                          Ask camera
                         </button>
-                      ) : (
-                        <button
-                          onClick={() => p.micSid && muteTrack(p.identity, p.micSid)}
-                          className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-red-600 text-white hover:bg-red-500"
-                        >
-                          Mute
-                        </button>
-                      ))}
+                      )}
 
-                    {!p.isLocal && isModerator && p.cameraOff && (
-                      <button
-                        onClick={() => askForCamera(p.identity)}
-                        className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-white hover:bg-white/15"
-                      >
-                        Ask camera
-                      </button>
-                    )}
-
-                    {!p.isLocal && isModerator &&
-                      (confirmRemove === p.identity ? (
-                        <button
-                          onClick={() => {
-                            removeParticipant(p.identity);
-                            setConfirmRemove(null);
-                          }}
-                          className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-red-600 text-white"
-                        >
-                          Confirm
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => setConfirmRemove(p.identity)}
-                          className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-red-400 hover:bg-red-500/20"
-                        >
-                          Remove
-                        </button>
-                      ))}
+                      {!p.isLocal && isModerator &&
+                        (confirmRemove === p.identity ? (
+                          <button
+                            onClick={() => {
+                              removeParticipant(p.identity);
+                              setConfirmRemove(null);
+                            }}
+                            className="px-2.5 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-red-600 text-white"
+                          >
+                            Confirm
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => setConfirmRemove(p.identity)}
+                            className="px-2 py-1 rounded-full text-[11px] font-semibold cursor-pointer bg-white/10 text-red-400 hover:bg-red-500/20"
+                          >
+                            ✕
+                          </button>
+                        ))}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {isModerator && !p.isLocal && (
-                <div className="pt-1">
-                  <VolumeSlider
-                    value={volumes[p.base] ?? 1}
-                    onChange={(v) => onVolume(p.base, v)}
-                    label={p.name}
-                    compact
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
+                {/* Per-Student Volume Slider (Synchronized lobby-wide by teacher) */}
+                {isModerator && !p.isLocal && (
+                  <div className="pt-1">
+                    <VolumeSlider
+                      value={volumes[p.base] ?? 1}
+                      onChange={(v) => onVolume(p.base, v)}
+                      label={p.name}
+                      compact
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
 
-        {isModerator && <RingStudents sessionId={sessionId} />}
+          {isModerator && <RingStudents sessionId={sessionId} />}
+        </div>
+
+        {/* Footer: Zoom 3-button bar [ Invite ] [ Mute All ] [ ... ] */}
+        <div className="p-3 border-t border-white/10 flex items-center gap-2 bg-white/[0.02] shrink-0">
+          <button
+            type="button"
+            onClick={handleCopyInvite}
+            className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white transition cursor-pointer text-center"
+          >
+            {inviteCopied ? '✓ Copied' : 'Invite'}
+          </button>
+          {isModerator && (
+            <button
+              type="button"
+              onClick={handleMuteAll}
+              className="flex-1 py-2 px-3 rounded-xl text-xs font-semibold bg-white/10 hover:bg-white/15 text-white transition cursor-pointer text-center"
+            >
+              {muteAllSuccess ? '✓ Muted All' : 'Mute All'}
+            </button>
+          )}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setMoreFooterOpen((v) => !v)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center bg-white/10 hover:bg-white/15 text-white transition cursor-pointer"
+              title="More options"
+            >
+              <ZoomMoreIcon className="w-4 h-4" />
+            </button>
+            {moreFooterOpen && (
+              <>
+                <div className="fixed inset-0 z-50" onClick={() => setMoreFooterOpen(false)} />
+                <div
+                  className="absolute bottom-11 right-0 z-50 w-64 p-2 rounded-2xl shadow-2xl border border-white/20 text-xs space-y-1 text-white animate-fadeIn"
+                  style={{ background: 'rgba(28, 30, 36, 0.98)', backdropFilter: 'blur(24px)' }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreFooterOpen(false);
+                      handleMuteAll();
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition cursor-pointer"
+                  >
+                    Mute participants upon entry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreFooterOpen(false);
+                      setAllowParticipantShare(false);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition cursor-pointer"
+                  >
+                    Allow participants to unmute
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoreFooterOpen(false);
+                      setRoomLocked(true);
+                    }}
+                    className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-white/10 transition cursor-pointer"
+                  >
+                    Lock meeting
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-    </div>
     </>
   );
 }

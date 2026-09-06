@@ -12,7 +12,7 @@ import { createPortal } from 'react-dom';
 import { Track } from 'livekit-client';
 import { isTrackReference, type TrackReferenceOrPlaceholder } from '@livekit/components-core';
 import { VideoTrack, useIsSpeaking } from '@livekit/components-react';
-import { MicOffIcon, MoreIcon, SpeakingBarsIcon } from './CallIcons';
+import { MicOffIcon, SpeakingBarsIcon } from './CallIcons';
 import VolumeSlider from './VolumeSlider';
 
 const MENU_WIDTH = 240;
@@ -38,6 +38,7 @@ export default function VideoTile({
   isSpotlighted,
   handRaised,
   actions,
+  volume,
   rounded = true,
   fit = 'contain',
 }: {
@@ -49,6 +50,7 @@ export default function VideoTile({
   isSpotlighted?: boolean;
   handRaised?: boolean;
   actions?: TileActions;
+  volume?: number;
   rounded?: boolean;
   fit?: 'cover' | 'contain';
 }) {
@@ -141,10 +143,12 @@ export default function VideoTile({
     (trackRef.source === Track.Source.ScreenShare ||
       trackRef.publication?.source === Track.Source.ScreenShare);
 
+  const effectiveVolume = volume !== undefined ? volume : (actions?.volume ?? 1);
+
   return (
     <div
       ref={rootRef}
-      className={`relative w-full h-full overflow-hidden transition-all duration-200 ${
+      className={`group relative w-full h-full overflow-hidden transition-all duration-200 ${
         rounded ? 'rounded-2xl sm:rounded-3xl' : ''
       }`}
       style={{
@@ -191,9 +195,9 @@ export default function VideoTile({
 
       {/* Frosted glass name & mic state capsule */}
       <div
-        className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full max-w-[85%]"
+        className="absolute bottom-2.5 left-2.5 flex items-center gap-1.5 px-2.5 py-1 rounded-full max-w-[85%] z-10"
         style={{
-          background: 'rgba(18, 20, 26, 0.72)',
+          background: 'rgba(18, 20, 26, 0.76)',
           backdropFilter: 'blur(16px)',
           WebkitBackdropFilter: 'blur(16px)',
           border: '1px solid rgba(255, 255, 255, 0.14)',
@@ -213,16 +217,21 @@ export default function VideoTile({
           {name}
           {isLocal ? ' (you)' : ''}
         </span>
-        {actions?.volume !== undefined && Math.round(actions.volume * 100) !== 100 && (
-          <span className="text-[10px] text-neutral-400 shrink-0 font-mono ml-0.5">
-            {Math.round(actions.volume * 100)}%
+        {/* Lobby-wide synchronized volume attenuation badge */}
+        {effectiveVolume < 0.98 && (
+          <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full font-bold font-mono ml-0.5 bg-blue-500/25 text-blue-300 border border-blue-400/30 flex items-center gap-0.5 shadow-sm"
+            title={`Volume attenuated to ${Math.round(effectiveVolume * 100)}% for whole classroom`}
+          >
+            <span>{effectiveVolume <= 0.05 ? '🔇' : '🔉'}</span>
+            <span>{Math.round(effectiveVolume * 100)}%</span>
           </span>
         )}
       </div>
 
       {handRaised && (
         <div
-          className="absolute top-2.5 right-2.5 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 z-10 animate-bounce"
+          className="absolute top-2.5 left-2.5 px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 z-10 animate-bounce"
           style={{
             background: 'rgba(245, 158, 11, 0.95)',
             backdropFilter: 'blur(12px)',
@@ -239,7 +248,7 @@ export default function VideoTile({
 
       {isSpotlighted && (
         <div
-          className={`absolute top-2.5 ${hasActions ? 'left-12' : 'left-2.5'} px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1 z-10`}
+          className={`absolute top-2.5 ${handRaised ? 'left-32' : 'left-2.5'} px-2.5 py-0.5 rounded-full text-[10px] font-bold tracking-wide flex items-center gap-1 z-10`}
           style={{
             background: 'linear-gradient(135deg, #007aff 0%, #0056b3 100%)',
             color: '#fff',
@@ -251,8 +260,58 @@ export default function VideoTile({
         </div>
       )}
 
-      {hasActions && (
-        <>
+      {/* Top-Right Zoom Action Buttons (Ask to Unmute / Unmute + ... More Menu) */}
+      <div
+        className={`absolute top-2.5 right-2.5 flex items-center gap-1.5 z-20 transition-opacity duration-200 ${
+          menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'
+        }`}
+        onPointerDown={(e) => e.stopPropagation()}
+      >
+        {isLocal ? (
+          actions?.onRename && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setRenaming(true);
+                openMenu();
+              }}
+              className="px-2.5 py-1 rounded-md text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-md transition-all cursor-pointer"
+            >
+              Rename
+            </button>
+          )
+        ) : (
+          <>
+            {micMuted && actions?.onAskToUnmute && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  actions.onAskToUnmute?.();
+                }}
+                className="px-2.5 py-1 rounded-md text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-md transition-all cursor-pointer"
+              >
+                Ask to Unmute
+              </button>
+            )}
+            {!micMuted && actions?.onMute && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  actions.onMute?.();
+                }}
+                className="px-2.5 py-1 rounded-md text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-md transition-all cursor-pointer"
+              >
+                Mute
+              </button>
+            )}
+          </>
+        )}
+
+        {/* Blue [...] More Menu Button */}
+        {hasActions && (
           <button
             ref={buttonRef}
             type="button"
@@ -260,20 +319,16 @@ export default function VideoTile({
               e.stopPropagation();
               openMenu();
             }}
-            onPointerDown={(e) => e.stopPropagation()}
             aria-label={`Options for ${name}`}
-            className="absolute top-2.5 left-2.5 w-8 h-8 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-90 z-10"
-            style={{
-              background: 'rgba(18, 20, 26, 0.72)',
-              backdropFilter: 'blur(16px)',
-              WebkitBackdropFilter: 'blur(16px)',
-              border: '1px solid rgba(255, 255, 255, 0.14)',
-              color: '#fff',
-            }}
+            className="w-7 h-6 sm:w-8 sm:h-7 rounded-md flex items-center justify-center font-bold text-white bg-blue-600 hover:bg-blue-500 active:scale-95 shadow-md transition-all cursor-pointer text-xs"
           >
-            <MoreIcon className="w-4 h-4" />
+            ⋯
           </button>
+        )}
+      </div>
 
+      {hasActions && (
+        <>
           {menuOpen && typeof document !== 'undefined' && createPortal(
             <>
               <div

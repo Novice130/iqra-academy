@@ -290,10 +290,94 @@ export const BreakoutIcon = (p: P) => (
 
 export const VideoSlashIcon = (p: P) => (
   <svg {...base} {...p}>
-    <rect x="2.5" y="6" width="13" height="12" rx="2" />
+    <rect x="2.5" y="6" width="13" height="12" rx="2.5" />
     <path d="M15.5 10.5l6-3.5v10l-6-3.5" />
     <line x1="2" y1="2" x2="22" y2="22" strokeWidth={2} />
   </svg>
 );
+
+export const ZoomShareBadgeIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none">
+    <rect x="2" y="2" width="20" height="20" rx="5" fill="#30D158" />
+    <path d="M12 16V6m0 0l-3.5 3.5M12 6l3.5 3.5" stroke="#000000" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const ZoomEndHexagonIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none">
+    <path d="M7.8 2.5h8.4l5.3 5.3v8.4l-5.3 5.3H7.8L2.5 16.2V7.8L7.8 2.5z" fill="#FF453A" stroke="#FF453A" strokeWidth="1" />
+    <path d="M9 9l6 6m0-6l-6 6" stroke="#FFFFFF" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const ZoomSecurityShieldIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    <path d="M12 2v20M4 11h16" />
+  </svg>
+);
+
+export const ZoomMoreIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8">
+    <circle cx="12" cy="12" r="9.5" />
+    <circle cx="8" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="12" cy="12" r="1.2" fill="currentColor" />
+    <circle cx="16" cy="12" r="1.2" fill="currentColor" />
+  </svg>
+);
+
+export const ZoomCopyIcon = ({ className = "w-4 h-4" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+export const ZoomEditPencilIcon = ({ className = "w-4 h-4" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+  </svg>
+);
+
+export const ZoomSecurityCheckIcon = ({ className = "w-4 h-4" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" fill="#30D158" />
+    <path d="M8.5 12l2.5 2.5 5-5" stroke="#FFFFFF" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
+export const ZoomHeartReactIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+  </svg>
+);
+
+export const HeadphonesIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 18v-6a9 9 0 0 1 18 0v6" />
+    <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z" />
+  </svg>
+);
+
+export const StatsBarChartIcon = ({ className = "w-5 h-5" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M18 20V10M12 20V4M6 20v-6" />
+  </svg>
+);
+
+export const PopOutIcon = ({ className = "w-4 h-4" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+  </svg>
+);
+
+export const ZoomBackgroundsIcon = ({ className = "w-4 h-4" }: P) => (
+  <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="3" y="4" width="18" height="16" rx="3" />
+    <circle cx="12" cy="9.5" r="2.5" />
+    <path d="M7 17c0-2.2 2.2-3.5 5-3.5s5 1.3 5 3.5" />
+  </svg>
+);
+
 
 

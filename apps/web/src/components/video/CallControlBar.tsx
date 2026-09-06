@@ -35,7 +35,7 @@ import {
   CameraIcon,
   CameraOffIcon,
   ChatIcon,
-  ChevronDownIcon,
+  ChevronUpIcon,
   ClosedCaptionsIcon,
   FlipCameraIcon,
   HandRaiseIcon,
@@ -45,16 +45,18 @@ import {
   LeaveIcon,
   MicIcon,
   MicOffIcon,
-  MoreIcon,
   PeopleIcon,
-  ScreenShareIcon,
   SettingsIcon,
-  SmileIcon,
   SparklesIcon,
   VideoSlashIcon,
   WhiteboardIcon,
+  ZoomShareBadgeIcon,
+  ZoomEndHexagonIcon,
+  ZoomSecurityShieldIcon,
+  ZoomMoreIcon,
+  ZoomHeartReactIcon,
 } from './CallIcons';
-import CallSettingsModal from './CallSettingsModal';
+import CallSettingsModal, { type SettingsTab } from './CallSettingsModal';
 import HostToolsModal from './HostToolsModal';
 import BreakoutPanel from './BreakoutPanel';
 
@@ -79,6 +81,8 @@ export default function CallControlBar({
   viewMode,
   onViewModeChange,
   onToggleEffects,
+  isBackgroundBlurred = false,
+  onToggleBackgroundBlur,
   onToggleMeetingInfo,
   onToggleCaptions,
   captionsActive = false,
@@ -101,6 +105,8 @@ export default function CallControlBar({
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
   onToggleEffects?: () => void;
+  isBackgroundBlurred?: boolean;
+  onToggleBackgroundBlur?: () => void;
   onToggleMeetingInfo?: () => void;
   onToggleCaptions?: () => void;
   captionsActive?: boolean;
@@ -116,6 +122,9 @@ export default function CallControlBar({
   const room = useRoomContext();
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
+  const [audioNoiseMode, setAudioNoiseMode] = useState<'noise-removal' | 'isolation' | 'original'>('noise-removal');
+  const [autoFrameEnabled, setAutoFrameEnabled] = useState(false);
   const [hostToolsOpen, setHostToolsOpen] = useState(false);
   const [breakoutFallbackOpen, setBreakoutFallbackOpen] = useState(false);
   const breakoutOpenEffective = onToggleBreakout ? breakoutOpen : breakoutFallbackOpen;
@@ -124,6 +133,7 @@ export default function CallControlBar({
   const [reactionsOpen, setReactionsOpen] = useState(false);
   const [micMenuOpen, setMicMenuOpen] = useState(false);
   const [camMenuOpen, setCamMenuOpen] = useState(false);
+  const [shareMenuOpen, setShareMenuOpen] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
   const [stopIncomingVideo, setStopIncomingVideo] = useState(false);
   const stoppedVideoSubsRef = React.useRef<Map<string, boolean>>(new Map());
@@ -184,6 +194,31 @@ export default function CallControlBar({
 
   const [micError, setMicError] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
+
+  const handleSelectAudioMode = async (mode: 'noise-removal' | 'isolation' | 'original') => {
+    setAudioNoiseMode(mode);
+    try {
+      const pub = room.localParticipant.getTrackPublication(Track.Source.Microphone);
+      const mediaTrack = (pub?.track as unknown as { mediaStreamTrack?: MediaStreamTrack })?.mediaStreamTrack;
+      if (mediaTrack && mediaTrack.applyConstraints) {
+        if (mode === 'original') {
+          await mediaTrack.applyConstraints({
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          });
+        } else {
+          await mediaTrack.applyConstraints({
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Could not apply audio constraints:', err);
+    }
+  };
 
   const handleMicToggle = async () => {
     setMicError(null);
@@ -336,7 +371,7 @@ export default function CallControlBar({
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
           });
-        } catch (e) {
+        } catch {
           setEndError('Could not end the class on the server. You have left the room; the class may still show as live.');
         }
       }
@@ -359,46 +394,40 @@ export default function CallControlBar({
         style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
       >
         <div
-          className="call-control-bar pointer-events-auto flex items-center justify-center gap-1.5 sm:gap-3 px-3 sm:px-5 py-2 rounded-3xl shadow-2xl transition-all"
+          className="call-control-bar pointer-events-auto flex items-center justify-center gap-1 sm:gap-2 px-3 sm:px-4 py-1.5 rounded-[28px] shadow-2xl transition-all"
           style={{
-            background: 'rgba(20, 22, 28, 0.94)',
-            backdropFilter: 'blur(32px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+            background: 'rgba(18, 20, 26, 0.82)',
+            backdropFilter: 'blur(36px) saturate(200%)',
+            WebkitBackdropFilter: 'blur(36px) saturate(200%)',
             border: '1px solid rgba(255, 255, 255, 0.16)',
-            boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+            boxShadow: '0 20px 48px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.35)',
           }}
         >
-          {/* Position 1: Mute with device caret */}
+          {/* Position 1: Audio with device caret */}
           <div className="relative flex flex-col items-center">
-            <div className="flex items-center">
+            <div className="flex items-center rounded-2xl overflow-hidden bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 transition">
               <button
                 type="button"
                 onClick={handleMicToggle}
                 disabled={mic.pending}
-                title={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
-                aria-label={mic.enabled ? 'Turn off microphone' : 'Turn on microphone'}
-                className="w-11 h-11 sm:w-12 sm:h-12 rounded-l-full sm:rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0 shadow-md hover:brightness-110"
-                style={{
-                  background: mic.enabled ? '#3c4043' : '#ea4335',
-                  color: '#ffffff',
-                  border: mic.enabled ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.3)',
-                  boxShadow: mic.enabled ? 'none' : '0 4px 14px rgba(234, 67, 53, 0.4)',
-                }}
+                title={mic.enabled ? 'Mute' : 'Unmute'}
+                aria-label={mic.enabled ? 'Mute' : 'Unmute'}
+                className="h-10 px-2.5 flex items-center justify-center cursor-pointer transition active:scale-95 disabled:opacity-50"
+                style={{ color: mic.enabled ? '#ffffff' : '#FF453A' }}
               >
-                {mic.enabled ? <MicIcon className="w-5 h-5" /> : <MicOffIcon className="w-5 h-5" />}
+                {mic.enabled ? <MicIcon className="w-5 h-5" /> : <MicOffIcon className="w-5 h-5 text-red-500" />}
               </button>
-              {/* Mic device caret */}
               <button
                 type="button"
                 onClick={() => setMicMenuOpen((v) => !v)}
                 title="Microphone settings"
                 aria-label="Microphone settings"
-                className="hidden sm:flex w-5 h-12 -ml-2 rounded-r-full items-center justify-center text-white/70 hover:text-white bg-white/10 hover:bg-white/20 border-y border-r border-white/15 transition cursor-pointer"
+                className="h-10 px-1.5 flex items-center justify-center text-white/70 hover:text-white border-l border-white/10 hover:bg-white/10 transition cursor-pointer"
               >
-                <ChevronDownIcon />
+                <ChevronUpIcon className="w-3.5 h-3.5" />
               </button>
             </div>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">
               {mic.enabled ? 'Mute' : 'Unmute'}
             </span>
             {micError && (
@@ -413,43 +442,142 @@ export default function CallControlBar({
               <>
                 <div className="fixed inset-0 z-50" onClick={() => setMicMenuOpen(false)} />
                 <div
-                  className="absolute bottom-16 left-0 z-50 w-64 p-3 rounded-2xl shadow-2xl border border-white/20 text-xs space-y-2 animate-fadeIn"
-                  style={{ background: 'rgba(28, 30, 36, 0.98)', backdropFilter: 'blur(24px)' }}
+                  className="absolute bottom-16 left-0 z-50 w-72 p-2.5 rounded-2xl shadow-2xl border border-white/20 text-xs animate-fadeIn text-white space-y-2 select-none"
+                  style={{
+                    background: 'rgba(26, 30, 38, 0.96)',
+                    backdropFilter: 'blur(32px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+                    boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+                  }}
                 >
-                  <div className="font-bold text-white text-[11px] uppercase tracking-wider px-1">
-                    Select Microphone
+                  {/* Select Microphone */}
+                  <div>
+                    <div className="text-[10px] font-bold text-white/50 uppercase tracking-wider px-2 py-1">
+                      Select a Microphone
+                    </div>
+                    {deviceError && (
+                      <div role="alert" className="px-2 text-[11px] text-amber-300">
+                        {deviceError}{' '}
+                        <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                      </div>
+                    )}
+                    {mics.length === 0 && !deviceError && (
+                      <div className="px-2 text-[11px] text-white/60">
+                        No microphones found.{' '}
+                        <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                      </div>
+                    )}
+                    <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                      {mics.map((m) => {
+                        const active = room.getActiveDevice('audioinput') === m.deviceId;
+                        return (
+                          <button
+                            key={m.deviceId}
+                            type="button"
+                            onClick={() => {
+                              room.switchActiveDevice('audioinput', m.deviceId).catch(() => {});
+                              setMicMenuOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                          >
+                            <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{active ? '✓' : ''}</span>
+                            <span className="truncate">{m.label || `Microphone ${m.deviceId.slice(0, 5)}`}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  {deviceError && (
-                    <div role="alert" className="px-1 text-[11px] text-amber-300">
-                      {deviceError}{' '}
-                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+
+                  <div className="border-t border-white/10 my-1" />
+
+                  {/* Select Speaker */}
+                  <div>
+                    <div className="text-[10px] font-bold text-white/50 uppercase tracking-wider px-2 py-1">
+                      Select a Speaker
                     </div>
-                  )}
-                  {mics.length === 0 && !deviceError && (
-                    <div className="px-1 text-[11px] text-white/60">
-                      No microphones found. Connect one, allow permission, then{' '}
-                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>.
+                    <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                      {speakers.map((s) => {
+                        const active = (audioOutputDeviceId || speakers[0]?.deviceId) === s.deviceId;
+                        return (
+                          <button
+                            key={s.deviceId}
+                            type="button"
+                            onClick={() => {
+                              setAudioOutputDeviceId?.(s.deviceId);
+                              room.switchActiveDevice('audiooutput', s.deviceId).catch(() => {});
+                              setMicMenuOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                          >
+                            <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{active ? '✓' : ''}</span>
+                            <span className="truncate">{s.label || `Speaker ${s.deviceId.slice(0, 5)}`}</span>
+                          </button>
+                        );
+                      })}
                     </div>
-                  )}
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {mics.map((m) => {
-                      const active = room.getActiveDevice('audioinput') === m.deviceId;
-                      return (
-                        <button
-                          key={m.deviceId}
-                          type="button"
-                          onClick={() => {
-                            room.switchActiveDevice('audioinput', m.deviceId).catch(() => {});
-                            setMicMenuOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-xl truncate text-[11px] transition ${
-                            active ? 'bg-blue-600 text-white font-bold' : 'text-white/80 hover:bg-white/10'
-                          }`}
-                        >
-                          {m.label || `Microphone ${m.deviceId.slice(0, 5)}`}
-                        </button>
-                      );
-                    })}
+                  </div>
+
+                  <div className="border-t border-white/10 my-1" />
+
+                  {/* Microphone Modes */}
+                  <div>
+                    <div className="text-[10px] font-bold text-white/50 uppercase tracking-wider px-2 py-1">
+                      Microphone Modes
+                    </div>
+                    <div className="space-y-0.5">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAudioMode('noise-removal')}
+                        className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                      >
+                        <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{audioNoiseMode === 'noise-removal' ? '✓' : ''}</span>
+                        <span className="truncate">Noise removal (default)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAudioMode('isolation')}
+                        className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                      >
+                        <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{audioNoiseMode === 'isolation' ? '✓' : ''}</span>
+                        <span className="truncate">Personalized audio isolation</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectAudioMode('original')}
+                        className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                      >
+                        <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{audioNoiseMode === 'original' ? '✓' : ''}</span>
+                        <span className="truncate">Original sound for musicians</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="border-t border-white/10 my-1" />
+
+                  {/* Audio Utilities */}
+                  <div className="space-y-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMicMenuOpen(false);
+                        setSettingsInitialTab('audio');
+                        setSettingsOpen(true);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-xl text-xs hover:bg-white/10 transition cursor-pointer text-white/90 pl-6"
+                    >
+                      Test Speaker & Microphone...
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMicMenuOpen(false);
+                        setSettingsInitialTab('audio');
+                        setSettingsOpen(true);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-xl text-xs hover:bg-white/10 transition cursor-pointer text-white/90 pl-6"
+                    >
+                      Audio Settings...
+                    </button>
                   </div>
                 </div>
               </>
@@ -458,35 +586,29 @@ export default function CallControlBar({
 
           {/* Position 2: Video with device caret */}
           <div className="relative flex flex-col items-center">
-            <div className="flex items-center">
+            <div className="flex items-center rounded-2xl overflow-hidden bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 transition">
               <button
                 type="button"
                 onClick={handleCameraToggle}
                 disabled={camera.pending}
-                title={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
-                aria-label={camera.enabled ? 'Turn off camera' : 'Turn on camera'}
-                className="w-11 h-11 sm:w-12 sm:h-12 rounded-l-full sm:rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 disabled:opacity-50 shrink-0 shadow-md hover:brightness-110"
-                style={{
-                  background: camera.enabled ? '#3c4043' : '#ea4335',
-                  color: '#ffffff',
-                  border: camera.enabled ? '1px solid rgba(255, 255, 255, 0.15)' : '1px solid rgba(255, 255, 255, 0.3)',
-                  boxShadow: camera.enabled ? 'none' : '0 4px 14px rgba(234, 67, 53, 0.4)',
-                }}
+                title={camera.enabled ? 'Stop Video' : 'Start Video'}
+                aria-label={camera.enabled ? 'Stop Video' : 'Start Video'}
+                className="h-10 px-2.5 flex items-center justify-center cursor-pointer transition active:scale-95 disabled:opacity-50"
+                style={{ color: camera.enabled ? '#ffffff' : '#FF453A' }}
               >
-                {camera.enabled ? <CameraIcon className="w-5 h-5" /> : <CameraOffIcon className="w-5 h-5" />}
+                {camera.enabled ? <CameraIcon className="w-5 h-5" /> : <CameraOffIcon className="w-5 h-5 text-red-500" />}
               </button>
-              {/* Camera device caret */}
               <button
                 type="button"
                 onClick={() => setCamMenuOpen((v) => !v)}
                 title="Camera settings"
                 aria-label="Camera settings"
-                className="hidden sm:flex w-5 h-12 -ml-2 rounded-r-full items-center justify-center text-white/70 hover:text-white bg-white/10 hover:bg-white/20 border-y border-r border-white/15 transition cursor-pointer"
+                className="h-10 px-1.5 flex items-center justify-center text-white/70 hover:text-white border-l border-white/10 hover:bg-white/10 transition cursor-pointer"
               >
-                <ChevronDownIcon />
+                <ChevronUpIcon className="w-3.5 h-3.5" />
               </button>
             </div>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">
               {camera.enabled ? 'Stop Video' : 'Start Video'}
             </span>
             {cameraError && (
@@ -501,113 +623,190 @@ export default function CallControlBar({
               <>
                 <div className="fixed inset-0 z-50" onClick={() => setCamMenuOpen(false)} />
                 <div
-                  className="absolute bottom-16 left-0 z-50 w-64 p-3 rounded-2xl shadow-2xl border border-white/20 text-xs space-y-2 animate-fadeIn"
-                  style={{ background: 'rgba(28, 30, 36, 0.98)', backdropFilter: 'blur(24px)' }}
+                  className="absolute bottom-16 left-0 z-50 w-72 p-2.5 rounded-2xl shadow-2xl border border-white/20 text-xs animate-fadeIn text-white space-y-2 select-none"
+                  style={{
+                    background: 'rgba(26, 30, 38, 0.96)',
+                    backdropFilter: 'blur(32px) saturate(180%)',
+                    WebkitBackdropFilter: 'blur(32px) saturate(180%)',
+                    boxShadow: '0 20px 50px rgba(0, 0, 0, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.2)',
+                  }}
                 >
-                  <div className="font-bold text-white text-[11px] uppercase tracking-wider px-1">
-                    Select Camera
+                  {/* Select Camera */}
+                  <div>
+                    <div className="text-[10px] font-bold text-white/50 uppercase tracking-wider px-2 py-1">
+                      Select a Camera
+                    </div>
+                    {deviceError && (
+                      <div role="alert" className="px-2 text-[11px] text-amber-300">
+                        {deviceError}{' '}
+                        <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                      </div>
+                    )}
+                    {cameras.length === 0 && !deviceError && (
+                      <div className="px-2 text-[11px] text-white/60">
+                        No cameras found.{' '}
+                        <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+                      </div>
+                    )}
+                    <div className="space-y-0.5 max-h-32 overflow-y-auto">
+                      {cameras.map((c) => {
+                        const active = room.getActiveDevice('videoinput') === c.deviceId;
+                        return (
+                          <button
+                            key={c.deviceId}
+                            type="button"
+                            onClick={() => {
+                              room.switchActiveDevice('videoinput', c.deviceId).catch(() => {});
+                              setCamMenuOpen(false);
+                            }}
+                            className="w-full text-left px-2 py-1.5 rounded-xl text-xs flex items-center gap-2 hover:bg-white/10 transition cursor-pointer text-white/90"
+                          >
+                            <span className="w-3.5 text-[#0A84FF] font-bold text-sm">{active ? '✓' : ''}</span>
+                            <span className="truncate">{c.label || `Camera ${c.deviceId.slice(0, 5)}`}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
-                  {deviceError && (
-                    <div role="alert" className="px-1 text-[11px] text-amber-300">
-                      {deviceError}{' '}
-                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>
+
+                  <div className="border-t border-white/10 my-1" />
+
+                  {/* Blur My Background & Auto-frame */}
+                  <div className="space-y-2 px-2 py-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white/90">Blur My Background</span>
+                      <button
+                        type="button"
+                        onClick={() => onToggleBackgroundBlur?.()}
+                        className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer flex items-center ${
+                          isBackgroundBlurred ? 'bg-[#0A84FF] justify-end' : 'bg-white/20 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
+                      </button>
                     </div>
-                  )}
-                  {cameras.length === 0 && !deviceError && (
-                    <div className="px-1 text-[11px] text-white/60">
-                      No cameras found. Connect one, allow permission, then{' '}
-                      <button type="button" onClick={refreshDevices} className="underline cursor-pointer">Retry</button>.
+
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-white/90">Auto-frame</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (hasMultipleCameras) cycleCamera();
+                          setAutoFrameEnabled((v) => !v);
+                        }}
+                        className={`w-9 h-5 rounded-full p-0.5 transition-colors cursor-pointer flex items-center ${
+                          autoFrameEnabled ? 'bg-[#0A84FF] justify-end' : 'bg-white/20 justify-start'
+                        }`}
+                      >
+                        <span className="w-4 h-4 rounded-full bg-white shadow-sm" />
+                      </button>
                     </div>
-                  )}
-                  <div className="space-y-1 max-h-48 overflow-y-auto">
-                    {cameras.map((c) => {
-                      const active = room.getActiveDevice('videoinput') === c.deviceId;
-                      return (
-                        <button
-                          key={c.deviceId}
-                          type="button"
-                          onClick={() => {
-                            room.switchActiveDevice('videoinput', c.deviceId).catch(() => {});
-                            setCamMenuOpen(false);
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-xl truncate text-[11px] transition ${
-                            active ? 'bg-blue-600 text-white font-bold' : 'text-white/80 hover:bg-white/10'
-                          }`}
-                        >
-                          {c.label || `Camera ${c.deviceId.slice(0, 5)}`}
-                        </button>
-                      );
-                    })}
+                  </div>
+
+                  <div className="border-t border-white/10 my-1" />
+
+                  {/* Virtual Background & Settings */}
+                  <div className="space-y-0.5">
+                    {onToggleEffects && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCamMenuOpen(false);
+                          onToggleEffects();
+                        }}
+                        className="w-full text-left px-2 py-1.5 rounded-xl text-xs hover:bg-white/10 transition cursor-pointer text-white/90 pl-6"
+                      >
+                        Choose Virtual Background...
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCamMenuOpen(false);
+                        setSettingsInitialTab('video');
+                        setSettingsOpen(true);
+                      }}
+                      className="w-full text-left px-2 py-1.5 rounded-xl text-xs hover:bg-white/10 transition cursor-pointer text-white/90 pl-6"
+                    >
+                      Video & Effects Settings...
+                    </button>
                   </div>
                 </div>
               </>
             )}
           </div>
 
-          {/* Position 3: Participants with count (Desktop only: hidden on < 768px) */}
+          {/* Position 3: Participants with count (Desktop only) */}
           <div className="hidden md:flex flex-col items-center">
-            <button
-              type="button"
-              onClick={onTogglePeople}
-              title="Participants"
-              aria-label="Participants roster"
-              className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-              style={{
-                background: peopleOpen ? '#0A84FF' : '#3c4043',
-                color: '#ffffff',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-              }}
-            >
-              <PeopleIcon className="w-5 h-5" />
-              <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-blue-500 text-white shadow-md border border-white/20">
-                {participantsCount}
-              </span>
-            </button>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">People</span>
+            <div className={`flex items-center rounded-2xl overflow-hidden border transition ${
+              peopleOpen ? 'bg-white/[0.2] border-sky-400/40 shadow-sm' : 'bg-white/[0.08] hover:bg-white/[0.14] border-white/10'
+            }`}>
+              <button
+                type="button"
+                onClick={onTogglePeople}
+                title="Participants"
+                aria-label="Participants"
+                className="h-10 px-2.5 flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 text-white"
+              >
+                <PeopleIcon className="w-5 h-5" />
+                <span className="text-xs font-semibold">{participantsCount}</span>
+              </button>
+              <button
+                type="button"
+                onClick={onTogglePeople}
+                title="Participants options"
+                aria-label="Participants options"
+                className="h-10 px-1.5 flex items-center justify-center text-white/70 hover:text-white border-l border-white/10 hover:bg-white/10 transition cursor-pointer"
+              >
+                <ChevronUpIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">Participants</span>
           </div>
 
-          {/* Position 4: Chat with unread badge (Desktop only: hidden on < 768px) */}
+          {/* Position 4: Chat with unread badge (Desktop only) */}
           <div className="hidden md:flex flex-col items-center">
-            <button
-              type="button"
-              onClick={onToggleChat}
-              title="In-call chat"
-              aria-label="Chat"
-              className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-              style={{
-                background: chatOpen ? '#0A84FF' : '#3c4043',
-                color: '#ffffff',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-              }}
-            >
-              <ChatIcon className="w-5 h-5" />
-              {unreadMessages > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-red-500 text-white shadow-md border border-white/20">
-                  {unreadMessages > 9 ? '9+' : unreadMessages}
-                </span>
-              )}
-            </button>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">Chat</span>
+            <div className="relative flex items-center rounded-2xl overflow-hidden bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 transition">
+              <button
+                type="button"
+                onClick={onToggleChat}
+                title="Chat"
+                aria-label="Chat"
+                className="h-10 px-2.5 flex items-center justify-center cursor-pointer transition active:scale-95 text-white"
+              >
+                <ChatIcon className="w-5 h-5" />
+                {unreadMessages > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-red-500 text-white shadow-md border border-white/20">
+                    {unreadMessages > 9 ? '9+' : unreadMessages}
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={onToggleChat}
+                title="Chat options"
+                aria-label="Chat options"
+                className="h-10 px-1.5 flex items-center justify-center text-white/70 hover:text-white border-l border-white/10 hover:bg-white/10 transition cursor-pointer"
+              >
+                <ChevronUpIcon className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">Chat</span>
           </div>
 
-          {/* Position 5: Reactions (Desktop only: hidden on < 768px) */}
+          {/* Position 5: Reactions (Desktop only) */}
           <div className="relative hidden md:flex flex-col items-center">
             <button
               type="button"
               onClick={() => setReactionsOpen((v) => !v)}
               title="Reactions & Hand Raise"
               aria-label="Reactions"
-              className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-              style={{
-                background: handRaised ? '#eab308' : reactionsOpen ? '#4f5358' : '#3c4043',
-                color: handRaised ? '#000000' : '#ffffff',
-                border: handRaised ? '1px solid #fde047' : '1px solid rgba(255, 255, 255, 0.15)',
-              }}
+              className="h-10 px-3.5 rounded-2xl flex items-center justify-center bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 cursor-pointer transition active:scale-95 text-white"
             >
-              {handRaised ? <HandRaiseIcon className="w-5 h-5" /> : <SmileIcon className="w-5 h-5" />}
+              {handRaised ? <HandRaiseIcon className="w-5 h-5 text-yellow-400" /> : <ZoomHeartReactIcon className="w-5 h-5" />}
             </button>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">
-              {handRaised ? 'Raised' : 'Reactions'}
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">
+              {handRaised ? 'Raised' : 'React'}
             </span>
 
             {/* Reactions Popover */}
@@ -647,40 +846,99 @@ export default function CallControlBar({
             )}
           </div>
 
-          {/* Position 6: Share (green active state) — visible on desktop & mobile */}
+          {/* Position 6: Share (green active state) */}
           {canScreenShare && (
-            <div className="flex flex-col items-center">
-              <button
-                type="button"
-                onClick={() => {
-                  if (nativeShell) {
-                    toggleNativeShare();
-                  } else {
-                    screenShare.toggle();
-                  }
-                }}
-                title={isSharing ? 'Stop sharing screen' : 'Share your screen'}
-                aria-label={isSharing ? 'Stop sharing screen' : 'Share screen'}
-                className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-                style={{
-                  background: isSharing ? '#30D158' : '#3c4043',
-                  color: isSharing ? '#000000' : '#ffffff',
-                  border: isSharing ? '1px solid #30D158' : '1px solid rgba(255, 255, 255, 0.15)',
-                  boxShadow: isSharing ? '0 4px 16px rgba(48, 209, 88, 0.45)' : 'none',
-                }}
-              >
-                <ScreenShareIcon className="w-5 h-5" />
-              </button>
-              <span
-                className="text-[10px] font-medium mt-1 select-none"
-                style={{ color: isSharing ? '#30D158' : 'rgba(255, 255, 255, 0.7)' }}
-              >
+            <div className="relative flex flex-col items-center">
+              <div className="flex items-center rounded-2xl overflow-hidden bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 transition">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (nativeShell) {
+                      toggleNativeShare();
+                    } else {
+                      screenShare.toggle();
+                    }
+                  }}
+                  title={isSharing ? 'Stop sharing screen' : 'Share your screen'}
+                  aria-label={isSharing ? 'Stop sharing screen' : 'Share screen'}
+                  className="h-10 px-2.5 flex items-center justify-center cursor-pointer transition active:scale-95"
+                >
+                  <ZoomShareBadgeIcon className="w-5 h-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShareMenuOpen((v) => !v)}
+                  title="Share options"
+                  aria-label="Share options"
+                  className="h-10 px-1.5 flex items-center justify-center text-white/70 hover:text-white border-l border-white/10 hover:bg-white/10 transition cursor-pointer"
+                >
+                  <ChevronUpIcon className="w-3.5 h-3.5" />
+                </button>
+              </div>
+              <span className="text-[10px] font-medium mt-1 select-none text-[#30D158]">
                 {isSharing ? 'Stop Share' : 'Share'}
               </span>
+
+              {/* Zoom Share Options Caret Menu */}
+              {shareMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-50" onClick={() => setShareMenuOpen(false)} />
+                  <div
+                    className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 w-72 rounded-2xl p-2.5 shadow-2xl border flex flex-col gap-1 text-xs animate-fadeIn"
+                    style={{
+                      background: 'rgba(28, 29, 34, 0.96)',
+                      backdropFilter: 'blur(36px) saturate(180%)',
+                      WebkitBackdropFilter: 'blur(36px) saturate(180%)',
+                      borderColor: 'rgba(255, 255, 255, 0.16)',
+                      boxShadow: '0 20px 50px rgba(0, 0, 0, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.15)',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isHost) setAllowParticipantShare(false);
+                        setShareMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-white/10 transition cursor-pointer text-white"
+                    >
+                      <span className="truncate">One participant can share at a time</span>
+                      {!allowParticipantShare && <span className="text-[#30D158] font-bold shrink-0 ml-2">✓</span>}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (isHost) setAllowParticipantShare(true);
+                        setShareMenuOpen(false);
+                      }}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-white/10 transition cursor-pointer text-white"
+                    >
+                      <span className="truncate">Multiple participants can share</span>
+                      {allowParticipantShare && <span className="text-[#30D158] font-bold shrink-0 ml-2">✓</span>}
+                    </button>
+
+                    {isHost && (
+                      <>
+                        <div className="h-[1px] bg-white/10 my-1" />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShareMenuOpen(false);
+                            setHostToolsOpen(true);
+                          }}
+                          className="w-full text-left px-3 py-2 rounded-xl hover:bg-white/10 transition text-sky-400 font-medium cursor-pointer"
+                        >
+                          Advanced Sharing Options…
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
-          {/* Position 7: Host Tools (host only, Desktop only: hidden on < 768px) */}
+          {/* Position 7: Host Tools (host only, Desktop only) */}
           {isHost && (
             <div className="hidden md:flex flex-col items-center">
               <button
@@ -688,35 +946,24 @@ export default function CallControlBar({
                 onClick={() => setHostToolsOpen(true)}
                 title="Host Management Tools"
                 aria-label="Host Tools"
-                className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-                style={{
-                  background: hostToolsOpen ? '#10b981' : '#3c4043',
-                  color: '#ffffff',
-                  border: '1px solid rgba(255, 255, 255, 0.15)',
-                }}
+                className="h-10 px-3.5 rounded-2xl flex items-center justify-center bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 cursor-pointer transition active:scale-95 text-white"
               >
-                <HostShieldIcon className="w-5 h-5" />
+                <ZoomSecurityShieldIcon className="w-5 h-5 text-emerald-400" />
               </button>
-              <span className="text-[10px] text-white/70 font-medium mt-1 select-none">Host Tools</span>
+              <span className="text-[10px] text-white/80 font-medium mt-1 select-none">Host tools</span>
             </div>
           )}
 
-          {/* Position 8: More (overflow grid) — visible on desktop & mobile */}
+          {/* Position 8: More */}
           <div className="flex flex-col items-center">
             <button
               type="button"
               onClick={() => setMoreMenuOpen((v) => !v)}
               title="More options"
               aria-label="More options"
-              className="relative w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-md hover:brightness-110"
-              style={{
-                background: moreMenuOpen ? '#4f5358' : '#3c4043',
-                color: '#ffffff',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-              }}
+              className="relative h-10 px-3.5 rounded-2xl flex items-center justify-center bg-white/[0.08] hover:bg-white/[0.14] border border-white/10 cursor-pointer transition active:scale-95 text-white"
             >
-              <MoreIcon className="w-5 h-5" />
-              {/* On mobile, show badge here if messages unread */}
+              <ZoomMoreIcon className="w-5 h-5" />
               <span className="md:hidden">
                 {unreadMessages > 0 && !chatOpen && (
                   <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full text-[10px] font-bold flex items-center justify-center bg-red-500 text-white shadow-md border border-white/20">
@@ -725,10 +972,10 @@ export default function CallControlBar({
                 )}
               </span>
             </button>
-            <span className="text-[10px] text-white/70 font-medium mt-1 select-none">More</span>
+            <span className="text-[10px] text-white/80 font-medium mt-1 select-none">More</span>
           </div>
 
-          {/* Position 9: End (rightmost red) — visible on desktop & mobile */}
+          {/* Position 9: End */}
           <div className="flex flex-col items-center">
             <button
               type="button"
@@ -743,19 +990,16 @@ export default function CallControlBar({
               disabled={ending}
               title={isHost ? 'End or leave class' : 'Leave call'}
               aria-label={isHost ? 'End or leave class' : 'Leave call'}
-              className="w-13 sm:w-16 h-11 sm:h-12 rounded-full flex items-center justify-center cursor-pointer transition-all active:scale-95 shrink-0 shadow-lg hover:brightness-110"
+              className="h-10 px-4 rounded-2xl flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 shrink-0 shadow-lg hover:brightness-110 bg-[#FF453A] hover:bg-red-600 text-white font-bold text-xs"
               style={{
-                background: '#ea4335',
-                color: '#ffffff',
+                boxShadow: '0 4px 14px rgba(255, 69, 58, 0.45)',
                 border: '1px solid rgba(255, 255, 255, 0.25)',
-                boxShadow: '0 6px 18px rgba(234, 67, 53, 0.5)',
               }}
             >
-              <LeaveIcon className="w-5 h-5 sm:w-6 sm:h-6" />
+              <ZoomEndHexagonIcon className="w-4 h-4" />
+              <span>{isHost ? 'End' : 'Leave'}</span>
             </button>
-            <span className="text-[10px] text-red-400 font-bold mt-1 select-none">
-              {isHost ? 'End' : 'Leave'}
-            </span>
+            <span className="text-[10px] text-red-400 font-bold mt-1 select-none opacity-0">.</span>
             {endError && (
               <span role="alert" className="mt-1 max-w-[180px] text-center text-[10px] font-semibold text-amber-300">
                 {endError}
@@ -1099,6 +1343,7 @@ export default function CallControlBar({
       {settingsOpen && (
         <CallSettingsModal
           onClose={() => setSettingsOpen(false)}
+          initialTab={settingsInitialTab}
           viewMode={viewMode}
           onViewModeChange={onViewModeChange}
           onToggleEffects={onToggleEffects}

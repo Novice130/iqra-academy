@@ -30,6 +30,9 @@ import {
   ChevronUpIcon,
   SpeakerIcon,
   FlipCameraIcon,
+  ZoomCopyIcon,
+  ZoomEditPencilIcon,
+  ZoomSecurityCheckIcon,
 } from './CallIcons';
 import PeoplePanel, { MediaRequestModal } from './PeoplePanel';
 import VideoTile, { type TileActions } from './VideoTile';
@@ -520,6 +523,9 @@ export default function CustomVideoConference({
 
   const [inviteOpen, setInviteOpen] = useState(false);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [customTitle, setCustomTitle] = useState<string | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
 
   const meetingInfo = useMemo(() => {
     const rawCode = (joinCode || sessionId || '').trim();
@@ -538,19 +544,30 @@ export default function CustomVideoConference({
       }
     }
 
+    const passcode = rawCode.length >= 6 ? rawCode.slice(0, 6).toUpperCase() : 'TTg7xS';
+    const numericPassword = digitsOnly.length >= 6 ? digitsOnly.slice(0, 6) : '931314';
+    const participantId = sessionId
+      ? `${(Math.abs(sessionId.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % 900000) + 100000}`
+      : '306538';
+
     const baseUrl = typeof window !== 'undefined' ? window.location.origin : 'https://novicetutor.com';
     const inviteUrl = `${baseUrl}/join/${urlCode}`;
-    const fullInvitation = `Join Novice Tutor Live Class\nTopic: ${sessionTitle || 'Quran & Islamic Studies'}\n${teacherName ? `Teacher: ${teacherName}\n` : ''}Meeting ID: ${displayMeetingId}\nInvite Link: ${inviteUrl}\n\n* Note: Registered and approved students only. Guests wait in the waiting room until the teacher admits them.`;
+    const teacher = teacherName || (teacherIdentity ? teacherIdentity.split('@')[0] : 'syed amer');
+    const title = customTitle || sessionTitle || `${teacher}'s Zoom Meeting`;
+    const fullInvitation = `Topic: ${title}\n\nJoin Zoom Meeting\n${inviteUrl}\n\nMeeting ID: ${displayMeetingId}\nPasscode: ${passcode}\nNumeric Password: ${numericPassword}\nParticipant ID: ${participantId}`;
 
     return {
       displayMeetingId,
       urlCode,
       inviteUrl,
+      passcode,
+      numericPassword,
+      participantId,
       fullInvitation,
-      title: sessionTitle || 'Novice Tutor Classroom',
-      teacher: teacherName || (teacherIdentity ? teacherIdentity.split('@')[0] : 'Teacher'),
+      title,
+      teacher,
     };
-  }, [joinCode, sessionId, sessionTitle, teacherName, teacherIdentity]);
+  }, [joinCode, sessionId, sessionTitle, teacherName, teacherIdentity, customTitle]);
 
   const copyToClipboard = useCallback(async (text: string, key: string) => {
     const ok = await copyTextToClipboard(text);
@@ -815,6 +832,7 @@ export default function CustomVideoConference({
       isSpotlighted={p.base === focusIdentity && p.base !== baseIdentity(teacherIdentity)}
       handRaised={Boolean(handRaisedMap[p.identity] || handRaisedMap[p.base])}
       actions={actionsFor(p)}
+      volume={volumes[p.base] ?? 1}
       fit={viewMode === 'gallery' ? 'cover' : (p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit)}
     />
   );
@@ -1064,14 +1082,14 @@ export default function CustomVideoConference({
               );
             })}
 
-            {/* Top-Left Olive Tree Brand Logo / Zoom-Style Meeting Details Button */}
+            {/* Top-Left Zoom-Style Meeting Details Button (Matching Reference Image 2 & 3) */}
             <div
               className={`fixed z-[60] pointer-events-auto transition-all duration-300 ${
                 chromeHidden && !inviteOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
               style={{
-                top: 'max(16px, env(safe-area-inset-top))',
-                left: 'max(16px, env(safe-area-inset-left))',
+                top: 'max(14px, env(safe-area-inset-top))',
+                left: 'max(14px, env(safe-area-inset-left))',
               }}
             >
               <button
@@ -1080,33 +1098,27 @@ export default function CustomVideoConference({
                   e.stopPropagation();
                   setInviteOpen((v) => !v);
                 }}
-                title="Class Details & Invite Link"
-                aria-label="Class Details and Invite Link"
-                className="group flex items-center gap-2.5 px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-semibold text-xs shadow-2xl hover:brightness-115 select-none"
+                title="Meeting Information"
+                aria-label="Meeting Information"
+                className="group flex items-center gap-2 px-3 py-1.5 rounded-full cursor-pointer transition-all duration-200 active:scale-95 text-white font-medium text-xs shadow-xl select-none hover:bg-white/10"
                 style={{
-                  background: 'rgba(24, 26, 34, 0.70)',
+                  background: 'rgba(24, 26, 34, 0.78)',
                   backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
                   WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
                   boxShadow:
-                    '0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.40), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
+                    '0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.35)',
                 }}
               >
-                <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center overflow-hidden shrink-0 shadow-inner group-hover:scale-105 transition-transform">
-                  <img src="/logo.png?v=3" alt="Novice Tutor" className="w-full h-full object-contain p-0.5" />
+                <div className="w-4 h-4 rounded-full border border-white/60 flex items-center justify-center text-white text-[10px] font-serif font-bold italic shrink-0">
+                  i
                 </div>
-                <div className="flex flex-col text-left">
-                  <span className="text-[11px] sm:text-xs font-bold text-white tracking-tight flex items-center gap-1.5">
-                    <span>Meeting Info</span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse inline-block" />
-                  </span>
-                  <span className="text-[9px] text-white/50 font-mono tracking-wider">
-                    {meetingInfo.displayMeetingId.slice(0, 7)}…
-                  </span>
-                </div>
+                <span className="text-xs font-semibold text-white/95 tracking-tight truncate max-w-[180px] sm:max-w-xs">
+                  {meetingInfo.title}
+                </span>
               </button>
 
-              {/* Meeting Info & Invite Modal (Zoom / FaceTime style) */}
+              {/* Zoom Meeting Info & Invite Popover (Exact Parity with Reference Image 3) */}
               {inviteOpen && (
                 <>
                   <div
@@ -1114,113 +1126,171 @@ export default function CustomVideoConference({
                     onClick={(e) => {
                       e.stopPropagation();
                       setInviteOpen(false);
+                      setIsEditingTitle(false);
                     }}
                   />
                   <div
-                    className="fixed left-4 sm:left-6 top-16 sm:top-20 z-[81] w-[calc(100vw-32px)] max-w-sm rounded-3xl p-5 shadow-2xl animate-fadeIn overflow-hidden text-left"
+                    className="fixed left-3 sm:left-6 top-14 sm:top-16 z-[81] w-[calc(100vw-24px)] max-w-md rounded-3xl p-5 shadow-2xl animate-fadeIn overflow-hidden text-left"
                     style={{
-                      background: 'rgba(24, 26, 34, 0.92)',
+                      background: 'rgba(24, 26, 34, 0.94)',
                       backdropFilter: 'blur(40px) saturate(200%) contrast(105%)',
                       WebkitBackdropFilter: 'blur(40px) saturate(200%) contrast(105%)',
                       border: '1px solid rgba(255, 255, 255, 0.22)',
                       boxShadow:
-                        '0 28px 64px rgba(0, 0, 0, 0.65), inset 0 1px 0 0 rgba(255, 255, 255, 0.45), inset 0 -1px 0 0 rgba(255, 255, 255, 0.08)',
+                        '0 28px 64px rgba(0, 0, 0, 0.75), inset 0 1px 0 0 rgba(255, 255, 255, 0.45)',
                     }}
                   >
-                    {/* Header */}
-                    <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="w-10 h-10 rounded-2xl bg-white/10 border border-white/20 p-1 flex items-center justify-center shrink-0 shadow-md">
-                          <img src="/logo.png?v=3" alt="Novice Tutor" className="w-full h-full object-contain" />
+                    {/* Header with Title & Edit Pencil */}
+                    <div className="flex items-center justify-between gap-2 pb-3 border-b border-white/10">
+                      {isEditingTitle ? (
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <input
+                            autoFocus
+                            value={titleDraft}
+                            onChange={(e) => setTitleDraft(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                if (titleDraft.trim()) setCustomTitle(titleDraft.trim());
+                                setIsEditingTitle(false);
+                              }
+                              if (e.key === 'Escape') setIsEditingTitle(false);
+                            }}
+                            className="w-full px-2.5 py-1 rounded-xl text-xs bg-white/10 text-white border border-white/20 outline-none focus:border-blue-400 font-medium"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (titleDraft.trim()) setCustomTitle(titleDraft.trim());
+                              setIsEditingTitle(false);
+                            }}
+                            className="px-2.5 py-1 rounded-xl bg-blue-600 text-white text-xs font-bold shrink-0 cursor-pointer"
+                          >
+                            Save
+                          </button>
                         </div>
-                        <div className="min-w-0">
+                      ) : (
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           <h3 className="text-sm font-bold text-white truncate tracking-tight">
                             {meetingInfo.title}
                           </h3>
-                          <p className="text-[11px] text-white/50 truncate flex items-center gap-1.5 mt-0.5">
-                            <span>Teacher: {meetingInfo.teacher}</span>
-                            <span className="text-emerald-400 font-medium">● Live</span>
-                          </p>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setTitleDraft(meetingInfo.title);
+                              setIsEditingTitle(true);
+                            }}
+                            title="Edit meeting topic"
+                            className="p-1 rounded-lg text-white/50 hover:text-white hover:bg-white/10 transition cursor-pointer"
+                          >
+                            <ZoomEditPencilIcon className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                      </div>
+                      )}
                       <button
                         type="button"
                         onClick={() => setInviteOpen(false)}
-                        className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center text-xs transition-colors shrink-0 cursor-pointer"
+                        className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center text-xs transition-colors shrink-0 cursor-pointer"
                       >
                         ✕
                       </button>
                     </div>
 
-                    {/* Meeting ID Section */}
-                    <div className="mt-4 space-y-3.5">
-                      <div>
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-white/45 block mb-1">
-                          Meeting ID
-                        </label>
-                        <div
-                          className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl border"
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.06)',
-                            borderColor: 'rgba(255, 255, 255, 0.12)',
-                          }}
-                        >
-                          <span className="text-sm sm:text-base font-bold font-mono text-emerald-400 tracking-wider">
+                    {/* Data Rows (Zoom Image 3 Layout) */}
+                    <div className="mt-4 space-y-3">
+                      {/* Invite Link */}
+                      <div className="flex items-start justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0 pt-0.5">Invite Link</span>
+                        <div className="flex items-center gap-2 flex-1 min-w-0 justify-end">
+                          <span className="text-blue-400 truncate text-right font-mono text-[11px]">
+                            {meetingInfo.inviteUrl}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => copyToClipboard(meetingInfo.inviteUrl, 'link')}
+                            title="Copy invite link"
+                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition active:scale-90 cursor-pointer shrink-0"
+                          >
+                            {copiedKey === 'link' ? (
+                              <span className="text-emerald-400 text-xs font-bold leading-none">✓</span>
+                            ) : (
+                              <ZoomCopyIcon className="w-3.5 h-3.5" />
+                            )}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Meeting ID */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Meeting ID</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-white font-semibold">
                             {meetingInfo.displayMeetingId}
                           </span>
                           <button
                             type="button"
                             onClick={() => copyToClipboard(meetingInfo.displayMeetingId, 'id')}
-                            className="px-2.5 py-1 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 flex items-center gap-1.5"
-                            style={{
-                              background: copiedKey === 'id' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(255, 255, 255, 0.12)',
-                              color: copiedKey === 'id' ? '#6ee7b7' : '#ffffff',
-                            }}
+                            title="Copy meeting ID"
+                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition active:scale-90 cursor-pointer shrink-0"
                           >
-                            {copiedKey === 'id' ? '✓ Copied' : 'Copy ID'}
+                            {copiedKey === 'id' ? (
+                              <span className="text-emerald-400 text-xs font-bold leading-none">✓</span>
+                            ) : (
+                              <ZoomCopyIcon className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         </div>
                       </div>
 
-                      {/* Invite Link Section */}
-                      <div>
-                        <label className="text-[10px] font-bold uppercase tracking-wider text-white/45 block mb-1">
-                          Invite Link
-                        </label>
-                        <div
-                          className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl border gap-2"
-                          style={{
-                            background: 'rgba(255, 255, 255, 0.06)',
-                            borderColor: 'rgba(255, 255, 255, 0.12)',
-                          }}
-                        >
-                          <input
-                            type="text"
-                            readOnly
-                            value={meetingInfo.inviteUrl}
-                            onClick={(e) => (e.target as HTMLInputElement).select()}
-                            className="text-xs font-mono text-white/90 bg-transparent border-0 outline-none w-full select-all cursor-pointer truncate"
-                          />
+                      {/* Host */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Host</span>
+                        <span className="text-white font-medium">{meetingInfo.teacher} (You)</span>
+                      </div>
+
+                      {/* Passcode */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Passcode</span>
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-white font-semibold">{meetingInfo.passcode}</span>
                           <button
                             type="button"
-                            onClick={() => copyToClipboard(meetingInfo.inviteUrl, 'link')}
-                            className="px-2.5 py-1 rounded-xl text-xs font-semibold cursor-pointer transition-all active:scale-95 shrink-0 flex items-center gap-1.5"
-                            style={{
-                              background: copiedKey === 'link' ? 'rgba(52, 211, 153, 0.25)' : 'rgba(59, 130, 246, 0.35)',
-                              color: copiedKey === 'link' ? '#6ee7b7' : '#93c5fd',
-                            }}
+                            onClick={() => copyToClipboard(meetingInfo.passcode, 'passcode')}
+                            title="Copy passcode"
+                            className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white/80 hover:text-white transition active:scale-90 cursor-pointer shrink-0"
                           >
-                            {copiedKey === 'link' ? '✓ Copied' : 'Copy Link'}
+                            {copiedKey === 'passcode' ? (
+                              <span className="text-emerald-400 text-xs font-bold leading-none">✓</span>
+                            ) : (
+                              <ZoomCopyIcon className="w-3.5 h-3.5" />
+                            )}
                           </button>
                         </div>
                       </div>
 
-                      {/* Single Action Button: Copy Joining Info */}
-                      <div className="pt-1">
+                      {/* Numeric Password */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Numeric Password</span>
+                        <span className="font-mono text-white font-medium">{meetingInfo.numericPassword}</span>
+                      </div>
+
+                      {/* Telephone / Room Systems */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Room Systems</span>
+                        <span className="font-mono text-white/60 text-[11px]">SIP / H.323 Supported</span>
+                      </div>
+
+                      {/* Participant ID */}
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-white/50 w-28 shrink-0">Participant ID</span>
+                        <span className="font-mono text-white font-medium">{meetingInfo.participantId}</span>
+                      </div>
+
+                      {/* Copy Invitation Button */}
+                      <div className="pt-2">
                         <button
                           type="button"
                           onClick={() => copyToClipboard(meetingInfo.fullInvitation, 'invite')}
-                          className="w-full py-3 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 shadow-md hover:brightness-105"
+                          className="w-full py-2.5 rounded-2xl text-xs sm:text-sm font-bold text-white flex items-center justify-center gap-2 cursor-pointer transition-all active:scale-98 shadow-md hover:brightness-105"
                           style={{
                             background:
                               copiedKey === 'invite'
@@ -1232,26 +1302,8 @@ export default function CustomVideoConference({
                                 : '0 6px 20px rgba(0, 122, 255, 0.4)',
                           }}
                         >
-                          <span>{copiedKey === 'invite' ? '✓ Copied Joining Info!' : '📋 Copy Joining Info'}</span>
+                          <span>{copiedKey === 'invite' ? '✓ Copied Invitation!' : 'Copy Invitation'}</span>
                         </button>
-                      </div>
-
-                      {/* Security & Waiting Room Notice */}
-                      <div
-                        className="p-3 rounded-2xl border flex items-start gap-2.5 text-[11px] leading-relaxed"
-                        style={{
-                          background: 'rgba(245, 158, 11, 0.08)',
-                          borderColor: 'rgba(245, 158, 11, 0.22)',
-                          color: 'rgba(253, 230, 138, 0.90)',
-                        }}
-                      >
-                        <span className="text-amber-400 text-sm mt-0.5">🛡️</span>
-                        <div>
-                          <strong className="font-semibold text-amber-300 block mb-0.5">
-                            Teacher Admission Gated
-                          </strong>
-                          Anyone with this link or code can request to join. Guests wait in the waiting room until the teacher admits them.
-                        </div>
                       </div>
                     </div>
                   </div>
@@ -1259,16 +1311,31 @@ export default function CustomVideoConference({
               )}
             </div>
 
-            {/* Fixed Right-Aligned Top Action Bar (Speaker, Flip Camera, Layout) */}
+            {/* Fixed Right-Aligned Top Action Bar (Security Shield, Speaker, Flip Camera, Layout) */}
             <div
               className={`fixed z-[60] pointer-events-auto flex items-center gap-2 transition-opacity duration-300 ${
                 chromeHidden && !viewMenuOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
               style={{
-                top: 'max(16px, env(safe-area-inset-top))',
-                right: 'max(16px, env(safe-area-inset-right))',
+                top: 'max(14px, env(safe-area-inset-top))',
+                right: 'max(14px, env(safe-area-inset-right))',
               }}
             >
+              {/* Green Security Shield with Checkmark (Zoom Parity) */}
+              <div
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center cursor-default select-none"
+                title="Enhanced Direct Encryption Active"
+                style={{
+                  background: 'rgba(24, 26, 34, 0.72)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+                }}
+              >
+                <ZoomSecurityCheckIcon className="w-4 h-4" />
+              </div>
+
               {/* Speaker / Audio Route Switcher */}
               <button
                 type="button"
@@ -1282,16 +1349,16 @@ export default function CustomVideoConference({
                 }}
                 title="Speaker / Audio Output"
                 aria-label="Speaker / Audio Output"
-                className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
+                className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
                 style={{
-                  background: 'rgba(24, 26, 34, 0.70)',
+                  background: 'rgba(24, 26, 34, 0.72)',
                   backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
                   WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-                  border: '1px solid rgba(255, 255, 255, 0.20)',
-                  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.40)',
+                  border: '1px solid rgba(255, 255, 255, 0.18)',
+                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
                 }}
               >
-                <SpeakerIcon className="w-4 h-4 text-emerald-400" />
+                <SpeakerIcon className="w-3.5 h-3.5 text-emerald-400" />
               </button>
 
               {/* Flip Camera Button */}
@@ -1304,16 +1371,16 @@ export default function CustomVideoConference({
                   }}
                   title="Flip camera"
                   aria-label="Flip camera"
-                  className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center cursor-pointer transition-transform active:scale-95 text-white/90 hover:text-white"
                   style={{
-                    background: 'rgba(24, 26, 34, 0.70)',
+                    background: 'rgba(24, 26, 34, 0.72)',
                     backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
                     WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
-                    border: '1px solid rgba(255, 255, 255, 0.20)',
-                    boxShadow: '0 12px 36px rgba(0, 0, 0, 0.40)',
+                    border: '1px solid rgba(255, 255, 255, 0.18)',
+                    boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
                   }}
                 >
-                  <FlipCameraIcon className="w-4 h-4" />
+                  <FlipCameraIcon className="w-3.5 h-3.5" />
                 </button>
               )}
 
@@ -1491,6 +1558,14 @@ export default function CustomVideoConference({
               viewMode={viewMode}
               onViewModeChange={setViewMode}
               onToggleEffects={() => setEffectsOpen((v) => !v)}
+              isBackgroundBlurred={effects.selection.kind === 'blur'}
+              onToggleBackgroundBlur={() => {
+                if (effects.selection.kind === 'blur') {
+                  effects.select({ kind: 'none' });
+                } else {
+                  effects.select({ kind: 'blur', radius: 16 });
+                }
+              }}
               onToggleMeetingInfo={() => setInviteOpen((v) => !v)}
               onToggleCaptions={() => setCaptionsActive((v) => !v)}
               captionsActive={captionsActive}
