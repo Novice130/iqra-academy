@@ -19,7 +19,7 @@ import ClassActionButton from "@/components/ClassActionButton";
 import CopyLinkButton from "@/components/CopyLinkButton";
 import SessionRowActions from "../dashboard/teacher/SessionRowActions";
 import LocalTime from "@/components/LocalTime";
-import { getAttendanceReport } from "@/lib/attendance";
+import { getAttendanceStats } from "@/lib/attendance";
 import InstantMeetingAdminButton from "./InstantMeetingAdminButton";
 
 interface LiveClassCardData {
@@ -407,24 +407,19 @@ async function getOrgMetrics(orgId: string, isSuperAdmin: boolean) {
       ? inArray(invoices.status, ["OPEN", "OVERDUE"])
       : and(eq(invoices.orgId, orgId), inArray(invoices.status, ["OPEN", "OVERDUE"]));
 
-    const [studentsCount, teachersCount, todayCount, openInvoicesCount, attendanceReport] = await Promise.all([
+    const [studentsCount, teachersCount, todayCount, openInvoicesCount, attendanceStats] = await Promise.all([
       db.select({ count: sql<number>`count(*)::int` }).from(studentProfiles).where(studentWhere),
       db.select({ count: sql<number>`count(*)::int` }).from(users).where(teacherWhere),
       db.select({ count: sql<number>`count(*)::int` }).from(sessions).where(todayClassWhere),
       db.select({ count: sql<number>`count(*)::int` }).from(invoices).where(invoiceWhere),
-      getAttendanceReport({
-        orgId: isSuperAdmin ? "" : orgId,
+      getAttendanceStats({
+        orgId: isSuperAdmin ? undefined : orgId,
         from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
         to: new Date(),
-      }).catch(() => []),
+      }).catch(() => ({ expected: 0, attended: 0, attendanceRate: "--" })),
     ]);
 
-    const expected = attendanceReport.reduce((sum, occ) => sum + occ.students.length, 0);
-    const attended = attendanceReport.reduce(
-      (sum, occ) => sum + occ.students.filter((s) => s.status !== "ABSENT").length,
-      0
-    );
-    const attendanceRate = expected > 0 && attended > 0 ? `${Math.round((attended / expected) * 100)}%` : "--";
+    const attendanceRate = attendanceStats.attendanceRate;
 
     return {
       students: studentsCount[0]?.count ?? 0,

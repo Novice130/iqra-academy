@@ -11,7 +11,8 @@
  * - End class for everyone
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useHostControls } from './hostControls';
 import { HostShieldIcon, MicOffIcon } from './CallIcons';
 
@@ -77,14 +78,24 @@ export default function HostToolsModal({
     }
   };
 
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
       <div
-        className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm animate-fadeIn"
+        className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm animate-fadeIn"
         onClick={onClose}
       />
       <div
-        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[81] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-6 shadow-2xl animate-fadeIn overflow-y-auto max-h-[85vh]"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Host Management Tools"
+        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[101] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-6 shadow-2xl animate-fadeIn overflow-y-auto max-h-[85vh]"
         style={{
           background: 'rgba(24, 26, 32, 0.96)',
           backdropFilter: 'blur(36px) saturate(180%)',
@@ -272,6 +283,7 @@ export default function HostToolsModal({
           </div>
         </div>
       </div>
-    </>
+    </>,
+    document.body
   );
 }

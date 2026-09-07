@@ -126,6 +126,8 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
   private isInferring = false;
   private inferenceCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private inferenceCtx: OffscreenCanvasRenderingContext2D | CanvasRenderingContext2D | null = null;
+  /** MediaPipe's own canvas, kept free of any 2d context — see the glCanvas getter. */
+  private segmenterCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
   private worker: SegmentationWorkerClient | null = null;
   private generation = 0;
   private inferenceSequence = 0;
@@ -177,6 +179,26 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
       : null;
   }
 
+  /**
+   * A context-free canvas for MediaPipe. It never gets a 2d context: a canvas
+   * that already has one cannot also give the graph runner the WebGL context
+   * it needs, and sharing the draw canvas made every delegate fail at
+   * `StartGraph` with a missing `kGpuService`.
+   */
+  private get glCanvas(): OffscreenCanvas | HTMLCanvasElement | null {
+    if (this.segmenterCanvas) return this.segmenterCanvas;
+    const size = this.quality === 'detailed' ? 256 : 144;
+    if (typeof OffscreenCanvas !== 'undefined') {
+      this.segmenterCanvas = new OffscreenCanvas(256, size);
+    } else if (typeof document !== 'undefined') {
+      const c = document.createElement('canvas');
+      c.width = 256;
+      c.height = size;
+      this.segmenterCanvas = c;
+    }
+    return this.segmenterCanvas;
+  }
+
   private async initializeInference() {
     if (typeof Worker !== 'undefined' && typeof VideoFrame !== 'undefined') {
       try {
@@ -200,7 +222,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
 
   private async initializeMainThreadSegmenter() {
     if (this.segmenter) return;
-    const canvas = this.inferenceCanvas;
+    const canvas = this.glCanvas;
     if (!canvas) throw new Error('Background inference canvas is unavailable');
     const fileSet = await vision.FilesetResolver.forVisionTasks(WASM_BASE);
     try {
@@ -326,6 +348,7 @@ export default class SmoothBackgroundTransformer extends VideoTransformer<Smooth
     this.canvas = undefined;
     this.inferenceCanvas = null;
     this.inferenceCtx = null;
+    this.segmenterCanvas = null;
   }
 
   async update(options: SmoothBackgroundOptions) {

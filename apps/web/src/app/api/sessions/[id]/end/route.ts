@@ -87,17 +87,17 @@ export async function POST(
       // Tell every booked phone to drop the "Join classroom now" card. Anyone
       // who was *in* the room learns instantly from LiveKit's `roomDeleted`;
       // this is for the student who never joined and whose app is otherwise
-      // waiting on its next poll. Deferred so the teacher's tap doesn't wait
+      // waiting on its next poll. Deferred push so the teacher's tap doesn't wait
       // on N push round-trips.
-      afterResponse(
-        classRosterUserIds({
-          canonical: session,
-          teacherId: session.teacherId,
-          includeFinished: true,
-        }).then((userIds) =>
-          userIds.length ? sendClassEndedPush(userIds, sessionId) : 0
-        )
-      );
+      const endUserIds = await classRosterUserIds({
+        canonical: session,
+        teacherId: session.teacherId,
+        includeFinished: true,
+      }).catch(() => []);
+
+      if (endUserIds.length) {
+        afterResponse(sendClassEndedPush(endUserIds, sessionId).catch(() => 0));
+      }
 
       return NextResponse.json({ success: true });
     } catch (error) {

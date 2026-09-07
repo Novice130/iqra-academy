@@ -19,7 +19,7 @@
  * instant leaves as an ISO string and is rendered in the viewer's zone.
  */
 
-import { and, eq, gte, inArray, isNull, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bookings, sessionAttendance, sessions, studentProfiles, users } from "@/db/schema";
 import { groupIntoOccurrences } from "@/lib/class-room";
@@ -337,3 +337,65 @@ export async function getAttendanceReport(opts: {
     })
     .sort((a, b) => (b.scheduledStart ?? "").localeCompare(a.scheduledStart ?? ""));
 }
+
+export interface AttendanceStats {
+  expected: number;
+  attended: number;
+  attendanceRate: string;
+}
+
+/**
+ * Fast SQL-aggregated attendance statistics for dashboards.
+ * Replaces loading the entire 30-day session/booking/attendance object graph into Worker memory.
+ */
+export async function getAttendanceStats(opts: {
+  orgId?: string;
+  teacherId?: string;
+  from: Date;
+  to: Date;
+}): Promise<AttendanceStats> {
+  const conditions = [
+    gte(sessions.scheduledStart, opts.from),
+    lte(sessions.scheduledStart, opts.to),
+    isNull(sessions.mergedIntoId),
+  ];
+  if (opts.orgId) {
+    conditions.push(eq(sessions.orgId, opts.orgId));
+  }
+  if (opts.teacherId) {
+    conditions.push(eq(sessions.teacherId, opts.teacherId));
+  }
+
+  const res = await db
+    .select({
+      expected: sql<number>`count(distinct ${bookings.id})::int`,
+      attended: sql<number>`count(distinct case when ${sessionAttendance.id} is not null then ${bookings.id} end)::int`,
+    })
+    .from(sessions)
+    .innerJoin(
+      bookings,
+      and(
+        eq(bookings.sessionId, sessions.id),
+        ne(bookings.status, "CANCELLED")
+      )
+    )
+    .leftJoin(
+      sessionAttendance,
+      and(
+        eq(sessionAttendance.sessionId, sessions.id),
+        eq(sessionAttendance.userId, bookings.userId),
+        eq(sessionAttendance.role, "STUDENT")
+      )
+    )
+    .where(and(...conditions));
+
+  const expected = res[0]?.expected ?? 0;
+  const attended = res[0]?.attended ?? 0;
+  const attendanceRate =
+    expected > 0 && attended > 0
+      ? `${Math.round((attended / expected) * 100)}%`
+      : "--";
+
+  return { expected, attended, attendanceRate };
+}
+

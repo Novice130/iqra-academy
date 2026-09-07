@@ -26,7 +26,10 @@ export class SegmentationWorkerClient {
   ) {}
 
   async init() {
-    const worker = new Worker(new URL('./segmentation.worker.ts', import.meta.url), { type: 'module' });
+    // Classic worker, not `type: 'module'`: MediaPipe's wasm loader calls
+    // importScripts(), which module workers reject ("The URL ... is invalid").
+    // The bundler inlines the ESM source either way, so nothing is lost.
+    const worker = new Worker(new URL('./segmentation.worker.ts', import.meta.url));
     this.worker = worker;
 
     await new Promise<void>((resolve, reject) => {

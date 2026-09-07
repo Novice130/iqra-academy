@@ -23,7 +23,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { withDb, withRLS } from "@/lib/db";
+import { withDb, withHttpDb, withRLS } from "@/lib/db";
 import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { auditLogs, bookings, sessions, studentProfiles, users } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
@@ -73,7 +73,7 @@ function formatIn(instant: Date, zone: string | null): string {
 
 /** GET /api/sessions/merge — what could be combined. */
 export async function GET(request: NextRequest) {
-  return withDb(async () => {
+  return withHttpDb(async () => {
     try {
       const authResult = await requireRole(request, ["TEACHER"]);
       if (authResult instanceof NextResponse) return authResult;

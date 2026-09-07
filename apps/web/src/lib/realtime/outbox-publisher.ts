@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { schedulingEvents } from "@/db/schema";
 import { and, asc, eq, isNull, lt } from "drizzle-orm";
 import type { SchedulingEventMessage } from "@/realtime/protocol";
@@ -116,49 +116,51 @@ export interface DrainResult {
  * request's afterResponse sweep).
  */
 export async function drainOutbox(opts: { orgId?: string; limit?: number } = {}): Promise<DrainResult> {
-  const limit = opts.limit ?? 50;
-  const whereConditions = [
-    isNull(schedulingEvents.publishedAt),
-    lt(schedulingEvents.attempts, 5),
-  ];
-  if (opts.orgId) {
-    whereConditions.push(eq(schedulingEvents.orgId, opts.orgId));
-  }
+  return withHttpDb(async () => {
+    const limit = opts.limit ?? 50;
+    const whereConditions = [
+      isNull(schedulingEvents.publishedAt),
+      lt(schedulingEvents.attempts, 5),
+    ];
+    if (opts.orgId) {
+      whereConditions.push(eq(schedulingEvents.orgId, opts.orgId));
+    }
 
-  const pending = await db
-    .select()
-    .from(schedulingEvents)
-    .where(and(...whereConditions))
-    .orderBy(asc(schedulingEvents.createdAt))
-    .limit(limit);
+    const pending = await db
+      .select()
+      .from(schedulingEvents)
+      .where(and(...whereConditions))
+      .orderBy(asc(schedulingEvents.createdAt))
+      .limit(limit);
 
-  let published = 0;
-  let failed = 0;
-  const deadLettered: string[] = [];
+    let published = 0;
+    let failed = 0;
+    const deadLettered: string[] = [];
 
-  for (const row of pending) {
-    const message = toSchedulingEventMessage(row);
-    try {
-      await publishToHub(message);
-      await db
-        .update(schedulingEvents)
-        .set({ publishedAt: new Date() })
-        .where(eq(schedulingEvents.id, row.id));
-      published++;
-    } catch (err) {
-      failed++;
-      console.warn(`[Realtime Outbox] Failed publishing event ${row.id}:`, err);
-      const nextAttempts = (row.attempts ?? 0) + 1;
-      await db
-        .update(schedulingEvents)
-        .set({ attempts: nextAttempts })
-        .where(eq(schedulingEvents.id, row.id));
-      if (nextAttempts >= 5) {
-        deadLettered.push(row.id);
-        console.error(`[Realtime Outbox Dead-Letter] Event ${row.id} for org ${row.orgId} exceeded 5 attempts.`);
+    for (const row of pending) {
+      const message = toSchedulingEventMessage(row);
+      try {
+        await publishToHub(message);
+        await db
+          .update(schedulingEvents)
+          .set({ publishedAt: new Date() })
+          .where(eq(schedulingEvents.id, row.id));
+        published++;
+      } catch (err) {
+        failed++;
+        console.warn(`[Realtime Outbox] Failed publishing event ${row.id}:`, err);
+        const nextAttempts = (row.attempts ?? 0) + 1;
+        await db
+          .update(schedulingEvents)
+          .set({ attempts: nextAttempts })
+          .where(eq(schedulingEvents.id, row.id));
+        if (nextAttempts >= 5) {
+          deadLettered.push(row.id);
+          console.error(`[Realtime Outbox Dead-Letter] Event ${row.id} for org ${row.orgId} exceeded 5 attempts.`);
+        }
       }
     }
-  }
 
-  return { published, failed, deadLettered };
+    return { published, failed, deadLettered };
+  });
 }

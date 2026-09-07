@@ -8,6 +8,7 @@
  */
 
 import React, { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useRoomContext, useRemoteParticipants } from '@livekit/components-react';
 
 interface BreakoutRoomView {
@@ -136,13 +137,21 @@ export default function BreakoutPanel({
     }
   };
 
-  return (
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted || typeof document === 'undefined') return null;
+
+  return createPortal(
     <>
-      <div className="fixed inset-0 z-[80] bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm animate-fadeIn" onClick={onClose} />
       <div
         role="dialog"
+        aria-modal="true"
         aria-label="Breakout rooms"
-        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[81] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[85vh]"
+        className="fixed left-1/2 -translate-x-1/2 bottom-0 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[101] w-full sm:max-w-md rounded-t-[32px] sm:rounded-3xl p-6 shadow-2xl overflow-y-auto max-h-[85vh] animate-fadeIn"
         style={{
           background: 'rgba(24, 26, 32, 0.96)',
           border: '1px solid rgba(255, 255, 255, 0.18)',
@@ -270,6 +279,7 @@ export default function BreakoutPanel({
           </div>
         )}
       </div>
-    </>
+    </>,
+    document.body
   );
 }

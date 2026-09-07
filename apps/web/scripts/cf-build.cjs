@@ -175,17 +175,79 @@ function patchWorkerExports() {
 
     let content = fs.readFileSync(workerFile, "utf8");
     let changed = false;
+
+    // Clean up any legacy named scheduled function export
+    if (content.includes("export async function scheduled")) {
+      content = content.replace(/export async function scheduled[\s\S]*?\}\n?/g, "");
+      changed = true;
+    }
+
     if (!content.includes("export { AvailabilityHub }")) {
       content += '\nexport { AvailabilityHub } from "./cloudflare-templates/AvailabilityHub.js";\n';
       changed = true;
     }
-    if (!content.includes("scheduled(") && !content.includes("export async function scheduled")) {
-      content += '\nexport async function scheduled(event, env, ctx) {\n  // Cron trigger handler for outbox retry sweeper or scheduled jobs\n  console.log("Scheduled cron executed:", event?.cron || "minute-trigger");\n}\n';
+
+    // Attach scheduled handler to the default export object so Cloudflare's cron trigger recognizes it
+    if (!content.includes("async scheduled(event, env, ctx)")) {
+      content = content.replace(
+        /export\s+default\s*\{/,
+        `export default {
+    async scheduled(event, env, ctx) {
+        console.log("Scheduled cron executed:", event?.cron || "minute-trigger");
+        try {
+            const secret = env.REALTIME_SECRET || "novicetutor-realtime-fallback-secret-2026";
+            await fetch("https://novicetutor.com/api/realtime/drain-outbox", {
+                method: "POST",
+                headers: { Authorization: \`Bearer \${secret}\` },
+            });
+        } catch (err) {
+            console.warn("Scheduled outbox drain error:", err);
+        }
+    },`
+      );
       changed = true;
     }
+
+    // Intercept WebSocket upgrade to AvailabilityHub DO at the Cloudflare Worker root level
+    // Next.js App Router cannot stream 101 Switching Protocols responses, causing requests to hang.
+    if (!content.includes('url.pathname === "/api/realtime/ws"')) {
+      const wsRouteCode = `const url = new URL(request.url);
+            if (url.pathname === "/api/realtime/ws") {
+                const ticket = url.searchParams.get("ticket");
+                if (!ticket) {
+                    return new Response(JSON.stringify({ error: "Missing realtime ticket" }), {
+                        status: 401,
+                        headers: { "Content-Type": "application/json" }
+                    });
+                }
+                let orgId = null;
+                try {
+                    const parts = ticket.split(".");
+                    if (parts.length === 3) {
+                        const payload = JSON.parse(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")));
+                        orgId = payload.orgId;
+                    }
+                } catch {}
+                if (!orgId) {
+                    return new Response(JSON.stringify({ error: "Invalid ticket claims" }), {
+                        status: 401,
+                        headers: { "Content-Type": "application/json" }
+                    });
+                }
+                if (env.AVAILABILITY_HUB && typeof env.AVAILABILITY_HUB.idFromName === "function") {
+                    const doId = env.AVAILABILITY_HUB.idFromName(orgId);
+                    const stub = env.AVAILABILITY_HUB.get(doId);
+                    return stub.fetch(request);
+                }
+                return new Response("AvailabilityHub DO not bound", { status: 503 });
+            }`;
+      content = content.replace("const url = new URL(request.url);", wsRouteCode);
+      changed = true;
+    }
+
     if (changed) {
       fs.writeFileSync(workerFile, content, "utf8");
-      console.log("✅ Successfully patched .open-next/worker.js exports (AvailabilityHub & scheduled)!");
+      console.log("✅ Successfully patched .open-next/worker.js exports (AvailabilityHub, scheduled & WebSocket intercept)!");
     }
   }
 }

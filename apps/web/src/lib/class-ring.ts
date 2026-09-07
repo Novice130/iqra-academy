@@ -30,7 +30,7 @@
 
 import { and, eq, gt, gte, inArray, lte, ne } from "drizzle-orm";
 import { createId } from "@paralleldrive/cuid2";
-import { db } from "@/lib/db";
+import { db, withHttpDb } from "@/lib/db";
 import { bookings, callInvites, sessions, users } from "@/db/schema";
 import { SIBLING_WINDOW_MS } from "@/lib/class-room";
 import { baseIdentity, getRoomServiceClient } from "@/lib/livekit";
@@ -69,31 +69,33 @@ export async function classRosterUserIds(opts: {
   teacherId: string;
   includeFinished?: boolean;
 }): Promise<string[]> {
-  const { canonical, teacherId, includeFinished = false } = opts;
+  return withHttpDb(async () => {
+    const { canonical, teacherId, includeFinished = false } = opts;
 
-  // Same ±90min rule the room resolver groups occurrences on.
-  const anchor = canonical.scheduledStart?.getTime() ?? Date.now();
-  const statusFilters = includeFinished
-    ? [ne(sessions.status, "CANCELLED")]
-    : [ne(sessions.status, "CANCELLED"), ne(sessions.status, "COMPLETED")];
+    // Same ±90min rule the room resolver groups occurrences on.
+    const anchor = canonical.scheduledStart?.getTime() ?? Date.now();
+    const statusFilters = includeFinished
+      ? [ne(sessions.status, "CANCELLED")]
+      : [ne(sessions.status, "CANCELLED"), ne(sessions.status, "COMPLETED")];
 
-  const rows = await db.query.sessions.findMany({
-    where: and(
-      eq(sessions.teacherId, canonical.teacherId),
-      ...statusFilters,
-      gte(sessions.scheduledStart, new Date(anchor - SIBLING_WINDOW_MS)),
-      lte(sessions.scheduledStart, new Date(anchor + SIBLING_WINDOW_MS))
-    ),
-    columns: { id: true },
+    const rows = await db.query.sessions.findMany({
+      where: and(
+        eq(sessions.teacherId, canonical.teacherId),
+        ...statusFilters,
+        gte(sessions.scheduledStart, new Date(anchor - SIBLING_WINDOW_MS)),
+        lte(sessions.scheduledStart, new Date(anchor + SIBLING_WINDOW_MS))
+      ),
+      columns: { id: true },
+    });
+    const sessionIds = rows.map((r) => r.id);
+    if (sessionIds.length === 0) return [];
+
+    const roster = await db.query.bookings.findMany({
+      where: and(inArray(bookings.sessionId, sessionIds), ne(bookings.status, "CANCELLED")),
+      columns: { userId: true },
+    });
+    return [...new Set(roster.map((b) => b.userId))].filter((id) => id !== teacherId);
   });
-  const sessionIds = rows.map((r) => r.id);
-  if (sessionIds.length === 0) return [];
-
-  const roster = await db.query.bookings.findMany({
-    where: and(inArray(bookings.sessionId, sessionIds), ne(bookings.status, "CANCELLED")),
-    columns: { userId: true },
-  });
-  return [...new Set(roster.map((b) => b.userId))].filter((id) => id !== teacherId);
 }
 
 /**
@@ -113,79 +115,81 @@ export async function ringClassStudents(opts: {
   teacherId: string;
   teacherName: string;
 }): Promise<number> {
-  const { canonical, roomName, teacherId, teacherName } = opts;
+  return withHttpDb(async () => {
+    const { canonical, roomName, teacherId, teacherName } = opts;
 
-  // 1 & 2. Who is expected in this class, across every row of the occurrence.
-  let candidates = await classRosterUserIds({ canonical, teacherId });
-  if (candidates.length === 0) return 0;
+    // 1 & 2. Who is expected in this class, across every row of the occurrence.
+    let candidates = await classRosterUserIds({ canonical, teacherId });
+    if (candidates.length === 0) return 0;
 
-  // 3. Drop anyone already in the room. Identity is `email#random` per
-  //    connection, so presence is matched on the base identity, which is the
-  //    email — hence loading the users rather than comparing ids.
-  try {
-    const participants = await getRoomServiceClient().listParticipants(roomName);
-    const present = new Set(
-      participants
-        .map((p) => baseIdentity(p.identity))
-        .filter((e): e is string => !!e)
-    );
-    if (present.size > 0) {
-      const people = await db.query.users.findMany({
-        where: inArray(users.id, candidates),
-        columns: { id: true, email: true },
-      });
-      const inRoom = new Set(
-        people.filter((u) => u.email && present.has(u.email)).map((u) => u.id)
+    // 3. Drop anyone already in the room. Identity is `email#random` per
+    //    connection, so presence is matched on the base identity, which is the
+    //    email — hence loading the users rather than comparing ids.
+    try {
+      const participants = await getRoomServiceClient().listParticipants(roomName);
+      const present = new Set(
+        participants
+          .map((p) => baseIdentity(p.identity))
+          .filter((e): e is string => !!e)
       );
-      candidates = candidates.filter((id) => !inRoom.has(id));
+      if (present.size > 0) {
+        const people = await db.query.users.findMany({
+          where: inArray(users.id, candidates),
+          columns: { id: true, email: true },
+        });
+        const inRoom = new Set(
+          people.filter((u) => u.email && present.has(u.email)).map((u) => u.id)
+        );
+        candidates = candidates.filter((id) => !inRoom.has(id));
+      }
+    } catch {
+      // Couldn't tell who is in the room — ring everyone rather than nobody. A
+      // duplicate ring for someone already present is a nuisance; ringing no one
+      // when the teacher arrives is the bug this whole file exists to fix.
     }
-  } catch {
-    // Couldn't tell who is in the room — ring everyone rather than nobody. A
-    // duplicate ring for someone already present is a nuisance; ringing no one
-    // when the teacher arrives is the bug this whole file exists to fix.
-  }
-  if (candidates.length === 0) return 0;
+    if (candidates.length === 0) return 0;
 
-  // 4. Rung recently for this same class — the teacher reconnecting, most
-  //    likely. See RE_RING_COOLDOWN_MS.
-  const recent = await db.query.callInvites.findMany({
-    where: and(
-      eq(callInvites.sessionId, canonical.id),
-      inArray(callInvites.calleeId, candidates),
-      gt(callInvites.createdAt, new Date(Date.now() - RE_RING_COOLDOWN_MS))
-    ),
-    columns: { calleeId: true },
+    // 4. Rung recently for this same class — the teacher reconnecting, most
+    //    likely. See RE_RING_COOLDOWN_MS.
+    const recent = await db.query.callInvites.findMany({
+      where: and(
+        eq(callInvites.sessionId, canonical.id),
+        inArray(callInvites.calleeId, candidates),
+        gt(callInvites.createdAt, new Date(Date.now() - RE_RING_COOLDOWN_MS))
+      ),
+      columns: { calleeId: true },
+    });
+    const cooling = new Set(recent.map((r) => r.calleeId));
+    candidates = candidates.filter((id) => !cooling.has(id));
+    if (candidates.length === 0) return 0;
+
+    // 5. One invite per student: the callId is what an Accept resolves against,
+    //    so a shared row would let the first student's answer stop everyone
+    //    else's ring.
+    const invites = candidates.map((calleeId) => ({
+      id: createId(),
+      orgId: canonical.orgId,
+      sessionId: canonical.id,
+      callerId: teacherId,
+      calleeId,
+      status: "RINGING" as const,
+    }));
+    await db.insert(callInvites).values(invites);
+
+    // Rings the phone itself for anyone with the app installed; a no-op
+    // otherwise. Sent per student because the payload carries their own callId.
+    await Promise.all(
+      invites.map((i) =>
+        sendCallPush([i.calleeId], {
+          callId: i.id,
+          sessionId: canonical.id,
+          callerName: teacherName,
+        }).catch(() => {})
+      )
+    );
+    // ...and a closed laptop tab. One call, the sender fans out.
+    await sendWebPushToUsers(candidates).catch(() => {});
+
+    return invites.length;
   });
-  const cooling = new Set(recent.map((r) => r.calleeId));
-  candidates = candidates.filter((id) => !cooling.has(id));
-  if (candidates.length === 0) return 0;
-
-  // 5. One invite per student: the callId is what an Accept resolves against,
-  //    so a shared row would let the first student's answer stop everyone
-  //    else's ring.
-  const invites = candidates.map((calleeId) => ({
-    id: createId(),
-    orgId: canonical.orgId,
-    sessionId: canonical.id,
-    callerId: teacherId,
-    calleeId,
-    status: "RINGING" as const,
-  }));
-  await db.insert(callInvites).values(invites);
-
-  // Rings the phone itself for anyone with the app installed; a no-op
-  // otherwise. Sent per student because the payload carries their own callId.
-  await Promise.all(
-    invites.map((i) =>
-      sendCallPush([i.calleeId], {
-        callId: i.id,
-        sessionId: canonical.id,
-        callerName: teacherName,
-      }).catch(() => {})
-    )
-  );
-  // ...and a closed laptop tab. One call, the sender fans out.
-  await sendWebPushToUsers(candidates).catch(() => {});
-
-  return invites.length;
 }

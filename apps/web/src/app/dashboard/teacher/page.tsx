@@ -18,8 +18,7 @@ import TodaySchedule, { type ScheduleRow } from "./TodaySchedule";
 import CombineClasses from "./CombineClasses";
 import LocalTime from "@/components/LocalTime";
 import CopyLinkButton from "@/components/CopyLinkButton";
-import ClassActionButton from "@/components/ClassActionButton";
-import { getAttendanceReport } from "@/lib/attendance";
+import { getAttendanceStats } from "@/lib/attendance";
 
 function safeDistanceToNow(d: Date | string | null | undefined): string {
   if (!d) return "recently";
@@ -89,7 +88,7 @@ export default async function TeacherDashboard() {
     todaySessions,
     weekCountResult,
     activeStudentsResult,
-    attendanceReport,
+    attendanceStats,
   ] = await Promise.all([
     db.query.sessions.findMany({
       where: and(
@@ -124,12 +123,12 @@ export default async function TeacherDashboard() {
       .innerJoin(sessions, eq(bookings.sessionId, sessions.id))
       .where(eq(sessions.teacherId, user.id))
       .groupBy(bookings.studentProfileId),
-    getAttendanceReport({
+    getAttendanceStats({
       orgId: dbUser?.orgId ?? "",
       ...(isAdmin ? {} : { teacherId: user.id }),
       from: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
       to: new Date(),
-    }).catch(() => []),
+    }).catch(() => ({ expected: 0, attended: 0, attendanceRate: "--" })),
   ]);
 
   const scheduleRows: ScheduleRow[] = (todaySessions || []).map((s) => ({
@@ -145,13 +144,7 @@ export default async function TeacherDashboard() {
   }));
 
   const upcomingCount = (todaySessions || []).filter((s) => s.status === "SCHEDULED").length;
-
-  const expected = (attendanceReport || []).reduce((sum, occ) => sum + (occ.students?.length || 0), 0);
-  const attended = (attendanceReport || []).reduce(
-    (sum, occ) => sum + (occ.students || []).filter((s) => s.status !== "ABSENT").length,
-    0
-  );
-  const attendanceRate = expected > 0 && attended > 0 ? `${Math.round((attended / expected) * 100)}%` : "--";
+  const { expected, attended, attendanceRate } = attendanceStats;
 
   return (
     <div className="p-6 lg:p-10 max-w-5xl">

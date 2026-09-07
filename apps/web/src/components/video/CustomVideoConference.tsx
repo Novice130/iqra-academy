@@ -974,11 +974,16 @@ export default function CustomVideoConference({
 
   const handleStagePointerUp = (e: React.PointerEvent) => {
     if (Date.now() - tapStartTimeRef.current < 300) {
+      const target = e.target as HTMLElement;
+      // Taps inside the effects drawer must not close it: the drawer unmounting
+      // on pointerup eats the swatch's click (which fires after pointerup), so
+      // the pick never reaches select() and the selection snaps back to None.
+      // Backdrop taps still dismiss via the backdrop's own pointerdown handler.
+      if (target.closest('[data-effects-drawer]')) return;
       if (viewMenuOpen) setViewMenuOpen(false);
       if (effectsOpen) setEffectsOpen(false);
       if (peopleOpen) setPeopleOpen(false);
 
-      const target = e.target as HTMLElement;
       if (
         target.closest('button') ||
         target.closest('input') ||
@@ -1531,7 +1536,10 @@ export default function CustomVideoConference({
                   }}
                 />
                 <div
+                  data-effects-drawer
                   className="fixed left-1/2 -translate-x-1/2 bottom-[96px] z-[81] rounded-3xl overflow-y-auto"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onPointerUp={(e) => e.stopPropagation()}
                   style={{
                     background: 'rgba(24, 26, 34, 0.78)',
                     backdropFilter: 'blur(36px) saturate(200%) contrast(105%)',
