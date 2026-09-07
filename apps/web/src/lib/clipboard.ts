@@ -7,21 +7,14 @@
 export async function copyTextToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
-  // 1. Try modern navigator.clipboard API first (if in secure context)
-  if (
-    typeof navigator !== 'undefined' &&
-    navigator.clipboard &&
-    typeof navigator.clipboard.writeText === 'function'
-  ) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      // Insecure origin, iframe permissions policy, or permission denied — proceed to fallback below
-    }
-  }
-
-  // 2. Fallback: textarea select + execCommand('copy')
+  // 1. textarea select + execCommand('copy') — deliberately FIRST and fully
+  // synchronous. Both Safari and Chrome only honour a copy inside the user
+  // gesture, and the moment we `await` anything (the async clipboard API's
+  // own promise, a rejected NotAllowedError) Safari no longer counts the tap
+  // as a gesture, so a fallback that runs after an await fails too. That is
+  // what "the copy button doesn't work anywhere" was on iOS: the clipboard
+  // write was rejected, and every fallback had already lost the gesture by
+  // the time it ran.
   if (typeof document !== 'undefined') {
     try {
       const textarea = document.createElement('textarea');
@@ -50,6 +43,22 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
       if (successful) return true;
     } catch (err) {
       console.warn('execCommand copy failed:', err);
+    }
+  }
+
+  // 2. Modern navigator.clipboard API (secure contexts). Reached when
+  // execCommand is unavailable or refuses; by now the gesture may be spent,
+  // but there is nothing left to lose by trying.
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Insecure origin, iframe permissions policy, or permission denied — proceed to fallback below
     }
   }
 

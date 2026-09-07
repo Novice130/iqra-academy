@@ -64,16 +64,27 @@ export default function GuestJoinPage() {
   // not drag us back out of the room when the server retires the used request.
   const settledRef = useRef(false);
 
-  // If user is already logged in with an account, send them straight to class
+  // If user is already logged in with an account, try their own join route
+  // first — but a student whose account is not booked with this teacher has no
+  // session to join, and the join API rejects them. The share link must work
+  // for everyone, so on 401/403 they stay here and use the guest knock flow
+  // like anyone else.
   useEffect(() => {
+    if (!sessionId) return;
+    let cancelled = false;
     authClient
       .getSession()
-      .then(({ data }) => {
-        if (data?.session && sessionId) {
-          router.replace(`/dashboard/session/${sessionId}`);
-        }
+      .then(async ({ data }) => {
+        if (cancelled || !data?.session) return;
+        const res = await fetch(`/api/sessions/${sessionId}/join`).catch(() => null);
+        if (cancelled) return;
+        if (res && (res.status === 401 || res.status === 403)) return; // not booked — fall through to guest flow
+        router.replace(`/dashboard/session/${sessionId}`);
       })
       .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, router]);
 
   // Check if this guest was previously admitted for this session

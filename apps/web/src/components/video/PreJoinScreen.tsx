@@ -306,7 +306,9 @@ export default function PreJoinScreen({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                // contain, not cover — cover crops the top of the head in the
+                // preview box, which reads as the camera "zooming in".
+                className="w-full h-full object-contain"
                 style={{ transform: 'scaleX(-1)' }}
               />
             ) : (

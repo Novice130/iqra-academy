@@ -873,7 +873,18 @@ export default function CustomVideoConference({
       handRaised={Boolean(handRaisedMap[p.identity] || handRaisedMap[p.base])}
       actions={actionsFor(p)}
       volume={volumes[p.base] ?? 1}
-      fit={viewMode === 'gallery' ? 'cover' : (p.isLocal && p.trackRef.source === Track.Source.Camera ? tileFit : fit)}
+      // Zoom crops other people's tiles to fill, but your own tile shows your
+      // whole frame — cover here kept shaving the top of the head off, which
+      // read as "it's zooming in too much". Self-view never crops.
+      fit={
+        viewMode === 'gallery'
+          ? p.isLocal && p.trackRef.source === Track.Source.Camera
+            ? 'contain'
+            : 'cover'
+          : p.isLocal && p.trackRef.source === Track.Source.Camera
+            ? tileFit
+            : fit
+      }
     />
   );
 

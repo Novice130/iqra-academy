@@ -1302,7 +1302,10 @@ export default function CallControlBar({
             role="dialog"
             aria-modal="true"
             aria-label="End or Leave Class"
-            className="fixed left-1/2 -translate-x-1/2 top-1/2 -translate-y-1/2 z-[101] w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 animate-fadeIn"
+            // Zoom anchors this menu directly above the End button, not
+            // centre-screen: the bar sits bottom-centre, so the panel hangs
+            // just above it with a clear gap for the End button itself.
+            className="fixed left-1/2 -translate-x-1/2 bottom-24 sm:bottom-28 z-[101] w-full max-w-sm rounded-3xl p-6 shadow-2xl text-center space-y-4 animate-fadeIn"
             style={{
               background: 'rgba(28, 30, 36, 0.96)',
               border: '1px solid rgba(255, 255, 255, 0.18)',
