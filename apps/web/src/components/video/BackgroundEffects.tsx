@@ -304,14 +304,64 @@ function Swatch({
   );
 }
 
+/**
+ * Self-view for the effects drawer. Attaches the live camera track — which
+ * already carries the processor — so the preview shows the applied effect
+ * instantly, the same way Zoom's panel does. People used to pick a wallpaper
+ * and see nothing until they closed the panel and looked at their own tile.
+ */
+function EffectsPreview({ track }: { track: LocalVideoTrack }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    try {
+      el.srcObject = track.mediaStream ?? null;
+    } catch {}
+    track.attach(el);
+    el.play().catch(() => {});
+    return () => {
+      track.detach(el);
+      el.srcObject = null;
+    };
+  }, [track]);
+
+  return (
+    <div
+      className="relative w-full aspect-video rounded-2xl overflow-hidden border border-white/15 shadow-lg"
+      style={{ background: '#0d0f14' }}
+    >
+      <video
+        ref={videoRef}
+        autoPlay
+        playsInline
+        muted
+        className="w-full h-full object-cover"
+        style={{ transform: 'scaleX(-1)' }}
+      />
+      <span className="absolute bottom-1.5 right-2 text-[9px] font-semibold text-white/60 select-none">
+        Preview
+      </span>
+    </div>
+  );
+}
+
 export function BackgroundEffectsContent({
   effects,
   onSelect,
   onClose,
+  cameraTrack,
+  cameraOff,
 }: {
   effects: BackgroundEffects;
   onSelect?: () => void;
   onClose?: () => void;
+  /** Live camera track — with the processor attached, so the preview shows
+   * exactly what participants see, Zoom-style. Omit to hide the preview. */
+  cameraTrack?: LocalVideoTrack | null;
+  /** When the camera is off there is nothing to preview. */
+  cameraOff?: boolean;
 }) {
   const { selection, select, supported, busy, error } = effects;
 
@@ -330,6 +380,11 @@ export function BackgroundEffectsContent({
 
   return (
     <div className="px-3 pb-3 pt-1">
+      {cameraTrack && !cameraOff ? (
+        <div className="px-1 pb-2">
+          <EffectsPreview track={cameraTrack} />
+        </div>
+      ) : null}
       <div className="flex items-center justify-between px-1 py-2">
         <div className="text-[11px] font-bold uppercase tracking-wider text-white/50">
           Visual Effects {busy && <span className="normal-case font-normal text-blue-400">· applying…</span>}

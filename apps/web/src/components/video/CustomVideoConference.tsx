@@ -40,6 +40,8 @@ import GuestKnockPrompt from './GuestKnockPrompt';
 import ScreenSharePill from './ScreenSharePill';
 import SoloInactivityPrompt from './SoloInactivityPrompt';
 import { useBackgroundEffects, BackgroundEffectsContent, BLUR_DEFAULT_RADIUS, type EffectSelection } from './BackgroundEffects';
+import { useLocalParticipant } from '@livekit/components-react';
+import type { LocalVideoTrack } from 'livekit-client';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
 import WhiteboardOverlay from './WhiteboardOverlay';
@@ -632,6 +634,13 @@ export default function CustomVideoConference({
   const focusIdentity = baseIdentity(roomSpotlight) ?? baseIdentity(teacherIdentity);
   const [viewMode, setViewMode] = useState<ViewMode>(isModerator ? 'gallery' : 'speaker');
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  /**
+   * Zoom-parity layout options while someone is sharing their screen: how many
+   * student tiles float over the share, or nothing but the share itself
+   * (`shareExpanded` — the "make it big" choice).
+   */
+  const [shareOverlayMode, setShareOverlayMode] = useState<'one' | 'two' | 'all'>('all');
+  const [shareExpanded, setShareExpanded] = useState(false);
 
   const speakers = useSpeakingParticipants();
   const [lastSpeaker, setLastSpeaker] = useState<string | null>(null);
@@ -651,6 +660,31 @@ export default function CustomVideoConference({
   const hasMultipleCameras = useHasMultipleCameras();
   const effects = useBackgroundEffects(initialEffect);
   const [effectsOpen, setEffectsOpen] = useState(false);
+  // Live camera track for the effects-drawer preview. The track already
+  // carries the background processor, so attaching it shows the chosen
+  // effect — not the raw camera.
+  const { localParticipant: previewParticipant } = useLocalParticipant();
+  const [localCameraTrack, setLocalCameraTrack] = useState<LocalVideoTrack | null>(null);
+  const [localCameraMuted, setLocalCameraMuted] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      const pub = previewParticipant.getTrackPublication(Track.Source.Camera);
+      const track = (pub?.track ?? null) as LocalVideoTrack | null;
+      setLocalCameraTrack(track);
+      setLocalCameraMuted(!track || !!pub?.isMuted);
+    };
+    update();
+    previewParticipant.on('localTrackPublished', update);
+    previewParticipant.on('localTrackUnpublished', update);
+    previewParticipant.on('trackMuted', update);
+    previewParticipant.on('trackUnmuted', update);
+    return () => {
+      previewParticipant.off('localTrackPublished', update);
+      previewParticipant.off('localTrackUnpublished', update);
+      previewParticipant.off('trackMuted', update);
+      previewParticipant.off('trackUnmuted', update);
+    };
+  }, [previewParticipant]);
   const [tileFit] = useState<'cover' | 'contain'>('cover');
   const [peopleOpen, setPeopleOpen] = useState(false);
   const [chromeHidden, setChromeHidden] = useState(false);
@@ -672,6 +706,11 @@ export default function CustomVideoConference({
     }, 2800);
   }, []);
 
+  const chromeHiddenRef = useRef(false);
+  useEffect(() => {
+    chromeHiddenRef.current = chromeHidden;
+  }, [chromeHidden]);
+
   const resetIdleTimer = useCallback(() => {
     setChromeHidden(false);
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
@@ -683,7 +722,16 @@ export default function CustomVideoConference({
 
   useEffect(() => {
     resetIdleTimer();
-    const handleActivity = () => resetIdleTimer();
+    // Activity only re-arms the auto-hide while chrome is already visible. It
+    // used to force chrome back on every pointerdown, which fought the stage
+    // tap-toggle in handleStagePointerUp: the press showed the controls and the
+    // release immediately hid them again, so on a phone the settings flashed
+    // for the length of the touch and vanished on lift. Showing chrome is now
+    // exclusively the tap-toggle's job.
+    const handleActivity = () => {
+      if (chromeHiddenRef.current) return;
+      resetIdleTimer();
+    };
     window.addEventListener('pointermove', handleActivity, { passive: true });
     window.addEventListener('pointerdown', handleActivity, { passive: true });
     window.addEventListener('keydown', handleActivity, { passive: true });
@@ -903,8 +951,18 @@ export default function CustomVideoConference({
 
   if (screenShareTrack) {
     focused = describe(screenShareTrack);
-    floating = all;
     gridTiles = [];
+    if (shareExpanded) {
+      // "Big screen": nothing but the share, like Zoom's fill-the-stage layout.
+      floating = [];
+    } else if (shareOverlayMode === 'all') {
+      floating = all;
+    } else {
+      // Zoom shows the first one or two people as tiles over the share;
+      // remote students take priority, self-view comes last.
+      const pool = [...others, ...(localCamera ? [localCamera] : [])];
+      floating = pool.slice(0, shareOverlayMode === 'one' ? 1 : 2);
+    }
   } else if (viewMode === 'gallery') {
     // True Gallery Grid: All participants (remote and local) are placed in the grid with drag-and-drop adjustment!
     const rawGrid = [...others, ...(localCamera ? [localCamera] : [])];
@@ -999,10 +1057,12 @@ export default function CustomVideoConference({
         target.closest('button') ||
         target.closest('input') ||
         target.closest('.call-control-bar') ||
-        target.closest('[role="dialog"]')
+        target.closest('[role="dialog"]') ||
+        target.closest('[data-call-chrome]')
       ) {
         return;
       }
+      // Toggle: tap shows the controls and they stay; a second tap hides them.
       setChromeHidden((prev) => {
         const next = !prev;
         if (!next) resetIdleTimer();
@@ -1016,7 +1076,9 @@ export default function CustomVideoConference({
       <div
         className="lk-video-conference call-surface bg-neutral-950 select-none"
         style={{ height: '100%' }}
-        onPointerMove={resetIdleTimer}
+        onPointerMove={() => {
+          if (!chromeHiddenRef.current) resetIdleTimer();
+        }}
         onPointerDown={handleStagePointerDown}
         onPointerUp={handleStagePointerUp}
       >
@@ -1144,6 +1206,7 @@ export default function CustomVideoConference({
 
             {/* Top-Left Zoom-Style Meeting Details Button (Matching Reference Image 2 & 3) */}
             <div
+              data-call-chrome
               className={`fixed z-[60] pointer-events-auto transition-all duration-300 ${
                 chromeHidden && !inviteOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
@@ -1373,6 +1436,7 @@ export default function CustomVideoConference({
 
             {/* Fixed Right-Aligned Top Action Bar (Security Shield, Speaker, Flip Camera, Layout) */}
             <div
+              data-call-chrome
               className={`fixed z-[60] pointer-events-auto flex items-center gap-2 transition-opacity duration-300 ${
                 chromeHidden && !viewMenuOpen ? 'opacity-0 pointer-events-none' : 'opacity-100'
               }`}
@@ -1566,9 +1630,81 @@ export default function CustomVideoConference({
                     effects={effects}
                     onSelect={() => setEffectsOpen(false)}
                     onClose={() => setEffectsOpen(false)}
+                    cameraTrack={localCameraTrack}
+                    cameraOff={localCameraMuted}
                   />
                 </div>
               </>
+            )}
+
+            {/* Zoom-parity share layout switcher: pick how many faces ride over
+                the share, or go big-screen. Only while someone is sharing. */}
+            {screenShareTrack && (
+              <div
+                data-call-chrome
+                className={`fixed left-1/2 -translate-x-1/2 z-[60] flex items-center gap-1 rounded-full transition-all duration-300 ${
+                  chromeHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+                }`}
+                style={{
+                  bottom: 'calc(var(--call-bar-height, 84px) + 10px)',
+                  background: 'rgba(24, 26, 34, 0.78)',
+                  backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                  border: '1px solid rgba(255, 255, 255, 0.20)',
+                  boxShadow: '0 12px 36px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.35)',
+                  padding: '4px',
+                }}
+              >
+                {([
+                  { id: 'one' as const, label: '1' },
+                  { id: 'two' as const, label: '2' },
+                  { id: 'all' as const, label: 'All' },
+                  { id: 'expand' as const, label: '⤢' },
+                ]).map((opt) => {
+                  const selected =
+                    opt.id === 'expand'
+                      ? shareExpanded
+                      : !shareExpanded && shareOverlayMode === opt.id;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (opt.id === 'expand') {
+                          setShareExpanded((v) => !v);
+                        } else {
+                          setShareExpanded(false);
+                          setShareOverlayMode(opt.id);
+                        }
+                      }}
+                      title={
+                        opt.id === 'expand'
+                          ? shareExpanded
+                            ? 'Show participants over the share'
+                            : 'Big screen — hide participant tiles'
+                          : `Show ${opt.label} participant${opt.label === 'All' ? 's' : ''} over the share`
+                      }
+                      aria-label={
+                        opt.id === 'expand'
+                          ? shareExpanded
+                            ? 'Show participants over the share'
+                            : 'Big screen'
+                          : `Show ${opt.label} over the share`
+                      }
+                      aria-pressed={selected}
+                      className={`px-3 sm:px-3.5 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-all duration-150 active:scale-95 ${
+                        selected ? 'text-white' : 'text-white/60 hover:text-white'
+                      }`}
+                      style={{
+                        background: selected ? 'rgba(10, 132, 255, 0.85)' : 'transparent',
+                      }}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
 
