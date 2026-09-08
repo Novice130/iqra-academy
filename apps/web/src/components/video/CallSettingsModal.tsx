@@ -7,10 +7,12 @@
  * - Categories: General, Audio, Video, Backgrounds, Statistics, About
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Track } from 'livekit-client';
 import { useRoomContext, useLocalParticipant } from '@livekit/components-react';
+import { useKrispNoiseFilter } from '@livekit/components-react/krisp';
+import { isKrispNoiseFilterSupported } from '@livekit/krisp-noise-filter';
 import {
   SettingsIcon,
   MicIcon,
@@ -24,6 +26,10 @@ import type { ViewMode } from './CallControlBar';
 import { BackgroundEffectsContent, type BackgroundEffects } from './BackgroundEffects';
 
 export type SettingsTab = 'general' | 'audio' | 'video' | 'backgrounds' | 'statistics' | 'about';
+
+export type AudioMode = 'noise-removal' | 'isolation' | 'original';
+
+const AUDIO_MODE_KEY = 'nt.audio-mode';
 
 interface CallSettingsModalProps {
   onClose: () => void;
@@ -197,7 +203,15 @@ export default function CallSettingsModal({
   const [animateEmojis, setAnimateEmojis] = useState(true);
   const [spacebarUnmute, setSpacebarUnmute] = useState(true);
   const [skinTone, setSkinTone] = useState('👍');
-  const [audioMode, setAudioMode] = useState<'noise-removal' | 'isolation' | 'original'>('noise-removal');
+  const [audioMode, setAudioModeState] = useState<AudioMode>(() => {
+    if (typeof window === 'undefined') return 'noise-removal';
+    try {
+      const raw = window.localStorage.getItem(AUDIO_MODE_KEY);
+      return raw === 'isolation' || raw === 'original' ? raw : 'noise-removal';
+    } catch {
+      return 'noise-removal';
+    }
+  });
   const [testingSpeaker, setTestingSpeaker] = useState(false);
   const [speakerVolume, setSpeakerVolume] = useState(100);
   const [micVolume, setMicVolume] = useState(100);
@@ -205,6 +219,68 @@ export default function CallSettingsModal({
   const { localParticipant } = useLocalParticipant();
   const audioTrack = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack;
   const liveAudioLevel = useLiveAudioLevel(audioTrack ?? undefined);
+
+  // Krisp enhanced noise cancellation. Supported only on LiveKit Cloud and
+  // only in browsers with AudioWorklet; the hook no-ops gracefully otherwise.
+  const krisp = useKrispNoiseFilter({ filterOptions: { quality: 'medium' } });
+  const krispSupported = useMemo(() => isKrispNoiseFilterSupported(), []);
+
+  /**
+   * The three modes actually do things:
+   *  - noise-removal: browser NS + Krisp enhanced NC on top.
+   *  - isolation:     same DSP, plus an explicit AGC pass ("focus the voice").
+   *  - original:      everything off — raw mic, for tajweed fidelity.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    const applyMode = async () => {
+      const mic = localParticipant.getTrackPublication(Track.Source.Microphone);
+      const krispWanted = audioMode !== 'original';
+      try {
+        // Toggle Krisp first — it attaches to the currently published track.
+        if (krispSupported) {
+          await krisp.setNoiseFilterEnabled(krispWanted);
+        }
+        // "Original" re-captures the mic with browser DSP disabled so the raw
+        // signal reaches LiveKit. Unmuting with new constraints restarts the
+        // track; the Krisp hook re-runs on the fresh publication.
+        const currentlyOriginal = (mic?.audioTrack?.mediaStreamTrack as MediaTrackCapabilities & { _ntOriginal?: boolean })?._ntOriginal === true;
+        if (audioMode === 'original' && !currentlyOriginal && mic) {
+          await localParticipant.setMicrophoneEnabled(true, {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+          });
+          const fresh = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack
+            ?.mediaStreamTrack as (MediaStreamTrack & { _ntOriginal?: boolean }) | undefined;
+          if (fresh) fresh._ntOriginal = true;
+        } else if (audioMode !== 'original' && currentlyOriginal) {
+          await localParticipant.setMicrophoneEnabled(true, {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          });
+          const fresh = localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack
+            ?.mediaStreamTrack as (MediaStreamTrack & { _ntOriginal?: boolean }) | undefined;
+          if (fresh) fresh._ntOriginal = false;
+        }
+      } catch (err) {
+        console.warn('audio mode apply failed', err);
+      }
+    };
+    if (!cancelled && localParticipant) applyMode();
+    return () => {
+      cancelled = true;
+    };
+  }, [audioMode, krispSupported, localParticipant, krisp]);
+
+  // Persist the choice for the next class (per browser, like backgrounds).
+  const setAudioMode = useCallback((mode: AudioMode) => {
+    setAudioModeState(mode);
+    try {
+      window.localStorage.setItem(AUDIO_MODE_KEY, mode);
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (initialTab) setActiveTab(initialTab);
@@ -667,11 +743,16 @@ export default function CallSettingsModal({
                 {/* Audio Profile / Noise Suppression */}
                 <div className="space-y-2 pt-2 border-t border-white/10">
                   <div className="text-xs font-bold text-white">Microphone Modes & Noise Suppression</div>
+                  {!krispSupported && (
+                    <div className="text-[10px] text-amber-300/80">
+                      Enhanced noise removal is not available in this browser — basic suppression still applies.
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     {[
-                      { id: 'noise-removal', title: 'Noise removal (default)', desc: 'Blocks room background noise, fan hums, and echoes' },
-                      { id: 'isolation', title: 'Personalized audio isolation', desc: 'Focuses entirely on the speaker voice' },
-                      { id: 'original', title: 'Original sound for musicians', desc: 'Disables echo cancellation and noise suppression for high fidelity Quran tajweed' },
+                      { id: 'noise-removal' as AudioMode, title: 'Noise removal (default)', desc: 'Krisp-enhanced AI noise cancellation plus browser suppression — blocks room background noise, fan hums, and echoes' },
+                      { id: 'isolation' as AudioMode, title: 'Personalized audio isolation', desc: 'Noise removal plus automatic gain control that keeps the speaker voice loud and even' },
+                      { id: 'original' as AudioMode, title: 'Original sound for musicians', desc: 'Disables all noise cancellation and echo cancellation — high fidelity Quran tajweed' },
                     ].map((mode) => (
                       <label
                         key={mode.id}
@@ -685,7 +766,7 @@ export default function CallSettingsModal({
                           type="radio"
                           name="audioMode"
                           checked={audioMode === mode.id}
-                          onChange={() => setAudioMode(mode.id as any)}
+                          onChange={() => setAudioMode(mode.id)}
                           className="mt-0.5 text-blue-500 focus:ring-0 focus:ring-offset-0 cursor-pointer"
                         />
                         <div>

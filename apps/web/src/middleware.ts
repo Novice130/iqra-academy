@@ -43,7 +43,7 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'",
     `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://static.cloudflareinsights.com ${isDev ? "'unsafe-eval'" : ""}`.trim(),
     "worker-src 'self' blob:",
-    "connect-src 'self' wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com https://cloudflareinsights.com",
+    "connect-src 'self' wss://*.livekit.cloud https://*.livekit.cloud wss://meet.novicetutor.com https://integrations.livekit.io https://accounts.google.com https://fonts.googleapis.com https://fonts.gstatic.com https://cloudflareinsights.com",
     "img-src 'self' data: blob: https:",
     "media-src 'self' blob: data: https:",
     "font-src 'self' data: https://fonts.gstatic.com",

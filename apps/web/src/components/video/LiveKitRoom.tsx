@@ -211,13 +211,21 @@ export default function LiveKitRoom({
   // - Automatic Gain Control (AGC2)
   // - Highpass filter (eliminates mic rumble, electrical hum, and AC fans)
   // - Discontinuous Transmission (DTX) to eliminate background noise during speech pauses
-  const roomOptions = useMemo(
-    () => ({
+  //
+  // Unless the user picked "Original sound for musicians" in a previous call —
+  // that choice persists in localStorage (CallSettingsModal) and re-captures
+  // the mic with all browser DSP off, for tajweed fidelity.
+  const roomOptions = useMemo(() => {
+    let originalSound = false;
+    try {
+      originalSound = window.localStorage.getItem('nt.audio-mode') === 'original';
+    } catch {}
+    return {
       webAudioMix: needsWebAudioMix(),
       audioCaptureDefaults: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: !originalSound,
+        noiseSuppression: !originalSound,
+        autoGainControl: !originalSound,
         channelCount: 1,
         sampleRate: 48000,
       },
@@ -226,9 +234,8 @@ export default function LiveKitRoom({
         red: true,
         audioBitrate: 32000,
       },
-    }),
-    []
-  );
+    };
+  }, []);
 
   /**
    * True while the page is frozen in the back/forward cache. The browser

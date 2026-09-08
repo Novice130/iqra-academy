@@ -44,6 +44,7 @@ import { useLocalParticipant } from '@livekit/components-react';
 import type { LocalVideoTrack } from 'livekit-client';
 import { useCycleCamera, useHasMultipleCameras } from './cameraDevices';
 import { useHostControls } from './hostControls';
+import { useDocumentPip } from './useDocumentPip';
 import WhiteboardOverlay from './WhiteboardOverlay';
 import { gainForSlider } from '@/lib/audio-gain';
 import { copyTextToClipboard } from '@/lib/clipboard';
@@ -211,6 +212,93 @@ function useAudioPlaybackUnlock() {
         room.off(RoomEvent.AudioPlaybackStatusChanged, check);
       } catch {}
       disarm();
+    };
+  }, [room]);
+}
+
+/**
+ * Zoom-style entry/exit chimes: a short two-tone rises when someone connects
+ * and falls when they leave. Synthesised with WebAudio — no asset to load,
+ * and it plays through the room-independent AudioContext so it sounds even
+ * before the participant publishes a track. Skipped entirely until audio
+ * playback has been unlocked once, so nobody gets a chime they never consented
+ * to hearing (autoplay policies would block it anyway).
+ */
+function useParticipantChimes() {
+  const room = useRoomContext();
+
+  useEffect(() => {
+    if (!room) return;
+    let ctx: AudioContext | null = null;
+    let allowed = false;
+
+    const tone = (freqs: number[], at: number, duration: number) => {
+      if (!ctx) return;
+      try {
+        for (const freq of freqs) {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.value = freq;
+          const start = ctx.currentTime + at;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(0.14, start + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+          osc.connect(gain).connect(ctx.destination);
+          osc.start(start);
+          osc.stop(start + duration + 0.05);
+        }
+      } catch {}
+    };
+
+    const playJoin = () => tone([523.25, 783.99], 0, 0.35); // C5 → G5, rising
+    const playLeave = () => tone([783.99, 523.25], 0, 0.35); // G5 → C5, falling
+
+    const ensureCtx = () => {
+      if (!ctx) {
+        try {
+          ctx = new AudioContext();
+        } catch {
+          return false;
+        }
+      }
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+      return ctx.state !== 'closed';
+    };
+
+    // First successful playback unlock marks chimes as allowed.
+    const onPlaybackChanged = () => {
+      if (room.canPlaybackAudio && !allowed) {
+        allowed = true;
+        ensureCtx();
+      }
+    };
+
+    const onConnected = (participant: { isLocal?: boolean; identity: string }) => {
+      if (participant.isLocal || !allowed || !ensureCtx()) return;
+      playJoin();
+    };
+    const onDisconnected = (participant: { isLocal?: boolean; identity: string }) => {
+      if (participant.isLocal || !allowed || !ensureCtx()) return;
+      playLeave();
+    };
+
+    if (room.canPlaybackAudio) {
+      allowed = true;
+      ensureCtx();
+    }
+    try {
+      room.on(RoomEvent.AudioPlaybackStatusChanged, onPlaybackChanged);
+      room.on(RoomEvent.ParticipantConnected, onConnected);
+      room.on(RoomEvent.ParticipantDisconnected, onDisconnected);
+    } catch {}
+    return () => {
+      try {
+        room.off(RoomEvent.AudioPlaybackStatusChanged, onPlaybackChanged);
+        room.off(RoomEvent.ParticipantConnected, onConnected);
+        room.off(RoomEvent.ParticipantDisconnected, onDisconnected);
+      } catch {}
+      ctx?.close().catch(() => {});
     };
   }, [room]);
 }
@@ -602,6 +690,7 @@ export default function CustomVideoConference({
 
   useAppliedVolumes(volumes);
   useAudioPlaybackUnlock();
+  useParticipantChimes();
 
   const setVolume = useCallback(
     (base: string, volume: number) => {
@@ -693,6 +782,8 @@ export default function CustomVideoConference({
   const [captionsActive, setCaptionsActive] = useState(false);
   const [captionsAvailable, setCaptionsAvailable] = useState(true);
   const [captionsError, setCaptionsError] = useState<string | null>(null);
+  // Meet-parity always-on-top mini window (desktop Chromium only).
+  const pip = useDocumentPip(tracks);
   const [whiteboardActive, setWhiteboardActive] = useState(false);
   const tapStartTimeRef = useRef(0);
   const idleTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -1739,6 +1830,40 @@ export default function CustomVideoConference({
           <SoloInactivityPrompt isHost={isHost} onLeaveOrEnd={onEndClassIntent} />
 
           <MediaRequestModal />
+
+          {/* Meet-parity popout preview (desktop Chromium): an always-on-top
+              mini window that keeps the class visible when the tab loses
+              focus. Hidden on browsers without documentPictureInPicture. */}
+          {pip.supported && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (pip.pipOpen) pip.close();
+                else pip.open().catch(() => {});
+              }}
+              title={pip.pipOpen ? 'Close picture-in-picture' : 'Pop out class into a floating window'}
+              aria-label={pip.pipOpen ? 'Close picture-in-picture' : 'Pop out floating preview'}
+              className={`fixed z-[60] w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 active:scale-95 ${
+                chromeHidden ? 'opacity-0 pointer-events-none' : 'opacity-100'
+              }`}
+              style={{
+                top: 'max(14px, env(safe-area-inset-top))',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(24, 26, 34, 0.72)',
+                backdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                WebkitBackdropFilter: 'blur(32px) saturate(200%) contrast(105%)',
+                border: '1px solid rgba(255, 255, 255, 0.18)',
+                boxShadow: '0 8px 24px rgba(0, 0, 0, 0.35)',
+              }}
+            >
+              <svg viewBox="0 0 24 24" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: '#fff' }}>
+                <rect x="2" y="4" width="20" height="14" rx="2.5" />
+                <rect x="12" y="11" width="8" height="5.5" rx="1.5" fill="currentColor" stroke="none" />
+              </svg>
+            </button>
+          )}
 
           {/* Floating Control Bar with auto-hide transition */}
           <div
