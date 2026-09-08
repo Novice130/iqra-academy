@@ -27,6 +27,11 @@ export function normalizeJoinCode(code: string): string {
   if (digitsOnly.length === 12) {
     return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 6)}-${digitsOnly.slice(6, 9)}-${digitsOnly.slice(9, 12)}`;
   }
+  // joinCode rows are 10-digit numeric codes in 3-4-3 form (schema.ts), so a
+  // 10-digit entry — with spaces, dashes, or bare — must be re-dashed.
+  if (digitsOnly.length === 10) {
+    return `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7, 10)}`;
+  }
   const clean = trimmed.replace(/[^a-zA-Z]/g, "").toLowerCase();
   if (clean.length === 12) {
     return `${clean.slice(0, 4)}-${clean.slice(4, 8)}-${clean.slice(8, 12)}`;

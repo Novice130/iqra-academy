@@ -33,6 +33,16 @@ function extractAndFormatCode(input: string): { cleanId: string; displayFormatte
     };
   }
 
+  // Meeting IDs are 10-digit codes in 3-4-3 form (e.g. 846-2891-188). Without
+  // this branch the code kept its spaces and encodeURIComponent turned them
+  // into %20, which the session lookup then failed to match.
+  if (digitsOnly.length === 10) {
+    return {
+      cleanId: `${digitsOnly.slice(0, 3)}-${digitsOnly.slice(3, 7)}-${digitsOnly.slice(7, 10)}`,
+      displayFormatted: `${digitsOnly.slice(0, 3)} ${digitsOnly.slice(3, 7)} ${digitsOnly.slice(7, 10)}`,
+    };
+  }
+
   const alphaOnly = cleaned.replace(/[^a-zA-Z]/g, '').toLowerCase();
   if (alphaOnly.length === 12) {
     return {
