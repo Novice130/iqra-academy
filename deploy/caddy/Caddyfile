@@ -23,6 +23,12 @@ novicetutor.com, www.novicetutor.com {
 
 	encode zstd gzip
 
+	# The app reads CF-Connecting-IP for audit logs. Overwrite it with the
+	# address Caddy itself resolved: unchanged for requests from Cloudflare,
+	# the real peer address for anything that reached the origin directly —
+	# so a caller that bypasses Cloudflare cannot name its own IP.
+	request_header CF-Connecting-IP {client_ip}
+
 	# Scheduling realtime: WebSocket upgrades go to the sidecar. Next.js route
 	# handlers cannot answer a 101, which is the whole reason it exists.
 	@realtime path /api/realtime/ws /api/realtime/ws/*
