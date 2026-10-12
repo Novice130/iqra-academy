@@ -155,8 +155,8 @@ After editing `.env`, apply it with `cd /opt/novicetutor && ./deploy.sh "$(cat .
 
 ## Deploying
 
-Merging to `master` is the deploy. The `deploy` job runs after every CI gate
-passes and:
+Merging to `master` is the deploy. The `deploy` job runs after the web
+lint, typecheck, test and build job passes (the mobile jobs do not gate it) and:
 
 1. builds the image for `DEPLOY_PLATFORM`;
 2. boots it in the runner — `web`, `realtime` and a throwaway Postgres — and

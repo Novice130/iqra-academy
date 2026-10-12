@@ -18,11 +18,13 @@ export async function GET() {
       },
       { status: 200 }
     );
-  } catch (err: any) {
+  } catch (err) {
+    // The driver's message names the database host; this route is public.
+    console.error("[health] database check failed:", err);
     return NextResponse.json(
       {
         status: "error",
-        error: err?.message || "Database unreachable",
+        error: "Database unreachable",
         timestamp: new Date().toISOString(),
       },
       { status: 503 }

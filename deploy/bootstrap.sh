@@ -73,9 +73,14 @@ APT::Periodic::Unattended-Upgrade "1";
 APT
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 
-echo "==> Firewall (ufw): 22, 80, 443"
+echo "==> Firewall (ufw): ssh, 80, 443"
 # Note: ports published by Docker bypass ufw. Restricting 443 to Cloudflare's
 # ranges is done in the Hetzner Cloud Firewall, which sits in front of the box.
+# Whatever port sshd actually listens on, not just 22 — enabling the firewall
+# with a moved SSH port left closed would cut this session off.
+for ssh_port in $(sshd -T 2>/dev/null | awk '$1 == "port" { print $2 }'); do
+  ufw allow "${ssh_port}/tcp" >/dev/null
+done
 ufw allow OpenSSH >/dev/null
 ufw allow 80/tcp >/dev/null
 ufw allow 443/tcp >/dev/null
@@ -93,7 +98,10 @@ if [ "$HARDEN_SSH" -eq 1 ]; then
     echo "Refusing: neither root nor ${DEPLOY_USER} has an authorized key." >&2
     exit 1
   fi
-  cat > /etc/ssh/sshd_config.d/99-novicetutor.conf <<'SSHD'
+  # sshd keeps the FIRST value it reads for each setting, and cloud images
+  # ship 50-cloud-init.conf with password logins on — so this must sort first.
+  rm -f /etc/ssh/sshd_config.d/99-novicetutor.conf
+  cat > /etc/ssh/sshd_config.d/00-novicetutor.conf <<'SSHD'
 PasswordAuthentication no
 KbdInteractiveAuthentication no
 PermitRootLogin prohibit-password
@@ -103,7 +111,7 @@ SSHD
     echo "    password logins disabled. KEEP THIS SESSION OPEN and confirm a"
     echo "    key login works from a second terminal before closing it."
   else
-    rm -f /etc/ssh/sshd_config.d/99-novicetutor.conf
+    rm -f /etc/ssh/sshd_config.d/00-novicetutor.conf
     echo "sshd config test failed; change reverted." >&2
     exit 1
   fi

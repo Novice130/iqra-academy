@@ -39,12 +39,15 @@ services:
       NODE_OPTIONS: --max-old-space-size=1024
     volumes:
       - /opt/novicetutor/downloads:/data/downloads:ro
+    # Liveness only, on purpose: /api/health queries the database, and a
+    # database blip must not mark a working app unhealthy (caddy waits on
+    # this). deploy.sh checks /api/health once per deploy instead.
     healthcheck:
       test:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/favicon.ico').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3

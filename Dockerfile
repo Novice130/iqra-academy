@@ -63,6 +63,9 @@ RUN DATABASE_URL="postgresql://build:build@127.0.0.1:5432/build" \
 
 # ── Runtime ──────────────────────────────────────────────────────────────────
 FROM base AS runner
+# Links the GHCR package to the repository, so the workflow's GITHUB_TOKEN
+# keeps write access to it after the first push.
+LABEL org.opencontainers.image.source="https://github.com/Novice130/iqra-academy"
 WORKDIR /app
 
 # HOSTNAME matters: Docker sets it to the container id, and the standalone
