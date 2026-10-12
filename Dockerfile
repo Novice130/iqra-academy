@@ -1,14 +1,15 @@
 # syntax=docker/dockerfile:1.7
 #
 # One image, two services: the Next.js app (default command) and the realtime
-# sidecar (`node realtime-server.mjs`). See deploy/docker-compose.yml.
+# sidecar (`node realtime-server.mjs`). The compose file that runs them is in
+# the infra repo: hetzner/sites/novicetutor/compose.yml.
 #
 # Build from the repo root:
 #   docker build -t novicetutor .
 #
 # No secret is baked in. The only values compiled into the bundle are the
 # NEXT_PUBLIC_* build args below, which are public by definition; everything
-# else arrives at runtime from /opt/novicetutor/.env on the server.
+# else arrives at runtime from /opt/sites/novicetutor/web.env on the server.
 
 FROM node:24-bookworm-slim AS base
 ENV NEXT_TELEMETRY_DISABLED=1

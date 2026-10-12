@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  web-quality-and-tests:
-    name: Web Lint, Typecheck, Tests & Build
+  web-quality:
+    name: Web Lint, Typecheck & Build
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -57,6 +57,49 @@ jobs:
         env:
           DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
 
+      # Not `npm run build`: that also runs the mobile workspace's
+      # `flutter build apk`, and Flutter is only installed in the mobile jobs.
+      - name: Build Web App
+        run: npx turbo run build --filter=web
+        env:
+          DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
+          BETTER_AUTH_SECRET: "dummy-secret-for-build-and-lint-validation-32chars"
+          NEXT_PUBLIC_APP_URL: "https://novicetutor.com"
+          NODE_ENV: "production"
+
+  # Separate from web-quality so a red test run is visible on its own and does
+  # not decide whether the image job runs. Playwright starts its own dev
+  # server, so no build is needed here.
+  web-tests:
+    name: Web API & E2E Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: pass
+          POSTGRES_DB: db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Push Database Schema to Test Postgres
         run: |
           cd apps/web
@@ -64,14 +107,6 @@ jobs:
         env:
           DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
           ALLOW_LOCAL_DB_SCRIPTS: "1"
-
-      - name: Build Web App
-        run: npm run build
-        env:
-          DATABASE_URL: "postgresql://user:pass@localhost:5432/db"
-          BETTER_AUTH_SECRET: "dummy-secret-for-build-and-lint-validation-32chars"
-          NEXT_PUBLIC_APP_URL: "https://novicetutor.com"
-          NODE_ENV: "production"
 
       - name: Install Playwright Chromium Browser
         run: npx playwright install --with-deps chromium
@@ -178,13 +213,17 @@ jobs:
   ci-gate:
     name: CI Security & Parity Gate
     runs-on: ubuntu-latest
-    needs: [web-quality-and-tests, mobile-android, mobile-ios]
+    needs: [web-quality, web-tests, mobile-android, mobile-ios]
     if: always()
     steps:
       - name: Verify All Quality Gates Passed
         run: |
-          if [ "${{ needs.web-quality-and-tests.result }}" != "success" ]; then
-            echo "❌ web-quality-and-tests failed"
+          if [ "${{ needs.web-quality.result }}" != "success" ]; then
+            echo "❌ web-quality failed"
+            exit 1
+          fi
+          if [ "${{ needs.web-tests.result }}" != "success" ]; then
+            echo "❌ web-tests failed"
             exit 1
           fi
           if [ "${{ needs.mobile-android.result }}" != "success" ]; then
@@ -197,40 +236,37 @@ jobs:
           fi
           echo "✅ All CI quality, security, and parity gates passed successfully!"
 
-  # ── Production deploy ──────────────────────────────────────────────────────
-  # Builds the image, boots it in the runner, and only then ships it to the
-  # VPS. Runs on a push to master, after the web job is green, and only
-  # once the repository variable DEPLOY_ENABLED is set to "true" — so merging
-  # this workflow before the server exists does nothing.
+  # ── Production image ───────────────────────────────────────────────────────
+  # Builds the image, boots it in the runner, and pushes it to GHCR. Runs on a
+  # push to master, after web-quality is green. It does not deploy: the server
+  # has no public SSH, so a deploy is run from the Mac in the infra repo with
+  # `bin/prod deploy novicetutor <full commit sha>` (infra/docs/runbook.md).
   #
-  # Repository variables:  DEPLOY_ENABLED, DEPLOY_PLATFORM (linux/amd64 default;
-  #                        linux/arm64 for Hetzner CAX), DEPLOY_RUNNER (optional),
+  # Repository variables:  IMAGE_PLATFORM (linux/amd64 default; linux/arm64 for
+  #                        Hetzner CAX), IMAGE_RUNNER (optional),
   #                        NEXT_PUBLIC_APP_URL, NEXT_PUBLIC_VAPID_PUBLIC_KEY
-  # Repository secrets:    DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY,
-  #                        DEPLOY_KNOWN_HOSTS (optional, recommended)
-  # Runbook: docs/deploy-vps.md
-  deploy:
-    name: Build Image & Deploy to VPS
-    needs: [web-quality-and-tests]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DEPLOY_ENABLED == 'true'
-    runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}
+  image:
+    name: Build & Push Image
+    needs: [web-quality]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    runs-on: ${{ vars.IMAGE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     concurrency:
-      group: deploy-production
+      group: image-production
       cancel-in-progress: false
     permissions:
       contents: read
       packages: write
     env:
       IMAGE: ghcr.io/novice130/iqra-academy
-      PLATFORM: ${{ vars.DEPLOY_PLATFORM || 'linux/amd64' }}
+      PLATFORM: ${{ vars.IMAGE_PLATFORM || 'linux/amd64' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       # Only does work when PLATFORM differs from the runner's architecture
       # (an arm64 image on the default amd64 runner). Emulated builds are slow;
-      # set DEPLOY_RUNNER to an arm64 runner label to avoid that.
+      # set IMAGE_RUNNER to an arm64 runner label to avoid that.
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -307,46 +343,3 @@ jobs:
           docker push "$IMAGE:$GITHUB_SHA"
           docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
           docker push "$IMAGE:latest"
-
-      # deploy.sh pulls the sha tag, waits for health, and puts the previous
-      # tag back by itself if the new one does not come up.
-      - name: Deploy to VPS
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
-          GHCR_USER: ${{ github.actor }}
-          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          : "${DEPLOY_HOST:?secret DEPLOY_HOST is not set}"
-          : "${DEPLOY_USER:?secret DEPLOY_USER is not set}"
-          : "${DEPLOY_SSH_KEY:?secret DEPLOY_SSH_KEY is not set}"
-
-          install -d -m 700 ~/.ssh
-          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
-            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          else
-            echo "::warning::DEPLOY_KNOWN_HOSTS is not set; trusting the host key seen on this run."
-            ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" > ~/.ssh/known_hosts 2>/dev/null
-          fi
-          ssh_opts=(-i ~/.ssh/deploy_key -o StrictHostKeyChecking=yes -o BatchMode=yes)
-          target="$DEPLOY_USER@$DEPLOY_HOST"
-
-          ssh "${ssh_opts[@]}" -p "$DEPLOY_PORT" "$target" 'mkdir -p /opt/novicetutor/caddy'
-          scp "${ssh_opts[@]}" -P "$DEPLOY_PORT" deploy/docker-compose.yml deploy/deploy.sh "$target:/opt/novicetutor/"
-          scp "${ssh_opts[@]}" -P "$DEPLOY_PORT" deploy/caddy/Caddyfile "$target:/opt/novicetutor/caddy/Caddyfile"
-
-          # The token is short-lived and goes over stdin, never onto a command line.
-          printf '%s' "$GHCR_TOKEN" | ssh "${ssh_opts[@]}" -p "$DEPLOY_PORT" "$target" \
-            "docker login ghcr.io -u '$GHCR_USER' --password-stdin >/dev/null"
-          ssh "${ssh_opts[@]}" -p "$DEPLOY_PORT" "$target" \
-            "chmod +x /opt/novicetutor/deploy.sh && /opt/novicetutor/deploy.sh '$GITHUB_SHA'"
-
-      - name: Remove deploy key
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
