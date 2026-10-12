@@ -133,6 +133,18 @@ export const auth = betterAuth({
     },
   },
 
+  /**
+   * `org_id` is not a Better Auth core field. Unless it is declared here,
+   * Better Auth drops it from what the `databaseHooks.user.create.before` hook
+   * below returns, and the insert fails on the NOT NULL column. `input: false`
+   * keeps a client from choosing its own org in the sign-up body.
+   */
+  user: {
+    additionalFields: {
+      orgId: { type: "string", required: false, input: false },
+    },
+  },
+
   databaseHooks: {
     user: {
       create: {
