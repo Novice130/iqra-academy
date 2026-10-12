@@ -43,8 +43,11 @@ jobs:
       - name: Typecheck Web App (tsc)
         run: cd apps/web && npx tsc --noEmit
 
+      # Not `npm run lint`: that also runs the mobile workspace's
+      # `flutter analyze`, and Flutter is only installed in the mobile jobs
+      # (which run the analysis themselves).
       - name: Run ESLint
-        run: npm run lint
+        run: npx turbo run lint --filter=web --filter=desktop
 
       - name: Database Migration Drift & Integrity Check
         run: |
