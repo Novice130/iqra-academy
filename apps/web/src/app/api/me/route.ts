@@ -30,7 +30,7 @@ import { handleApiError, NotFoundError } from "@/lib/errors";
 
 export async function GET(request: NextRequest) {
   // A single indexed read of one row, no transaction — exactly what the HTTP
-  // driver exists for. See docs/worker-limits.md.
+  // driver exists for. See docs/archive/worker-limits.md.
   return withHttpDb(async () => {
     try {
       const authResult = await requireAuth(request);

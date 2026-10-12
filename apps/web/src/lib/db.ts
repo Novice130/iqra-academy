@@ -1,128 +1,87 @@
 /**
- * @fileoverview Drizzle ORM Client for Cloudflare Workers & Serverless
+ * @fileoverview Drizzle ORM Client for a long-lived Node.js server
  *
- * 📚 NEON SERVERLESS DRIVER:
- * Standard `postgres` TCP drivers do not work in Cloudflare Workers because
- * Workers use `workerd` (V8 edge runtime) which doesn't support raw Node TCP sockets.
- * `@neondatabase/serverless` connects over WebSockets (port 443), providing
- * instant query responses, full transaction support, and zero connection hangs!
+ * 📚 POSTGRES.JS DRIVER:
+ * The app runs as an ordinary Node process (`next start` on a VPS), so it
+ * talks to Postgres over plain TCP with `postgres` (postgres.js) — no
+ * WebSocket tunnel, no HTTP driver. Nothing here is Neon-specific: pointing
+ * `DATABASE_URL` at another Postgres is the whole migration.
  *
- * 📚 WHY PER-REQUEST POOLS:
- * Cloudflare Workers forbids reusing an I/O object (socket, stream) created
- * during one request's execution context from a different request's context
- * ("Cannot perform I/O on behalf of a different request"). A `Pool` created
- * once at module scope gets reused across requests handled by the same
- * worker isolate and eventually hits this — the request hangs and times out.
- * We use `AsyncLocalStorage` to hand each request its own `Pool`, created on
- * entry via `withDb()` and torn down when the request finishes. `db` itself
- * is a Proxy that resolves to whichever pool is active for the current
- * request, so existing call sites (`db.query...`, `db.transaction...`,
- * including real interactive transactions used by `withRLS` and quota
- * consumption logic) don't need to change — only the request entry points
- * (route handlers, server component pages) need to be wrapped in `withDb()`.
+ * 📚 WHY ONE PROCESS-WIDE POOL:
+ * A Node server keeps its sockets between requests, so a single pool created
+ * once and shared by every request is both correct and the cheap option — the
+ * TLS handshake is paid per connection, not per request. The client is built
+ * lazily on first use (never at import time, because `next build` imports
+ * these modules with no database to reach) and cached on `globalThis` so
+ * `next dev` hot reloads re-use it instead of leaking a pool per edit.
+ *
+ * `prepare: false` because the production URL is Neon's pooled endpoint
+ * (PgBouncer in transaction mode), where a prepared statement does not
+ * outlive the transaction that created it.
+ *
+ * 📚 `withDb()` / `withHttpDb()`:
+ * These used to hand each request its own connection — a WebSocket pool or
+ * an HTTP client — and choosing wrongly was a runtime error. Both are now
+ * pass-throughs kept so the existing call sites stay as they are;
+ * `db.transaction(...)` works inside either, and outside both.
  *
  * @module lib/db
  */
 
-import { drizzle, type NeonDatabase } from "drizzle-orm/neon-serverless";
-import { drizzle as drizzleHttp } from "drizzle-orm/neon-http";
-import { Pool, neon, neonConfig } from "@neondatabase/serverless";
-import { AsyncLocalStorage } from "node:async_hooks";
+import { drizzle, type PostgresJsDatabase } from "drizzle-orm/postgres-js";
+import postgres from "postgres";
+import { setDefaultAutoSelectFamilyAttemptTimeout } from "node:net";
 import { sql } from "drizzle-orm";
-import ws from "ws";
 import * as schema from "@/db/schema";
 
-// Enable WebSocket for local Node.js environments (npx tsx, seed scripts)
-// Cloudflare Workers has native global WebSocket, so we skip polyfilling there.
-if (typeof WebSocket === "undefined" && typeof window === "undefined") {
-  neonConfig.webSocketConstructor = ws;
-}
+type Db = PostgresJsDatabase<typeof schema>;
 
-type Db = NeonDatabase<typeof schema>;
+// Node gives each resolved address 250ms to connect before trying the next,
+// and the database host resolves to several. From a link slower than that —
+// a laptop a continent away from the database is ~270ms — every attempt is
+// abandoned and the connect fails with ETIMEDOUT though the host is reachable.
+setDefaultAutoSelectFamilyAttemptTimeout(2000);
 
-const dbContext = new AsyncLocalStorage<{ db: Db; pool: Pool | null }>();
-
-function createConnection(): { db: Db; pool: Pool } {
-  const pool = new Pool({ connectionString: process.env.DATABASE_URL! });
-  return { db: drizzle(pool, { schema }), pool };
-}
-
-/**
- * A pool-less connection over Neon's HTTP endpoint: one `fetch` per query,
- * no WebSocket, no handshake, nothing to tear down.
- *
- * The WebSocket pool above buys interactive transactions, and every request
- * was paying for it whether it used one or not. A pool is a TLS handshake and
- * a socket held open for the life of the request; a dashboard sitting on a
- * poll opened one every couple of seconds, and enough of those at once is
- * what put the worker over its 128 MB memory limit on 2026-08-06 and -07
- * (error 1102). Reads that never open a transaction have no reason to pay it.
- *
- * Typed as the pooled `Db` so the `db` proxy and every call site stay
- * unchanged — the two drivers differ only in `.transaction()`, which the
- * HTTP driver refuses at runtime. That is what `withHttpDb` is documented to
- * exclude, and `withRLS` is the thing to grep for.
- */
-function createHttpConnection(): { db: Db; pool: null } {
-  const client = neon(process.env.DATABASE_URL!);
-  return { db: drizzleHttp(client, { schema }) as unknown as Db, pool: null };
-}
-
-/**
- * Wraps a request handler so all `db` access inside it (including nested
- * calls like `requireAuth` → `getAuthContext`, or Better-Auth's adapter)
- * shares one pool scoped to this request only. Every API route handler and
- * server component page that touches the database must call through this.
- */
-export async function withDb<T>(fn: () => Promise<T>): Promise<T> {
-  // Nested calls only reuse an existing store IF it has a real pool.
-  // A store created by withHttpDb has pool: null and cannot run transactions.
-  const existingStore = dbContext.getStore();
-  if (existingStore && existingStore.pool) {
-    return fn();
-  }
-
-  const { db: requestDb, pool } = createConnection();
-  try {
-    return await dbContext.run({ db: requestDb, pool }, fn);
-  } finally {
-    await pool.end();
-  }
-}
-
-/**
- * Like `withDb`, but over HTTP — for handlers that only read and write rows
- * and never open a transaction.
- *
- * `db.transaction(...)` inside this (directly, or via `withRLS`) throws:
- * the Neon HTTP driver has no transactions. That is the whole trade. If a
- * handler needs one, it belongs in `withDb`.
- *
- * Better Auth goes through the same `db` proxy, so wrapping a route in this
- * moves session lookup onto HTTP too — it only ever does single-row reads.
- *
- * A handler already inside a `withDb` keeps that pool rather than opening a
- * second connection of a different kind alongside it.
- */
-export async function withHttpDb<T>(fn: () => Promise<T>): Promise<T> {
-  if (dbContext.getStore()) {
-    return fn();
-  }
-
-  const { db: requestDb, pool } = createHttpConnection();
-  // Nothing to close: there is no socket, only fetches that have already
-  // completed by the time the handler returns.
-  return dbContext.run({ db: requestDb, pool }, fn);
-}
+const globalForDb = globalThis as unknown as {
+  __dbClient?: ReturnType<typeof postgres>;
+  __db?: Db;
+};
 
 function currentDb(): Db {
-  const store = dbContext.getStore();
-  if (!store) {
-    throw new Error(
-      "Database accessed outside of withDb() — wrap the request handler (route.ts export or page.tsx) in withDb()."
-    );
+  if (!globalForDb.__db) {
+    const url = process.env.DATABASE_URL;
+    if (!url) {
+      throw new Error("DATABASE_URL is not set — the database cannot be reached.");
+    }
+    const client = postgres(url, {
+      max: Number(process.env.DB_POOL_MAX) || 10,
+      prepare: false,
+      // Seconds. Idle sockets are dropped before Neon's pooler drops them,
+      // and a one-off script is not held open after its last query.
+      idle_timeout: 20,
+      connect_timeout: 10,
+    });
+    globalForDb.__dbClient = client;
+    globalForDb.__db = drizzle(client, { schema });
   }
-  return store.db;
+  return globalForDb.__db;
+}
+
+/**
+ * Compatibility wrapper from the per-request-pool era: route handlers and
+ * server component pages are wrapped in this, and it now simply runs `fn`
+ * against the shared pool.
+ */
+export async function withDb<T>(fn: () => Promise<T>): Promise<T> {
+  return fn();
+}
+
+/**
+ * Compatibility wrapper, identical to `withDb`. It used to select a driver
+ * without transactions; there is one driver now and it has them.
+ */
+export async function withHttpDb<T>(fn: () => Promise<T>): Promise<T> {
+  return fn();
 }
 
 export const db: Db = new Proxy({} as Db, {

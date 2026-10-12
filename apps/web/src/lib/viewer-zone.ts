@@ -10,9 +10,10 @@
  *   1. `users.timezone`  — an explicit choice. Survives travel and VPNs, and
  *                          beats everything, because a person who told us
  *                          where they are should not be second-guessed.
- *   2. `cf.timezone`     — the IANA zone Cloudflare derives from the visitor's
- *                          IP. Free, already on every request, no geo-IP
- *                          library. This is the new part.
+ *   2. `cf-timezone`     — the IANA zone Cloudflare derives from the visitor's
+ *                          IP, sent to the origin as a request header by the
+ *                          "Add visitor location headers" managed transform.
+ *                          Free, no geo-IP library.
  *   3. the browser       — `Intl.DateTimeFormat().resolvedOptions().timeZone`,
  *                          resolved client-side in LocalTime.tsx.
  *   4. UTC.
@@ -32,6 +33,7 @@
  * @module lib/viewer-zone
  */
 
+import { headers } from "next/headers";
 import { isValidZone } from "./zones";
 
 export type ZoneSource = "account" | "ip" | "device";
@@ -39,23 +41,26 @@ export type ZoneSource = "account" | "ip" | "device";
 /**
  * The visitor's zone according to Cloudflare's IP geolocation, or null.
  *
- * Null in every case where we cannot know: `next dev` outside a Worker, a
- * request Cloudflare could not place, or a zone string this runtime's IANA
- * database does not recognise. Every one of those must degrade to "ask the
- * browser" rather than throw — this runs in a layout that renders the whole
- * dashboard.
+ * Null in every case where we cannot know: a request that did not come
+ * through the Cloudflare proxy (`next dev`, a health check hitting the box
+ * directly), the managed transform switched off, a request Cloudflare could
+ * not place, or a zone string this runtime's IANA database does not
+ * recognise. Every one of those must degrade to "ask the browser" rather than
+ * throw — this runs in a layout that renders the whole dashboard.
+ *
+ * The header is only as trustworthy as the path it arrived on. That is fine
+ * here: the worst a forged one does is show the forger their own classes in
+ * a zone of their choosing.
  */
 export async function requestZone(): Promise<string | null> {
   try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const ctx = await getCloudflareContext({ async: true });
-    const zone = (ctx?.cf as { timezone?: string } | undefined)?.timezone;
-    if (typeof zone === "string" && zone.length > 0 && isValidZone(zone)) {
+    const zone = (await headers()).get("cf-timezone")?.trim();
+    if (zone && isValidZone(zone)) {
       return zone;
     }
     return null;
   } catch {
-    // Not on a Worker, or called outside a request scope. Expected in dev.
+    // Called outside a request scope. Expected in scripts and tests.
     return null;
   }
 }

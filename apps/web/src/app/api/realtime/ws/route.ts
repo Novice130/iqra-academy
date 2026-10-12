@@ -3,6 +3,13 @@ import { verifyRealtimeTicket, getRealtimeSecret } from "@/lib/realtime/ticket";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * The realtime WebSocket does not live in Next: a route handler cannot answer
+ * 101 Switching Protocols. In production the reverse proxy sends this exact
+ * path to the realtime sidecar (src/realtime/server), so this handler is only
+ * reached where there is no proxy in front — `next dev`, tests — and all it
+ * can honestly do is validate the ticket and say where the socket is.
+ */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const ticket = searchParams.get("ticket");
@@ -24,22 +31,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Invalid or expired realtime ticket" }, { status: 401 });
   }
 
-  try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const cf = getCloudflareContext();
-    const hubNamespace = (cf?.env as any)?.AVAILABILITY_HUB;
-
-    if (hubNamespace && typeof hubNamespace.idFromName === "function") {
-      const doId = hubNamespace.idFromName(claims.orgId);
-      const stub = hubNamespace.get(doId);
-      // Forward the original request with WebSocket upgrade headers to the partitioned DO
-      return await stub.fetch(request as unknown as Request);
-    }
-  } catch (err) {
-    console.warn("[realtime/ws] Failed to route to AvailabilityHub DO:", err);
-  }
-
-  // Fallback for non-Cloudflare environments (Next.js dev/testing)
   if (request.headers.get("Upgrade") !== "websocket") {
     return NextResponse.json({
       status: "ready",
@@ -49,7 +40,8 @@ export async function GET(request: NextRequest) {
     });
   }
 
-  return new Response("WebSocket connection requires Cloudflare Durable Objects environment.", {
-    status: 501,
-  });
+  return new Response(
+    "WebSocket upgrades are served by the realtime sidecar, not by Next. Route /api/realtime/ws to it at the proxy.",
+    { status: 501 }
+  );
 }

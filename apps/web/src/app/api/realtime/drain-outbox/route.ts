@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withDb } from "@/lib/db";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
-import { getRealtimeSecret } from "@/lib/realtime/ticket";
+import { getRealtimeSecret, isServiceAuthorized } from "@/lib/realtime/ticket";
 
 export const dynamic = "force-dynamic";
 
@@ -13,8 +13,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: "Realtime is not configured." }, { status: 503 });
     }
-    const authHeader = request.headers.get("Authorization");
-    if (!authHeader || authHeader !== `Bearer ${secret}`) {
+    if (!isServiceAuthorized(request.headers.get("Authorization"), secret)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 

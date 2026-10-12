@@ -7,16 +7,15 @@
  * past the "unknown app" warning. Without that second part most people stop
  * there.
  *
- * Availability is asked of R2 rather than assumed. The desktop builds are
- * produced on a Windows machine and uploaded by hand, so hardcoding a link
+ * Availability is asked of the disk rather than assumed. The desktop builds are
+ * produced on a Windows machine and copied to the server by hand, so hardcoding a link
  * would hand out 404s on any day the upload had not happened yet. A platform
  * with no file says so instead of pretending.
  */
 
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getCloudflareContext } from "@opennextjs/cloudflare";
-import { ALLOWED_DOWNLOADS } from "@/lib/app-downloads";
+import { ALLOWED_DOWNLOADS, findDownload } from "@/lib/app-downloads";
 
 export const metadata: Metadata = {
   title: "Download the app | Novice Tutor",
@@ -25,7 +24,7 @@ export const metadata: Metadata = {
 };
 
 /**
- * Rendered per request, not at build. The point of asking R2 what exists is
+ * Rendered per request, not at build. The point of asking what exists is
  * that the answer changes when a build is uploaded — and uploads happen
  * without a deploy. Prerendering this would freeze "Windows: not published"
  * into the page until the next deploy, which is worse than not checking.
@@ -34,39 +33,15 @@ export const dynamic = "force-dynamic";
 
 const ANDROID_VERSION = "1.2";
 
-interface BucketObjectHead {
-  size: number;
-}
-interface AppDownloadsBucket {
-  head(key: string): Promise<BucketObjectHead | null>;
-}
-
-/** Which builds are actually sitting in the bucket right now, and how big. */
+/** Which builds are actually on disk right now, and how big. */
 async function availableBuilds(): Promise<Record<string, number | null>> {
-  const keys = Object.values(ALLOWED_DOWNLOADS);
-  const empty = Object.fromEntries(keys.map((k) => [k, null]));
-
-  try {
-    const { env } = getCloudflareContext();
-    const bucket = (env as unknown as { APP_DOWNLOADS?: AppDownloadsBucket }).APP_DOWNLOADS;
-    if (!bucket) return empty;
-
-    const entries = await Promise.all(
-      keys.map(async (key) => {
-        try {
-          const head = await bucket.head(key);
-          return [key, head ? head.size : null] as const;
-        } catch {
-          return [key, null] as const;
-        }
-      })
-    );
-    return Object.fromEntries(entries);
-  } catch {
-    // No Cloudflare context — `next dev` on a laptop. Everything reads as
-    // unavailable, which is honest here and never happens in production.
-    return empty;
-  }
+  const entries = await Promise.all(
+    Object.values(ALLOWED_DOWNLOADS).map(async (key) => {
+      const found = await findDownload(key);
+      return [key, found ? found.size : null] as const;
+    })
+  );
+  return Object.fromEntries(entries);
 }
 
 function formatSize(bytes: number | null): string | null {

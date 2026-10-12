@@ -7,12 +7,11 @@
  * - Categories: General, Audio, Video, Backgrounds, Statistics, About
  */
 
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Track } from 'livekit-client';
 import { useRoomContext, useLocalParticipant } from '@livekit/components-react';
 import { useKrispNoiseFilter } from '@livekit/components-react/krisp';
-import { isKrispNoiseFilterSupported } from '@livekit/krisp-noise-filter';
 import {
   SettingsIcon,
   MicIcon,
@@ -223,7 +222,20 @@ export default function CallSettingsModal({
   // Krisp enhanced noise cancellation. Supported only on LiveKit Cloud and
   // only in browsers with AudioWorklet; the hook no-ops gracefully otherwise.
   const krisp = useKrispNoiseFilter({ filterOptions: { quality: 'medium' } });
-  const krispSupported = useMemo(() => isKrispNoiseFilterSupported(), []);
+  // Loaded on the client only: the Krisp SDK subclasses `Worker` at module
+  // scope, so a static import throws when the server renders the call page.
+  const [krispSupported, setKrispSupported] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    import('@livekit/krisp-noise-filter')
+      .then((m) => {
+        if (!cancelled) setKrispSupported(m.isKrispNoiseFilterSupported());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   /**
    * The three modes actually do things:

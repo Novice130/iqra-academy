@@ -19,19 +19,12 @@
  * the AsyncLocalStorage request-pool machinery in lib/db buys nothing here.
  */
 
-import { drizzle as drizzleNeon, type NeonDatabase } from "drizzle-orm/neon-serverless";
-import { Pool, neonConfig } from "@neondatabase/serverless";
 import { drizzle as drizzlePostgresJs } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import ws from "ws";
 import { eq, and } from "drizzle-orm";
 import * as schema from "../../src/db/schema";
 import { organizations, users, authSessions } from "../../src/db/schema";
 import { requireIsolatedDb } from "../../scripts/lib/require-isolated-db";
-
-if (typeof WebSocket === "undefined") {
-  neonConfig.webSocketConstructor = ws;
-}
 
 export interface TestUser {
   id: string;
@@ -49,7 +42,7 @@ export interface TestOrg {
   student: TestUser;
 }
 
-type Db = NeonDatabase<typeof schema> | ReturnType<typeof drizzlePostgresJs<typeof schema>>;
+type Db = ReturnType<typeof drizzlePostgresJs<typeof schema>>;
 
 const ORG_SEEDS = [
   { slug: "pw-org-a", name: "Playwright Org A" },
@@ -62,41 +55,19 @@ const ROLE_SEEDS = [
   { role: "STUDENT", label: "student" },
 ] as const;
 
-type TestPool = Pool | { end: () => Promise<void> };
+type TestPool = { end: () => Promise<void> };
 
 let sharedDb: { db: Db; pool: TestPool; sql?: ReturnType<typeof postgres> } | null = null;
-
-function isLocalPgUrl(raw: string): boolean {
-  try {
-    const host = new URL(raw).hostname.toLowerCase();
-    return (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host === "[::1]" ||
-      host === ""
-    );
-  } catch {
-    return false;
-  }
-}
 
 function testDb(): { db: Db; pool: TestPool; sql?: ReturnType<typeof postgres> } {
   if (!sharedDb) {
     requireIsolatedDb("playwright-fixtures");
     const connectionString = process.env.DATABASE_URL!;
-    // @neondatabase/serverless speaks the Neon wire protocol over
-    // WebSockets; it cannot open a plain-TCP session to a local Postgres
-    // (docs/testing.md Option B). `postgres` (postgres-js) is already a
-    // runtime dependency, so route localhost fixtures through it and keep
-    // the Neon pool for isolated Neon branches.
-    if (isLocalPgUrl(connectionString)) {
-      const sql = postgres(connectionString);
-      sharedDb = { db: drizzlePostgresJs(sql, { schema }), pool: { end: async () => { await sql.end({ timeout: 2 }); } }, sql };
-    } else {
-      const pool = new Pool({ connectionString });
-      sharedDb = { db: drizzleNeon(pool, { schema }), pool };
-    }
+    // Same driver as the app (src/lib/db.ts): plain TCP, so a local
+    // Postgres and an isolated Neon branch are reached the same way.
+    // `prepare: false` keeps Neon's pooled endpoint usable.
+    const sql = postgres(connectionString, { prepare: false });
+    sharedDb = { db: drizzlePostgresJs(sql, { schema }), pool: { end: async () => { await sql.end({ timeout: 2 }); } }, sql };
   }
   return sharedDb;
 }
@@ -181,12 +152,7 @@ export async function createTestSession(userId: string): Promise<string> {
   // Playwright sends the Cookie header raw, so no encodeURIComponent.
   // Signed inline with WebCrypto (same algorithm as better-call) because
   // better-call/crypto is not in its exports map.
-  // NOTE: the app server itself runs @neondatabase/serverless (WebSocket +
-  // HTTP drivers), which cannot speak to a plain-TCP local Postgres
-  // (docs/testing.md Option B). Seeded suites therefore need an isolated
-  // *Neon branch*, not localhost — localhost only proves the fixture signs
-  // and seeds correctly. The unsigned raw token is returned when no
-  // BETTER_AUTH_SECRET is set.
+  // The unsigned raw token is returned when no BETTER_AUTH_SECRET is set.
   const secret = process.env.BETTER_AUTH_SECRET;
   if (secret) {
     const subtle =

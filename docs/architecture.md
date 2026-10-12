@@ -1,40 +1,62 @@
 # Architecture
 
-What runs where, as of 2026-08-06. The previous version of this page described
-four Docker containers on a VPS managed by Dockploy, with Jitsi for video —
-none of which has been true for a long time.
+What runs where, as of 2026-10-12. Until then the site ran on Cloudflare
+Workers through `@opennextjs/cloudflare`; the notes from that era are in
+`archive/worker-limits.md` and no longer describe the live system.
 
 ## Deployment
 
 ```
-                    ┌───────────────────────────────┐
-                    │   Cloudflare Workers          │
-                    │   novicetutor.com             │
-                    │   Next.js via @opennextjs      │
-                    └───────────┬───────────────────┘
-                                │
-        ┌───────────────────────┼───────────────────────┐
-        │                       │                       │
-┌───────▼────────┐   ┌──────────▼─────────┐   ┌─────────▼────────┐
-│ Neon Postgres  │   │  LiveKit Cloud     │   │ Stripe / Resend  │
-│ (serverless)   │   │  (SFU + TURN)      │   │                  │
-└────────────────┘   └────────────────────┘   └──────────────────┘
+  Browser ──► Cloudflare (DNS + proxy, CDN, DDoS)
+                    │  HTTPS, Full (strict)
+                    ▼
+        ┌──────────────────────────────────────────────┐
+        │  Hetzner VPS — Docker Compose                │
+        │                                              │
+        │  caddy :443 ─┬─ /api/realtime/ws ─► realtime │
+        │              └─ everything else ──► web      │
+        │                                              │
+        │  web       Next.js standalone, Node 24       │
+        │  realtime  WebSocket hub + outbox timer      │
+        └───────┬──────────────────────────────────────┘
+                │
+     ┌──────────┼───────────────────────┐
+     ▼          ▼                       ▼
+ Neon Postgres  LiveKit Cloud      Stripe / Resend
+ (pooled TCP)   (SFU + TURN)
 ```
 
-One Next.js app at `apps/web`, deployed to Cloudflare Workers with
-`@opennextjs/cloudflare` and Wrangler (`npm run deploy:cf`). There is no VPS,
-no Docker, and no container orchestration anywhere in the live system.
+One Next.js app at `apps/web`, built into a Docker image by GitHub Actions,
+pushed to GHCR and pulled by a single VPS. Three containers, defined in
+`deploy/docker-compose.yml`; `web` and `realtime` are the same image started
+with different commands. How to set the server up, deploy, roll back and cut
+over is in [deploy-vps.md](deploy-vps.md).
 
-- **Database** — Neon Postgres. Every DB-touching route or page must be wrapped
-  in one of two entry points (`src/lib/db.ts`), because Workers cannot reuse a
-  connection pool across requests: **`withDb()`** for anything that opens a
-  transaction (WebSocket pool), **`withHttpDb()`** for handlers that only read
-  and write rows (one `fetch` per query, no pool). Getting this wrong is not a
-  type error — transactions throw at runtime under the HTTP driver. Choosing
-  the pool everywhere is what caused two outages: see `worker-limits.md`.
-- **Large files** — R2 (`novicetutor-app`), streamed by a route handler. A
-  Workers static asset is capped at 25 MiB, and the Worker has 128 MB of
-  memory, so nothing big may be buffered. See `worker-limits.md`.
+- **Edge** — Cloudflare stays in front as DNS and proxy. Caddy terminates TLS
+  with a Cloudflare Origin CA certificate and only believes forwarding headers
+  from Cloudflare's address ranges, so the client IP in `x-forwarded-for` is
+  the real one. The visitor's timezone comes from Cloudflare's `cf-timezone`
+  header (the "Add visitor location headers" managed transform).
+- **Web** — stock `node server.js` from Next's standalone output. No custom
+  server, no bundle patching. It is one long-lived process, so module-level
+  state (the database pool) persists across requests, and work deferred past
+  the response simply keeps running.
+- **Realtime** — a small sidecar that owns the scheduling WebSocket
+  (`/api/realtime/ws`), because a Next route handler cannot answer a 101. It
+  holds one hub per `orgId` in memory, which is correct for exactly one
+  instance: running two would split subscribers between them. The app publishes
+  to it over the compose network (`POST /publish`, authenticated with
+  `REALTIME_SECRET`). The sidecar also runs the once-a-minute timer that calls
+  `/api/realtime/drain-outbox`, retrying events whose first publish failed.
+- **Database** — Neon Postgres over `postgres.js`, one pool per process against
+  Neon's pooled endpoint. `withDb()` and `withHttpDb()` in `src/lib/db.ts`
+  still wrap every route and page, but they are now only compatibility
+  wrappers: both resolve to the same pool and transactions work inside either.
+  The split mattered on Workers, where a pool could not outlive a request.
+  Moving the database later is a change of `DATABASE_URL`.
+- **Large files** — the Android APKs and desktop installers sit in
+  `/opt/novicetutor/downloads` on the server, mounted read-only into `web` and
+  streamed by `/api/app-download/[file]`. See `publishing-builds.md`.
 - **Auth** — Better Auth, cookie sessions. `session.user.role` is always
   undefined (no `additionalFields` configured) — read the role from the `users`
   table. Email verification and Google sign-in are wired but not enabled.
@@ -42,7 +64,7 @@ no Docker, and no container orchestration anywhere in the live system.
   what moving to a self-hosted SFU would involve.
 - **Payments** — Stripe. **Email** — Resend.
 - **Mobile** — `apps/mobile`, Flutter: a WebView shell over the site, plus FCM
-  push and native screen capture. APKs are served from R2. See `mobile-app.md`.
+  push and native screen capture. See `mobile-app.md`.
 
 ## Schema
 

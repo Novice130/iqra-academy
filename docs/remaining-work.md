@@ -31,7 +31,7 @@ Both routes below are on `withHttpDb` and deployed (Worker version
 anyone is tempted to wrap in `withDb`. What is still open now lives in
 `docs/next-up.md`.
 
-The rule, from `docs/worker-limits.md` and the doc comment in
+The rule, from `docs/archive/worker-limits.md` and the doc comment in
 `apps/web/src/lib/db.ts:77`: **`withDb()` only for handlers that open a
 transaction** (`db.transaction`, `withRLS`, quota logic). Everything else takes
 `withHttpDb()`. `tsc` cannot catch a wrong choice — the HTTP driver refuses
@@ -56,10 +56,9 @@ Deliberately **not** changed: `api/sessions/[id]/participant` (writes on both
 `POST` and its second handler) and the admin/session mutation routes. They stay
 pooled.
 
-Deploy — from `reference_deploy_and_db_ops` and the 2026-08-20 postmortem:
-clean local build, then `wrangler versions upload`, then
-`wrangler versions deploy <id>@100%`. Re-deploying an existing version id does
-nothing.
+Deploy — this section predates the move off Cloudflare Workers. Deploys are now
+a push to `master`; see `deploy-vps.md`. (The Workers-era procedure was a clean
+local build, `wrangler versions upload`, then `wrangler versions deploy`.)
 
 ## 2. Two-device pass on a real iPhone
 

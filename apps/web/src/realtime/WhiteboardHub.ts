@@ -30,7 +30,12 @@ export interface BoardState {
 }
 
 /**
- * WhiteboardHub — one Durable Object instance per (orgId, sessionId, boardId).
+ * WhiteboardHub — one instance per (orgId, sessionId, boardId).
+ *
+ * NOT SERVED ANYWHERE YET: written against the Durable Object interface
+ * (`BoardState` with persistent storage) and never bound to a runtime — the
+ * client's `/realtime/whiteboard` socket has no server behind it. The realtime
+ * sidecar (src/realtime/server) hosts AvailabilityHub only.
  *
  * SQLite-persisted stroke log with host lock/clear. Strokes broadcast to all
  * sockets in the instance (org partition is the instance itself — the id is
@@ -46,13 +51,7 @@ export class WhiteboardHub {
   ) {}
 
   private getSecret(): string {
-    return (
-      this.env?.REALTIME_SECRET ||
-      process.env.REALTIME_SECRET ||
-      (this.env as any)?.BETTER_AUTH_SECRET ||
-      process.env.BETTER_AUTH_SECRET ||
-      "novicetutor-realtime-fallback-secret-2026"
-    );
+    return this.env?.REALTIME_SECRET || process.env.REALTIME_SECRET || '';
   }
 
   static instanceName(orgId: string, sessionId: string, boardId: string) {

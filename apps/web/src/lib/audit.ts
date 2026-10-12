@@ -125,7 +125,9 @@ export async function logAuditBatch(entries: AuditLogParams[]): Promise<void> {
  * Helper to extract IP address from a request.
  *
  * 📚 IP ADDRESS NOTES:
- * - `x-forwarded-for` is set by reverse proxies (Nginx, Cloudflare)
+ * - `cf-connecting-ip` is set by Cloudflare, which every production request
+ *   passes through; it is a single address and wins when present
+ * - `x-forwarded-for` is set by reverse proxies (Caddy, Cloudflare)
  * - It can be a comma-separated list; the first one is the client
  * - In development, it's typically "::1" (IPv6 localhost)
  * - NEVER trust IP for authentication (it can be spoofed)
@@ -135,6 +137,10 @@ export async function logAuditBatch(entries: AuditLogParams[]): Promise<void> {
  * @returns The client's IP address or "unknown"
  */
 export function getClientIp(headers: Headers): string {
+  const connecting = headers.get("cf-connecting-ip")?.trim();
+  if (connecting) {
+    return connecting;
+  }
   const forwarded = headers.get("x-forwarded-for");
   if (forwarded) {
     return forwarded.split(",")[0].trim();

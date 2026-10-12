@@ -137,7 +137,7 @@ quran-lms/
 │
 ├── docs/                              # ── Integration Guides ──
 │   ├── architecture.md                # what runs where
-│   ├── worker-limits.md               # withDb vs withHttpDb, and the 1102 outages
+│   ├── deploy-vps.md                  # server setup, deploy, rollback, cutover
 │   ├── integration-stripe.md
 │   ├── integration-calcom.md
 │   ├── integration-livekit.md
@@ -282,7 +282,7 @@ npm run db:seed      # Seed database with test data
 | **Video** | LiveKit Cloud | Token-secured video rooms |
 | **Email** | Resend | Developer-first transactional email |
 | **Notifications** | Web Push (VAPID) | No app install needed |
-| **Deploy** | Cloudflare Workers (OpenNext) | `npm run deploy:cf` |
+| **Deploy** | Docker Compose on a VPS, behind Cloudflare | push to `master` — see `docs/deploy-vps.md` |
 
 ---
 
@@ -348,17 +348,17 @@ Key files to study:
 
 ---
 
-## 🏗️ Deployment (Cloudflare Workers)
+## 🏗️ Deployment (VPS + Docker Compose)
 
 **Domain**: `novicetutor.com`
 
 | Service | Hosting | URL |
 |---------|---------|-----|
-| Next.js Web App | **Cloudflare Workers** (OpenNext) | `https://novicetutor.com` |
+| Next.js Web App + realtime sidecar | **Hetzner VPS** (Docker Compose, Caddy), proxied by Cloudflare | `https://novicetutor.com` |
 | LiveKit Video | **LiveKit Cloud** | `wss://novice-tutor-kl6pco38.livekit.cloud` |
 | Database | **Neon Postgres** | Cloud Serverless DB |
 
-Deploy with `cd apps/web && npm run deploy:cf`. There is no VPS and no Docker in the live system — see [docs/architecture.md](docs/architecture.md).
+Merging to `master` deploys: GitHub Actions builds the image, pushes it to GHCR, and the server pulls it. Setup, rollback and the cutover checklist are in [docs/deploy-vps.md](docs/deploy-vps.md); what runs where is in [docs/architecture.md](docs/architecture.md).
 
 ---
 

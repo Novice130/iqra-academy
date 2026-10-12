@@ -80,8 +80,8 @@ notification row **and** calls `sendPushToUsers` → tapping the notification
 deep-links to `/dashboard/session/<id>`.
 
 **Server side** is `apps/web/src/lib/fcm.ts`. It uses the FCM HTTP v1 API and
-signs the OAuth2 assertion with Web Crypto, because `firebase-admin` does not
-run on Cloudflare Workers and Workers has no `crypto.createSign`. Dead tokens
+signs the OAuth2 assertion with Web Crypto — a holdover from Cloudflare
+Workers, where `firebase-admin` could not run. It works unchanged on Node. Dead tokens
 (404/`UNREGISTERED`) are deleted on the spot.
 
 **It is all no-op until configured.** Without `FCM_PROJECT_ID`,
@@ -96,41 +96,33 @@ and works before the Firebase project exists.
 listing, so it also has to talk someone through Android's "unknown app"
 warning. Most people stop there otherwise.
 
-**The APKs live in R2, not in `public/`.** They used to be Worker static
-assets, and that stopped being possible on 2026-08-08: screen sharing pulled
-in WebRTC's native libraries, the arm64 build went from 18.9MB to 32.1MB, and
-**a single Workers static asset is capped at 25 MiB**. Over that ceiling
-`deploy:cf` fails with `Error: Asset too large.` — the whole deploy, not just
-the file.
+**The APKs live on the server's disk, not in `public/` and not in git.** They
+sit in `/opt/novicetutor/downloads`, which is mounted read-only into the web
+container. (Until October 2026 they were in an R2 bucket, because a Workers
+static asset was capped at 25 MiB and the arm64 build is 32 MB.)
 
-Publishing a build is an upload, not a copy:
+Publishing a build is a copy to the server, not a deploy:
 
 ```sh
-npx wrangler r2 object put novicetutor-app/novice-tutor.apk \
-  --file apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-  --content-type application/vnd.android.package-archive --remote
+scp apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+  deploy@<server-ip>:/opt/novicetutor/downloads/novice-tutor.apk
 
-npx wrangler r2 object put novicetutor-app/novice-tutor-arm32.apk \
-  --file apps/mobile/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
-  --content-type application/vnd.android.package-archive --remote
+scp apps/mobile/build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+  deploy@<server-ip>:/opt/novicetutor/downloads/novice-tutor-arm32.apk
 ```
 
-`--remote` is not optional. Without it wrangler writes to a local simulated
-bucket and cheerfully reports success.
-
-The same bucket now holds the desktop installers, and the download page lists
+The same directory holds the desktop installers, and the download page lists
 every platform. Full runbook, including the Windows build that has to be made
-and uploaded from the Windows machine: [publishing-builds.md](publishing-builds.md).
+on the Windows machine: [publishing-builds.md](publishing-builds.md).
 
-Serving is `apps/web/src/app/api/app-download/[file]/route.ts`, over the
-`APP_DOWNLOADS` binding in `wrangler.json`. It hands `object.body` straight to
-the `Response` and allow-lists the two filenames. **Never buffer the object** —
-the worker has 128MB of memory and reading a 32MB file in to send it is the
-same mistake that caused the August 1102 outages (`worker-limits.md`). For the
-same reason, do not "simplify" this by storing the APK in Postgres.
+Serving is `apps/web/src/app/api/app-download/[file]/route.ts`, reading from
+`APP_DOWNLOADS_DIR`. It streams the file and allow-lists the filenames.
+**Never buffer the file** — a 216 MB disk image read into memory to send it is
+most of the container's limit. For the same reason, do not "simplify" this by
+storing builds in Postgres, and do not put them in `public/`: that would bake
+them into every image.
 
-`deploy:cf` warns if an `.apk` reappears in `public/app/`, because that is what
-silently breaks the next deploy. Bump `VERSION` and `SIZE` in
+Bump `VERSION` and `SIZE` in
 `src/app/app/download/page.tsx` when the app version changes.
 
 ## Ringing the phone
@@ -205,7 +197,8 @@ teacher's. The bar is self-diagnosing — if it appears, this was the cause.
    `android/settings.gradle.kts` and `android/app/build.gradle.kts` — without
    it the JSON is ignored and initialization still fails.
 4. Project settings → Service accounts → generate a private key; put the three
-   values in `apps/web/.env` and in the Worker's secrets.
+   values in `apps/web/.env` and in `/opt/novicetutor/.env` on the server
+   (then redeploy — see `deploy-vps.md`).
 5. Start a class as a teacher with the app installed and closed.
 
 ## Building it

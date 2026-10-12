@@ -1,0 +1,24 @@
+# Allow-list: the image is built from the web app and the workspace manifests,
+# nothing else. Everything not named here stays out of the build context —
+# including every .env file, the mobile/desktop sources and local build output.
+*
+
+!package.json
+!package-lock.json
+!apps/web
+!apps/desktop/package.json
+!apps/mobile/package.json
+
+apps/web/node_modules
+apps/web/.next
+apps/web/.open-next
+apps/web/.wrangler
+apps/web/dist
+apps/web/tests
+apps/web/test-results
+apps/web/playwright-report
+apps/web/.env*
+apps/web/*.log
+apps/web/*.tsbuildinfo
+apps/web/public/app
+**/.DS_Store

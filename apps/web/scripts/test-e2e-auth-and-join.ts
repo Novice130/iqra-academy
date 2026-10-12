@@ -27,9 +27,10 @@ async function run() {
   console.log("GET /api/guest/join pending result:", getPendingData);
 
   console.log("=== 3. Simulating Host Admission in DB ===");
-  const { neon } = await import("@neondatabase/serverless");
-  const sql = neon(process.env.DATABASE_URL!);
+  const { default: postgres } = await import("postgres");
+  const sql = postgres(process.env.DATABASE_URL!, { prepare: false });
   await sql`UPDATE guest_join_requests SET status = 'ADMITTED', responded_at = NOW() WHERE id = ${postData.requestId}`;
+  await sql.end({ timeout: 2 });
 
   console.log("=== 4. Polling Guest Join Status (Admitted) ===");
   const getAdmittedRes = await fetch(`http://localhost:3000/api/guest/join?requestId=${postData.requestId}`);

@@ -1,0 +1,51 @@
+# novicetutor.com — origin behind the Cloudflare proxy.
+#
+# Cloudflare SSL/TLS mode must be "Full (strict)". The certificate here is a
+# Cloudflare Origin CA cert: Cloudflare trusts it, browsers do not, so nothing
+# should ever reach this server except through Cloudflare (enforced by the
+# Hetzner Cloud Firewall — see docs/deploy-vps.md).
+
+{
+	# No ACME: the cert is supplied from disk.
+	auto_https disable_certs
+
+	servers {
+		# Cloudflare's published ranges (https://www.cloudflare.com/ips/).
+		# Only requests arriving from these get their forwarding headers
+		# believed; anything else has X-Forwarded-For replaced with the real
+		# peer address. Re-check the list when Cloudflare announces changes.
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP X-Forwarded-For
+	}
+}
+
+novicetutor.com, www.novicetutor.com {
+	tls /certs/origin.pem /certs/origin.key
+
+	encode zstd gzip
+
+	# Scheduling realtime: WebSocket upgrades go to the sidecar. Next.js route
+	# handlers cannot answer a 101, which is the whole reason it exists.
+	@realtime path /api/realtime/ws /api/realtime/ws/*
+	handle @realtime {
+		reverse_proxy realtime:8787
+	}
+
+	# Content-hashed build output: safe to cache forever, here and at the edge.
+	@static path /_next/static/*
+	handle @static {
+		header Cache-Control "public, max-age=31536000, immutable"
+		reverse_proxy web:3000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header -Server
+
+	log {
+		output stdout
+		format json
+	}
+}

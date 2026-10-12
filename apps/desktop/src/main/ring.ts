@@ -5,7 +5,7 @@
  * every 2.5s and draws a full-screen overlay. It also, deliberately, **stops
  * polling when `document.hidden`**: a backgrounded tab has no audio and nobody
  * looking at it, and that standing load is what took the worker down in August
- * (`docs/worker-limits.md`). Both of those hold for a tab and neither holds
+ * (`docs/archive/worker-limits.md`). Both of those hold for a tab and neither holds
  * here. A minimised desktop app is exactly the case that has to ring.
  *
  * So the poll moves to the main process while the window is hidden, and stands

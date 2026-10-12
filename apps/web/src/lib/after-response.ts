@@ -8,24 +8,26 @@
  * push notification. Awaiting those inside the handler put several network
  * round trips between tapping Join and seeing video.
  *
- * The catch is that a plain floating promise is NOT safe on Cloudflare
- * Workers: once a handler returns its response, the runtime is free to cancel
- * anything still pending in that request's context. Fire-and-forget there
- * means the ring silently stops going out — worse than the delay it saves.
- * `waitUntil` is the runtime's own answer: it keeps the isolate alive until
- * the promise settles, without holding up the response.
+ * The catch is that a plain floating promise is not something the framework
+ * knows about: nothing ties it to the request that started it, and a graceful
+ * shutdown (every deploy restarts the container) is free to exit with it still
+ * pending. Next's `after()` is the framework's own answer — it registers the
+ * work against the request, lets the response go out first, and is awaited
+ * before the server closes.
  *
- * Outside a Worker (`next dev`, `next start`, scripts) there is no execution
- * context to hand the promise to, so it simply runs to completion in-process,
- * which is what those environments do anyway.
+ * Outside a request (`tsx` scripts, tests, a module evaluated at build) there
+ * is no request scope and `after()` throws. The promise is already running by
+ * then, so it simply runs to completion in-process, which is what those
+ * environments do anyway.
  *
  * @module lib/after-response
  */
 
-import { getCloudflareContext } from "@opennextjs/cloudflare";
+import { after } from "next/server";
 
 /**
- * Runs `work` without blocking the response, keeping it alive on Workers.
+ * Runs `work` without blocking the response, registered with the request so
+ * it outlives the handler.
  *
  * Rejections are swallowed deliberately: every current caller is best-effort
  * bookkeeping, and an unhandled rejection in a deferred task must never be
@@ -35,19 +37,11 @@ export function afterResponse(work: Promise<unknown>): void {
   const swallowed = Promise.resolve(work).catch(() => {});
 
   try {
-    // Synchronous form: inside a Worker request this resolves immediately.
-    // It throws outside one, which is exactly the local-dev case below.
-    const cf = getCloudflareContext();
-    if (cf?.ctx?.waitUntil) {
-      cf.ctx.waitUntil(swallowed);
-      return;
-    }
-    console.warn("[afterResponse] Cloudflare context has no waitUntil");
+    // Throws when there is no request scope, which is exactly the
+    // script/test case below.
+    after(swallowed);
   } catch {
-    // Not running on Workers, or no context for this call. Fall through.
+    // Nothing to register with. The promise is already running and its
+    // rejection is already handled; letting it finish on its own is correct.
   }
-
-  // Nothing to register with. The promise is already running and its
-  // rejection is already handled; letting it finish on its own is correct
-  // everywhere that isn't a Worker.
 }

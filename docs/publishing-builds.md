@@ -1,7 +1,8 @@
 # Publishing app builds
 
 Every installable build — the Android APK, the Windows installer, the macOS
-disk image — is served from one Cloudflare R2 bucket and uploaded by hand.
+disk image — is served from one directory on the server and copied there by
+hand.
 Nothing publishes itself, and **no build is ever committed to git**.
 
 Read this before publishing anything. The Windows section is the one that has
@@ -11,29 +12,41 @@ to happen on the Windows machine; everything else is done from the Mac.
 
 | Piece | Where |
 | --- | --- |
-| Bucket | `novicetutor-app` (Cloudflare account `syedamer130@gmail.com`) |
-| Binding | `APP_DOWNLOADS`, declared in `apps/web/wrangler.json` |
-| Route | `apps/web/src/app/api/app-download/[file]/route.ts` — streams the object |
+| Directory | `/opt/novicetutor/downloads` on the VPS |
+| Mount | read-only at `/data/downloads` in the `web` container (`APP_DOWNLOADS_DIR`), declared in `deploy/docker-compose.yml` |
+| Route | `apps/web/src/app/api/app-download/[file]/route.ts` — streams the file |
 | Page | `apps/web/src/app/app/download/page.tsx` — novicetutor.com/app/download |
 | Key list | `apps/web/src/lib/app-downloads.ts` |
 
 The keys the route will serve, and nothing else:
 
-| Platform | Object key |
+| Platform | Filename |
 | --- | --- |
 | Android, 64-bit | `novice-tutor.apk` |
 | Android, 32-bit | `novice-tutor-arm32.apk` |
 | Windows | `novice-tutor-setup.exe` |
 | macOS | `novice-tutor.dmg` |
 
-**Uploading is enough. There is no deploy step.** The download page asks R2
-what exists on every request, so a platform's row appears — with the real file
-size — the moment the upload finishes. A platform with no object in the bucket
-shows "Not published yet" instead of a broken link.
+**Copying is enough. There is no deploy step.** The download page checks the
+directory on every request, so a platform's row appears — with the real file
+size — the moment the copy finishes. A platform with no file there shows "Not
+published yet" instead of a broken link.
+
+Copying needs SSH access to the server as `deploy` — your public key in
+`/home/deploy/.ssh/authorized_keys`. `<server-ip>` below is the VPS address.
+Copy to a temporary name and rename, so nobody downloads half a file:
+
+```sh
+scp <local-file> deploy@<server-ip>:/opt/novicetutor/downloads/<filename>.part
+ssh deploy@<server-ip> 'cd /opt/novicetutor/downloads && chmod 644 <filename>.part && mv <filename>.part <filename>'
+```
+
+The shorter one-line `scp` commands further down are fine for a first publish;
+use the two-step form when replacing a build that people are downloading.
 
 **iOS is not in this table and never will be.** An APK is a file we host; an
 iOS build can only reach a phone through Apple, so it has its own path
-entirely — `docs/ios-release.md`. Nothing about the R2 bucket applies to it.
+entirely — `docs/ios-release.md`. Nothing about the downloads directory applies to it.
 
 Two rules that are not optional:
 
@@ -41,9 +54,10 @@ Two rules that are not optional:
   the Flutter build output are all gitignored. Pushing from a machine that
   built an installer pushes the *source*, not the installer — this has already
   caused confusion once.
-- **Never put a build in `apps/web/public/`.** A single Workers static asset is
-  capped at 25 MiB and the arm64 APK is 32 MB. It does not fail politely: the
-  whole deploy dies with `Error: Asset too large.` That is why R2 exists here.
+- **Never put a build in `apps/web/public/`.** Everything in `public/` is baked
+  into the Docker image, so a 216 MB disk image there would be pulled by the
+  server on every deploy. The `.dockerignore` excludes `public/app/` for that
+  reason.
 
 ---
 
@@ -71,8 +85,8 @@ an Emulator" — and the installer build runs x86 Windows tools (`makensis.exe`,
 `rcedit.exe`). A native arm64 Wine would still need Rosetta for those. Note
 also that Rosetta is, in Apple's own words, very difficult to remove.
 
-Then `npm run dist:win` from `apps/desktop` as below, and upload with the same
-wrangler command.
+Then `npm run dist:win` from `apps/desktop` as below, and copy it up with the
+same `scp` command.
 
 ## Windows — from the Windows machine
 
@@ -107,18 +121,20 @@ apps\desktop\release\Novice Tutor Setup 1.0.0.exe
 and needs no admin rights (`perMachine: false`). See
 [desktop-app.md](desktop-app.md) for why.
 
-### 3. Sign in to Cloudflare, once per machine
+### 3. Set up SSH access, once per machine
+
+Windows 10 and 11 ship `ssh` and `scp`. Create a key if the machine has none,
+and have its public half added to the server's `deploy` user:
 
 ```powershell
-npx wrangler login
+ssh-keygen -t ed25519
+type $env:USERPROFILE\.ssh\id_ed25519.pub
 ```
 
-Opens a browser. Sign in as **syedamer130@gmail.com** and approve. The token is
-stored per user account, so this is once per Windows machine, not once per
-upload. Check it took:
+Send that one line to whoever administers the server. Check it took:
 
 ```powershell
-npx wrangler whoami
+ssh deploy@<server-ip> "ls /opt/novicetutor/downloads"
 ```
 
 ### 4. Upload
@@ -126,13 +142,8 @@ npx wrangler whoami
 One line. Note the quotes — the filename has spaces in it:
 
 ```powershell
-npx wrangler r2 object put novicetutor-app/novice-tutor-setup.exe --file "apps\desktop\release\Novice Tutor Setup 1.0.0.exe" --content-type application/vnd.microsoft.portable-executable --remote
+scp "apps\desktop\release\Novice Tutor Setup 1.0.0.exe" deploy@<server-ip>:/opt/novicetutor/downloads/novice-tutor-setup.exe
 ```
-
-**`--remote` is the flag that matters.** Without it wrangler writes to a
-*local simulated bucket* on your disk and prints "Upload complete" exactly as
-if it had worked. Nothing reaches Cloudflare. If an upload seems to have
-succeeded but the site does not show it, this is why.
 
 ### 5. Check it actually landed
 
@@ -161,9 +172,8 @@ cd apps/mobile
 flutter build apk --release --split-per-abi
 
 cd ../..
-npx wrangler r2 object put novicetutor-app/novice-tutor.apk \
-  --file apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
-  --content-type application/vnd.android.package-archive --remote
+scp apps/mobile/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+  deploy@<server-ip>:/opt/novicetutor/downloads/novice-tutor.apk
 ```
 
 The 32-bit build (`app-armeabi-v7a-release.apk`) goes to
@@ -181,9 +191,8 @@ npm install
 npm run dist:mac
 
 cd ../..
-npx wrangler r2 object put novicetutor-app/novice-tutor.dmg \
-  --file "apps/desktop/release/Novice Tutor-1.0.0-universal.dmg" \
-  --content-type application/x-apple-diskimage --remote
+scp "apps/desktop/release/Novice Tutor-1.0.0-universal.dmg" \
+  deploy@<server-ip>:/opt/novicetutor/downloads/novice-tutor.dmg
 ```
 
 Universal (Apple Silicon + Intel), which is why it is ~216 MB. The build is
@@ -208,4 +217,4 @@ Both of these, or the route returns 404:
 
 Then add a row to the download page. The list is deliberately a closed set: the
 filename is a URL path segment, and an open one would let anything in the
-bucket be fetched.
+directory be fetched.

@@ -88,7 +88,7 @@ there fails the whole request rather than degrading.
 **A ring that works while minimised.** `IncomingCallOverlay` polls
 `/api/calls/incoming`, and deliberately **stops when `document.hidden`** — a
 backgrounded tab has no audio and nobody looking at it, and that standing load
-is what took the worker down in August (`worker-limits.md`). Neither of those
+is what took the worker down in August (`archive/worker-limits.md`). Neither of those
 holds for a tray-resident app. So the poll moves to the main process whenever
 the window is hidden or minimised, and stands down the moment it is visible
 again; the two never poll at once. Cookies come from the shared session, so it
@@ -138,8 +138,8 @@ a universal `.dmg` plus a `.zip`.
 **Getting a build to users is a separate step, and none of it is in git** —
 see [publishing-builds.md](publishing-builds.md) for the exact commands,
 including the Windows one that has to be run on the Windows machine. The
-short version: the installers go to the R2 bucket `novicetutor-app`, and the
-download page picks them up with no deploy.
+short version: the installers are copied to `/opt/novicetutor/downloads` on the
+server, and the download page picks them up with no deploy.
 
 **`electron` must be pinned to an exact version** in `package.json`:
 electron-builder resolves the binary itself, refuses a range, and in this

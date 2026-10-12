@@ -127,9 +127,9 @@ compiles and lints clean and **has never run against real rows**.
 
 `apps/web/.env` no longer holds `DATABASE_URL` — it was rotated out after the
 security review (`SECURITY-ROTATION-CHECKLIST.md` §2). The live value exists
-only as a Cloudflare Worker secret, and **Cloudflare never hands a secret value
-back**: `npx wrangler secret list` proves it is set and cannot show it. So the
-string has to come from the Neon console.
+only on the server, in `/opt/novicetutor/.env` (see `deploy-vps.md`) — or, if
+that has not been filled in yet, in the Neon console. (It used to be a
+Cloudflare Worker secret, which could be listed but never read back.)
 
 Until it does, none of this can be checked and the migrations cannot be
 applied:

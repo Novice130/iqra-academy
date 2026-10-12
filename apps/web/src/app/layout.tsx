@@ -43,7 +43,7 @@ export default function RootLayout({
         {/* Deliberately not a server-side header read. Reading headers() here
             opts the entire site out of static rendering — every marketing
             page becomes per-request work on a Worker that has run out of room
-            before (see docs/worker-limits.md). The class is added on mount
+            before (see docs/archive/worker-limits.md). The class is added on mount
             instead; it only drives cosmetic suppressions (text selection, tap
             highlight, the chat bubble), so arriving a frame late costs
             nothing. The chrome that must not flash — the dashboard's tab bar —

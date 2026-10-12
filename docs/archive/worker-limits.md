@@ -1,6 +1,26 @@
+> **Historical — Workers era.** The site moved to a VPS in October 2026; none of these limits apply any more. See `../architecture.md` and `../deploy-vps.md`.
+
 # Worker limits, and the outages that found them
 
 Written 2026-08-08, after the site went down twice as classes started.
+
+> **2026-09-09 update: the account was on Workers Free all along, and the CPU
+> limit was the real killer.** Everything below was written assuming the
+> `standard` usage model (30s CPU). A live 5-minute `wrangler tail` during a
+> real class found the zone on plan "Free Website": **10ms CPU per invocation**,
+> and 78 `exceededCpu` kills in 5 minutes — one every ~4s, matching the
+> `/guests` poll from the host's iPad exactly. The app's CPU usage itself is
+> healthy (median ~10ms, p99 spikes 350ms — no leak, no GC thrash); the plan
+> limit just sits on top of the median, so every page action (auth + Better
+> Auth session crypto + drizzle + Next.js render = 10–20ms) dies at random.
+> That is why the 1102s looked "random" since day one. **Fix: Workers Paid
+> ($5/mo) → limit becomes 30s → kills stop with zero code change.** A VPS
+> would also fix it but only after rebuilding DO → Node WS, R2 hosting, cron
+> and CI — not worth it for this error alone. Also found: `GuestKnockPrompt`
+> was still polling at 4s despite item 4 below claiming 4s → 10s — the code
+> change had never actually been made; fixed 2026-09-09.
+
+---
 
 The Worker has **128 MB of memory** and 30s of CPU on the `standard` usage
 model. The CPU has never been close. The memory has taken the site down twice,

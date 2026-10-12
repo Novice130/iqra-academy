@@ -1,0 +1,108 @@
+# Production stack for novicetutor.com on a single 4 GB VPS.
+#
+# Lives on the server at /opt/novicetutor/docker-compose.yml (the deploy job
+# copies it there). Layout it expects beside it:
+#
+#   /opt/novicetutor/.env            runtime secrets, chmod 600 (see env.example)
+#   /opt/novicetutor/caddy/Caddyfile copied by the deploy job
+#   /opt/novicetutor/certs/          origin.pem + origin.key (Cloudflare Origin CA)
+#   /opt/novicetutor/downloads/      APK / installer files served by the app
+#
+# IMAGE_TAG picks the build; deploy.sh sets it and records the last good one.
+
+name: novicetutor
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+x-app: &app
+  image: ghcr.io/novice130/iqra-academy:${IMAGE_TAG:-latest}
+  env_file: .env
+  restart: unless-stopped
+  init: true
+  logging: *logging
+  networks: [internal]
+
+services:
+  web:
+    <<: *app
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      REALTIME_INTERNAL_URL: http://realtime:8787
+      APP_DOWNLOADS_DIR: /data/downloads
+      # Leaves headroom under the container limit for buffers and native memory.
+      NODE_OPTIONS: --max-old-space-size=1024
+    volumes:
+      - /opt/novicetutor/downloads:/data/downloads:ro
+    # Liveness only: a static file, so the check costs no database work.
+    # /api/health is deliberately NOT used here — it runs schema statements on
+    # every call. deploy.sh hits it once per deploy instead.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/favicon.ico').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1536m
+    stop_grace_period: 20s
+
+  realtime:
+    <<: *app
+    command: ["node", "realtime-server.mjs"]
+    environment:
+      NODE_ENV: production
+      REALTIME_PORT: "8787"
+      APP_INTERNAL_URL: http://web:3000
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    networks: [internal]
+    # The only service with published ports.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # The directory, not the file: scp replaces the file's inode, and a
+      # single-file bind mount would keep showing the old one.
+      - /opt/novicetutor/caddy:/etc/caddy:ro
+      - /opt/novicetutor/certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - web
+      - realtime
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 256m
+
+networks:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:

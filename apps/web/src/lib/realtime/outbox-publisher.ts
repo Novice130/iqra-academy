@@ -9,7 +9,8 @@ type LocalHubListener = (event: SchedulingEventMessage) => void;
 const localListenersByOrg = new Map<string, Set<LocalHubListener>>();
 
 /**
- * Register a local subscriber for tests or dev environments without Cloudflare DOs.
+ * Register a local subscriber for tests or dev environments without the
+ * realtime sidecar. Production never registers one.
  */
 export function subscribeLocalHub(orgId: string, listener: LocalHubListener): () => void {
   if (!localListenersByOrg.has(orgId)) {
@@ -22,50 +23,38 @@ export function subscribeLocalHub(orgId: string, listener: LocalHubListener): ()
   };
 }
 
+const PUBLISH_TIMEOUT_MS = 3_000;
+
 /**
- * Publishes an event to the partitioned AvailabilityHub Durable Object.
+ * Where the realtime sidecar listens, or null when there is none to talk to.
+ *
+ * Production always has one, so it defaults to loopback there and a sidecar
+ * that is down is a failed delivery. Outside production the sidecar is
+ * opt-in via REALTIME_INTERNAL_URL: `next dev` and the test suite normally
+ * run without it, and defaulting to loopback there would turn every
+ * mutation into a refused connection and a spent retry attempt.
+ */
+function sidecarUrl(): string | null {
+  const configured = process.env.REALTIME_INTERNAL_URL;
+  if (configured) return configured.replace(/\/+$/, "");
+  return process.env.NODE_ENV === "production" ? "http://127.0.0.1:8787" : null;
+}
+
+/**
+ * Publishes an event to the org's AvailabilityHub in the realtime sidecar.
  * Falls back to local in-memory subscribers in development or test environments.
  *
  * Delivery contract: resolves ONLY when the event reached its destination
- * (DO publish 2xx/204, or at least one local subscriber invoked without
- * throwing). Rejects otherwise — including when NO destination exists in a
- * server runtime — so drainOutbox can count attempts instead of marking
+ * (sidecar publish 2xx/204, or at least one local subscriber invoked without
+ * throwing). Rejects otherwise — a sidecar that is unreachable, slow, or
+ * answering non-2xx — so drainOutbox can count attempts instead of marking
  * undelivered rows published. Browser/test-only callers that only need
  * best-effort fan-out should catch.
  */
 export async function publishToHub(event: SchedulingEventMessage): Promise<void> {
-  // 1. Try Cloudflare Durable Object delivery
-  try {
-    const { getCloudflareContext } = await import("@opennextjs/cloudflare");
-    const cf = getCloudflareContext();
-    const hubNamespace = (cf?.env as any)?.AVAILABILITY_HUB;
-    if (hubNamespace && typeof hubNamespace.idFromName === "function") {
-      const doId = hubNamespace.idFromName(event.orgId);
-      const stub = hubNamespace.get(doId);
-      const secret = (cf?.env as any)?.REALTIME_SECRET || getRealtimeSecret();
-      const res = await stub.fetch("https://hub/publish", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${secret}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(event),
-      });
-      if (!res.ok) {
-        throw new Error(`Durable Object publish failed with status ${res.status}`);
-      }
-      return;
-    }
-  } catch (err) {
-    // Expected in environments where @opennextjs/cloudflare context is not bound (tests, Next dev).
-    // Swallow ONLY the missing-context case; a bound namespace that fails must reject.
-    const message = err instanceof Error ? err.message : "";
-    if (!/context|cloudflare|Workers|no context/i.test(message) && message !== "") {
-      throw err;
-    }
-  }
-
-  // 2. Dispatch to local subscribers (for tests and local dev)
+  // 1. Local subscribers (tests and local dev). Checked first so a test that
+  // registered one gets its event whatever the environment says about a
+  // sidecar.
   const listeners = localListenersByOrg.get(event.orgId);
   if (listeners && listeners.size > 0) {
     let delivered = 0;
@@ -85,14 +74,32 @@ export async function publishToHub(event: SchedulingEventMessage): Promise<void>
     return;
   }
 
-  // No destination (Next dev with no listeners, plain build without a DO
-  // binding): resolve best-effort. drainOutbox treats a resolve as delivered,
-  // so a drain that resolves here would park the row as published — but the
-  // alternative (throwing) would wedge every mutation behind an attempts
-  // counter in exactly the environments where realtime is decorative. The
-  // durable retry path is the scheduled drain in production, where the DO
-  // binding always exists; see wrangler.json [triggers] and the drain
-  // route's service auth.
+  // 2. The realtime sidecar
+  const url = sidecarUrl();
+  if (url) {
+    const res = await fetch(`${url}/publish`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${getRealtimeSecret()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(PUBLISH_TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      throw new Error(`Realtime sidecar publish failed with status ${res.status}`);
+    }
+    return;
+  }
+
+  // No destination (Next dev or a test run with no sidecar and no
+  // listeners): resolve best-effort. drainOutbox treats a resolve as
+  // delivered, so a drain that resolves here parks the row as published —
+  // but the alternative (throwing) would wedge every mutation behind an
+  // attempts counter in exactly the environments where realtime is
+  // decorative. Production never gets here: sidecarUrl() always resolves
+  // there, and the durable retry path is the sidecar's own drain timer
+  // hitting the service-authed drain route.
   return;
 }
 
@@ -112,8 +119,8 @@ export interface DrainResult {
  *
  * Delivery contract: a row is marked published ONLY when publishToHub
  * resolves. Any transport/listener failure bubbles, increments attempts,
- * and leaves the row unpublished for the next drain (cron or the next
- * request's afterResponse sweep).
+ * and leaves the row unpublished for the next drain (the sidecar's timer or
+ * the next request's afterResponse sweep).
  */
 export async function drainOutbox(opts: { orgId?: string; limit?: number } = {}): Promise<DrainResult> {
   return withHttpDb(async () => {
