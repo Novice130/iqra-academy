@@ -4,7 +4,6 @@
 # Cloudflare Origin CA cert: Cloudflare trusts it, browsers do not, so nothing
 # should ever reach this server except through Cloudflare (enforced by the
 # Hetzner Cloud Firewall — see docs/deploy-vps.md).
-
 {
 	# No ACME: the cert is supplied from disk.
 	auto_https disable_certs

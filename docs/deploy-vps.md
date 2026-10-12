@@ -166,7 +166,7 @@ passes and:
    `deploy.sh <commit-sha>`.
 
 `deploy.sh` pulls the tag, restarts the containers, and waits up to two minutes
-for both to be healthy and for `/api/health` to report the database reachable.
+for both to be healthy and for `/api/health` to report the database reachable (HTTP 200).
 If that does not happen it puts the previous tag back and fails the job.
 
 The restart is a few seconds of 502s. Calls in progress are not affected —
@@ -267,14 +267,9 @@ since then will not work on it.
 
 ## Known gaps
 
-- **`/api/health` runs schema statements on every call** and returns 200 even
-  when the database is down. The compose healthcheck therefore uses a static
-  file for liveness, and only `deploy.sh` calls `/api/health` (once, reading
-  the body). It should be split into a cheap liveness route and the migration
-  moved out.
 - **One server, no redundancy.** If the box is down, the site is down. Hetzner
   snapshots or backups of the server are worth enabling; the data itself lives
   in Neon, so the server holds nothing that cannot be rebuilt except `.env`,
   the certificate and `downloads/`.
 - **No uptime monitor.** Point an external check at
-  `https://novicetutor.com/api/health`.
+  `https://novicetutor.com/api/health` (returns HTTP 200 when healthy, HTTP 503 if the database is unreachable).

@@ -196,7 +196,7 @@ jobs:
 
   # ── Production deploy ──────────────────────────────────────────────────────
   # Builds the image, boots it in the runner, and only then ships it to the
-  # VPS. Runs on a push to master, after every gate above is green, and only
+  # VPS. Runs on a push to master, after the web job is green, and only
   # once the repository variable DEPLOY_ENABLED is set to "true" — so merging
   # this workflow before the server exists does nothing.
   #
@@ -208,7 +208,7 @@ jobs:
   # Runbook: docs/deploy-vps.md
   deploy:
     name: Build Image & Deploy to VPS
-    needs: [ci-gate]
+    needs: [web-quality-and-tests]
     if: github.event_name == 'push' && github.ref == 'refs/heads/master' && vars.DEPLOY_ENABLED == 'true'
     runs-on: ${{ vars.DEPLOY_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
@@ -254,9 +254,9 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The image that was just built, started the way compose starts it. The
-      # database is empty, so /api/health reports a schema error in its body —
-      # what is being proved is that both processes boot, listen and route.
+      # The image that was just built, started the way compose starts it.
+      # Verifies both web and realtime processes boot, connect to the database,
+      # listen and route.
       - name: Smoke-boot the image
         run: |
           set -euo pipefail

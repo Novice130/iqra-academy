@@ -63,6 +63,7 @@ export default defineConfig({
           ALLOW_LOCAL_DB_SCRIPTS: process.env.ALLOW_LOCAL_DB_SCRIPTS || "1",
           REALTIME_SECRET: process.env.REALTIME_SECRET || "test-realtime-secret-32-chars-min-playwright",
           BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "dummy-secret-for-build-and-lint-validation-32chars",
+          NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
         },
       },
 });

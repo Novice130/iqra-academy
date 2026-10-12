@@ -56,6 +56,11 @@ REALTIME_SECRET=test-realtime-secret-at-least-32-chars
 cd apps/web && npx drizzle-kit push   # schema into the empty test DB
 ```
 
+The app server now uses `postgres.js` (plain TCP), so a local Postgres works
+directly for both the app server (`next dev`) and test scripts/Playwright. There
+are no Neon-specific requirements or WebSocket tunnels; pointing `DATABASE_URL`
+at a local Postgres works directly.
+
 `REALTIME_SECRET` is required in both options: the realtime ticket, ws, and
 drain-outbox routes all fail closed (401/503) without it, so the Phase 4
 `realtime.spec.ts` suite cannot pass on an env that omits it.
@@ -123,13 +128,12 @@ lands, at which point Playwright reports it and the marker gets removed.
   every request; the server never serves. `next dev --turbopack` works fine,
   so `npm run dev` now defaults to Turbopack. Root cause (a dev-only webpack
   edge-bundle issue) is worth revisiting only if webpack dev is ever needed.
-- **`GET /api/health`'s embedded DDL fails in the dev environment.** The
-  route runs `ALTER TABLE users ADD COLUMN IF NOT EXISTS two_factor_enabled`
-  on every call; against the database in `.env` this fails, so it reports
-  HTTP 200 with `status: "error: Failed query..."`. Also, a health check
-  should never mutate schema. Phase 2 makes migrations own schema and turns
-  health into a read-only probe. Captured as `test.fail()` in
-  `tests/api/health.spec.ts`.
+- **`GET /api/health` is a read-only probe.** Previously, the route ran
+  embedded DDL (`ALTER TABLE ...`, `CREATE TABLE ...`) on every call and
+  returned 200 even on database error. It now performs a fast `SELECT 1` query
+  inside `withHttpDb`, returning HTTP 200 with `status: "ok"` when the database
+  is reachable and HTTP 503 with `status: "error"` when down. Tests in
+  `tests/api/health.spec.ts` assert this contract.
 - Destructive `scripts/*.ts` previously ran unguarded against the shared DB;
   now gated behind `requireIsolatedDb` (this document).
 - **iOS builds blocked by machine setup, not code.** Xcode 26.6 has the iOS

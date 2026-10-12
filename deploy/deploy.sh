@@ -38,14 +38,13 @@ container_health() {
 }
 
 # Healthy = both containers report healthy AND the app can reach its database.
-# /api/health answers 200 even when the database is down, so the body is what
-# gets checked.
+# /api/health returns HTTP 200 when healthy and HTTP 503 when the DB is unreachable.
 healthy() {
   local deadline=$((SECONDS + HEALTH_TIMEOUT))
   while [ "$SECONDS" -lt "$deadline" ]; do
     if [ "$(container_health web)" = "healthy" ] && [ "$(container_health realtime)" = "healthy" ]; then
       if docker compose exec -T web node -e \
-        "fetch('http://127.0.0.1:3000/api/health').then(r=>r.json()).then(j=>process.exit(j.status==='ok'?0:1)).catch(()=>process.exit(1))"; then
+        "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
         return 0
       fi
     fi

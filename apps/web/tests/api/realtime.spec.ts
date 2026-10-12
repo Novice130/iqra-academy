@@ -511,7 +511,7 @@ test.describe("Phase 4: API Endpoints & Tenant Isolation Integration", () => {
     const eventAggregateId = createId();
 
     // 1. Insert scheduling event inside transaction
-    const [inserted] = await db.transaction(async (tx) => {
+    const inserted = await db.transaction(async (tx) => {
       return insertSchedulingEvent(tx, {
         orgId: orgA.orgId,
         teacherId: orgA.teacher.id,
@@ -594,6 +594,9 @@ test.describe("Phase 4: API Endpoints & Tenant Isolation Integration", () => {
     const adminToken = await createTestSession(orgA.admin.id);
     const teacherToken = await createTestSession(orgA.teacher.id);
 
+    // Clean up any lingering notifications for this test user from previous runs
+    await db.delete(notifications).where(eq(notifications.userId, orgA.teacher.id));
+
     // 1. Admin sets availability for teacher A
     const putRes = await request.post("/api/teachers/availability", {
       headers: { Cookie: `better-auth.session_token=${adminToken}` },
@@ -670,10 +673,21 @@ test.describe("Phase 4: API Endpoints & Tenant Isolation Integration", () => {
     const adminToken = await createTestSession(orgA.admin.id);
 
     // 1. Admin creates a session via assign-student.
-    const start = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-    const profile = await db.query.studentProfiles.findFirst({
+    const start = new Date(Date.now() + (30 + Math.floor(Math.random() * 50)) * 24 * 60 * 60 * 1000).toISOString();
+    let profile = await db.query.studentProfiles.findFirst({
       where: eq(studentProfiles.userId, orgA.student.id),
     });
+    if (!profile) {
+      [profile] = await db
+        .insert(studentProfiles)
+        .values({
+          userId: orgA.student.id,
+          orgId: orgA.orgId,
+          name: orgA.student.name || "Student A",
+          track: "QAIDAH",
+        })
+        .returning();
+    }
     expect(profile).toBeDefined();
     const assignRes = await request.post("/api/admin/assign-student", {
       headers: { Cookie: `better-auth.session_token=${adminToken}` },
@@ -708,6 +722,12 @@ test.describe("Phase 4: API Endpoints & Tenant Isolation Integration", () => {
     });
     expect(cancelEvent).toBeDefined();
     expect(cancelEvent?.orgId).toBe(orgA.orgId);
+
+    // Ensure cancel event is pending so drainOutbox in this process delivers it
+    await db
+      .update(schedulingEvents)
+      .set({ publishedAt: null, attempts: 0 })
+      .where(eq(schedulingEvents.id, cancelEvent!.id));
 
     // 4. Draining with a local subscriber delivers the cancel to org A only.
     let receivedCancel: SchedulingEventMessage | null = null;

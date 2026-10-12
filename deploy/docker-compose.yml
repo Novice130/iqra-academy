@@ -39,15 +39,12 @@ services:
       NODE_OPTIONS: --max-old-space-size=1024
     volumes:
       - /opt/novicetutor/downloads:/data/downloads:ro
-    # Liveness only: a static file, so the check costs no database work.
-    # /api/health is deliberately NOT used here — it runs schema statements on
-    # every call. deploy.sh hits it once per deploy instead.
     healthcheck:
       test:
         - CMD
         - node
         - -e
-        - "fetch('http://127.0.0.1:3000/favicon.ico').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))"
+        - "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.status===200?0:1)).catch(()=>process.exit(1))"
       interval: 30s
       timeout: 5s
       retries: 3
