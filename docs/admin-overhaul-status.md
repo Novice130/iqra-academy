@@ -107,77 +107,41 @@ nav lists, per-page auth copies, duplicate `money()`, emoji labels.
   nothing wrote), `api/admin/observers`, `sendWelcomeEmail`,
   `sendSessionReminder`, `sendWeeklyDigest`. Tables kept (no migrations).
 
-## Server setup for the daily job (not done — infra repo is yours)
+## Server setup for the daily job
 
-Fits the existing pattern (`hetzner/backup/infra-backup.{service,timer}`): a
-host systemd timer, calling the route from inside the web container so the
-request never leaves the box and the secret never appears on a command line.
+Prepared, not installed. novicetutor.com is still on Cloudflare Workers
+(checked 2026-10-27: no `x-served-by: hetzner`), nothing for it runs on the
+Hetzner server, and the image with this route is not pushed. A timer installed
+now would fail every day.
 
-1. Add to `/opt/sites/novicetutor/web.env` (and the name to
-   `hetzner/sites/novicetutor/web.env.example`):
-   `CRON_SECRET=` a value from `openssl rand -hex 32`. Compose's `env_file`
-   already passes web.env to `web`; the realtime sidecar does not get it.
-2. `/etc/systemd/system/novicetutor-daily.service`:
+Ready in the infra repo's (uncommitted) `hetzner/sites/novicetutor/` draft:
+- `web.env.example` has `CRON_SECRET` (generate with `openssl rand -hex 32`).
+- `novicetutor-daily.service`: one-shot `docker exec novicetutor-web-1 node -e
+  "fetch(... Bearer process.env.CRON_SECRET)"`, so the request stays inside the
+  container and the secret is never on a command line.
+- `novicetutor-daily.timer`: daily 13:00 UTC, `Persistent=true`.
+- The install commands are at the top of the `.service` file.
 
-   ```ini
-   # Daily billing sweep for novicetutor.com: overdue invoices, subscription
-   # period end. journalctl -u novicetutor-daily.service -n 20
-   [Unit]
-   Description=novicetutor.com daily billing job
-   After=docker.service
-   Requires=docker.service
-
-   [Service]
-   Type=oneshot
-   ExecStart=/usr/bin/docker exec novicetutor-web-1 node -e "fetch('http://127.0.0.1:3000/api/cron/daily',{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
-   TimeoutStartSec=5min
-   ```
-
-3. `/etc/systemd/system/novicetutor-daily.timer`:
-
-   ```ini
-   # 13:00 UTC: morning in the US, evening in India. Persistent: a run missed
-   # while the server was off happens at boot.
-   [Unit]
-   Description=novicetutor.com daily billing job
-
-   [Timer]
-   OnCalendar=*-*-* 13:00:00 UTC
-   RandomizedDelaySec=10min
-   Persistent=true
-
-   [Install]
-   WantedBy=timers.target
-   ```
-
-4. `systemctl daemon-reload && systemctl enable --now novicetutor-daily.timer`,
-   then one manual run: `systemctl start novicetutor-daily.service &&
-   journalctl -u novicetutor-daily.service -n 20` (expect `200 {"success":true,...}`).
-5. Optional, defence in depth: in the `novicetutor` Caddy block, answer 404
-   for `/api/cron/*` from outside (`@internal path /api/cron/*` +
-   `respond @internal 404` before the main `handle`).
-
-Until the site moves to Hetzner nothing calls the route; Cloudflare Workers
-production keeps today's behaviour (on-load settle, overdue computed for
-display). One Neon wake a day is negligible.
+At cutover: put `CRON_SECRET` in `/opt/sites/novicetutor/web.env`, deploy, then
+install and enable the timer and run it once. Optional: have Caddy answer 404
+for `/api/cron/*` from outside. Until then the plans page still settles
+subscriptions on load and overdue status is computed for display.
 
 ## To do
 
 ### Left for the user
-1. Delete `cookies.txt` in the main checkout: a curl cookie jar holding a
-   novicetutor.com session cookie (expired 2026-08-29). Git-ignored, never
-   committed. The deletion was blocked by the permission guard.
-2. The repo copy of `AuthKey_T479RMTYDJ.p8` was moved to
-   `~/.appstoreconnect/moved-from-repo/`. It is byte-identical to
-   `~/.appstoreconnect/private_keys/AuthKey_T479RMTYDJ.p8`, so the moved copy
-   can be deleted. Key files there are now mode 600.
-3. Your main-checkout work from before the merge is snapshotted at
+1. Your main-checkout work from before the merge is snapshotted at
    `refs/backup/main-wip-2026-10-26` (all 16 files). It was re-applied after the
    merge except `InstantMeetingAdminButton.tsx`, which the branch deletes (its
    popup fix is in `git show refs/backup/main-wip-2026-10-26 --
    apps/web/src/app/admin/InstantMeetingAdminButton.tsx` if wanted). Delete the
    ref once happy: `git update-ref -d refs/backup/main-wip-2026-10-26`.
-4. Server setup above.
+2. Commit the infra draft (`hetzner/sites/novicetutor/`) with the rest of the
+   port, and install the timer at cutover (above).
+
+Done 2026-10-27: `cookies.txt` (expired session cookie) deleted; the repo copy
+of `AuthKey_T479RMTYDJ.p8` removed (byte-identical to
+`~/.appstoreconnect/private_keys/`, where the keys are now mode 600).
 
 ### Decisions needed (user)
 - Should a NO_SHOW still use up a lesson from the plan quota? (Currently yes:
