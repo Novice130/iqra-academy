@@ -5,9 +5,9 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
-import { eq, and, sql, count, desc, inArray, isNull } from "drizzle-orm";
+import { eq, and, sql, count, desc } from "drizzle-orm";
 import { bookings, sessions, studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
-import AssignStudentModal from "./AssignStudentModal";
+import Link from "next/link";
 import TeacherStudentsClient from "./TeacherStudentsClient";
 
 function calculateAge(dob: string | Date | null | undefined): string | number {
@@ -84,27 +84,6 @@ export default async function TeacherStudentsPage() {
       .groupBy(studentProfiles.id);
   }
 
-  // Fetch all teachers and all students for the admin modal
-  const allStudentProfiles = isAdmin
-    ? await db.query.studentProfiles.findMany({
-        where: isSuperAdmin ? undefined : eq(studentProfiles.orgId, orgId),
-        columns: { id: true, name: true, track: true },
-      })
-    : [];
-
-  const allTeachers = isAdmin
-    ? await db.query.users.findMany({
-        where: isSuperAdmin
-          ? and(inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]), isNull(users.deletedAt))
-          : and(
-              inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
-              eq(users.orgId, orgId),
-              isNull(users.deletedAt)
-            ),
-        columns: { id: true, name: true, email: true },
-      })
-    : [];
-
   // 2. Fetch total lesson counts per track
   const trackCounts = await db
     .select({ track: lessonContent.track, total: count() })
@@ -157,11 +136,16 @@ export default async function TeacherStudentsPage() {
           </p>
         </div>
 
+        {/* Booking lives on one admin page, which takes the class time the
+            old modal never sent (it always failed with a 400). */}
         {isAdmin && (
-          <AssignStudentModal
-            students={allStudentProfiles}
-            teachers={allTeachers}
-          />
+          <Link
+            href="/admin/assign-student"
+            className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition hover:opacity-90"
+            style={{ background: "var(--accent)" }}
+          >
+            Book a class
+          </Link>
         )}
       </div>
 
