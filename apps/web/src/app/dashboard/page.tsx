@@ -145,6 +145,8 @@ export default async function DashboardPage(props: {
           total: sql<number>`count(*)::int`,
         })
         .from(lessonContent)
+        // This family's org only, and only lessons a teacher can still record.
+        .where(and(eq(lessonContent.orgId, dbUser?.orgId ?? ""), eq(lessonContent.isActive, true)))
         .groupBy(lessonContent.track);
 
       totalLessonsMap = Object.fromEntries(

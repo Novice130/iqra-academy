@@ -5,10 +5,10 @@
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
-import { eq, desc, count } from "drizzle-orm";
-import { studentProfiles, progressRecords, lessonContent } from "@/db/schema";
-import { format } from "date-fns";
+import { and, eq, desc, count } from "drizzle-orm";
+import { studentProfiles, progressRecords, lessonContent, users } from "@/db/schema";
 import Link from "next/link";
+import LocalTime from "@/components/LocalTime";
 
 export default async function ProgressPage() {
   return withDb(async () => {
@@ -44,13 +44,21 @@ export default async function ProgressPage() {
       // 2. Fetch total lesson counts per track (to calculate %)
       let totalLessonsMap: Record<string, number> = {};
       try {
-        const trackCounts = await db
-          .select({
-            track: lessonContent.track,
-            total: count(),
-          })
-          .from(lessonContent)
-          .groupBy(lessonContent.track);
+        // Only this family's org, and only lessons a teacher can still record.
+        const viewer = await db.query.users.findFirst({
+          where: eq(users.id, user.id),
+          columns: { orgId: true },
+        });
+        const trackCounts = viewer
+          ? await db
+              .select({
+                track: lessonContent.track,
+                total: count(),
+              })
+              .from(lessonContent)
+              .where(and(eq(lessonContent.orgId, viewer.orgId), eq(lessonContent.isActive, true)))
+              .groupBy(lessonContent.track)
+          : [];
 
         totalLessonsMap = Object.fromEntries(
           trackCounts.map((tc) => [tc.track, Number(tc.total) || 1])
@@ -155,7 +163,7 @@ export default async function ProgressPage() {
                                     {record.lesson?.title || "Completed Lesson"}
                                   </span>
                                   <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                                    {record.completedAt ? format(new Date(record.completedAt), "MMM d") : "Completed"}
+                                    {record.completedAt ? <LocalTime iso={new Date(record.completedAt).toISOString()} mode="date" /> : "Completed"}
                                   </span>
                                 </div>
                                 {record.teacherNotes && (
