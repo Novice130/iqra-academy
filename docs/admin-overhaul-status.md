@@ -114,7 +114,8 @@ Prepared, not installed. novicetutor.com is still on Cloudflare Workers
 Hetzner server, and the image with this route is not pushed. A timer installed
 now would fail every day.
 
-Ready in the infra repo's (uncommitted) `hetzner/sites/novicetutor/` draft:
+Committed in the infra repo (`hetzner/sites/novicetutor/`, branch
+`gmktec-staging-design`, not pushed):
 - `web.env.example` has `CRON_SECRET` (generate with `openssl rand -hex 32`).
 - `novicetutor-daily.service`: one-shot `docker exec novicetutor-web-1 node -e
   "fetch(... Bearer process.env.CRON_SECRET)"`, so the request stays inside the
@@ -122,10 +123,11 @@ Ready in the infra repo's (uncommitted) `hetzner/sites/novicetutor/` draft:
 - `novicetutor-daily.timer`: daily 13:00 UTC, `Persistent=true`.
 - The install commands are at the top of the `.service` file.
 
-At cutover: put `CRON_SECRET` in `/opt/sites/novicetutor/web.env`, deploy, then
-install and enable the timer and run it once. Optional: have Caddy answer 404
-for `/api/cron/*` from outside. Until then the plans page still settles
-subscriptions on load and overdue status is computed for display.
+The full server procedure, including when to enable the timer, is in the infra
+repo's `docs/novicetutor-move.md` (section 4; cutover and rollback in 6 and 7).
+Caddy answers 404 for `/api/cron/*` from outside. Until the timer runs, the
+plans page still settles subscriptions on load and overdue status is computed
+for display.
 
 ## To do
 
@@ -136,8 +138,9 @@ subscriptions on load and overdue status is computed for display.
    popup fix is in `git show refs/backup/main-wip-2026-10-26 --
    apps/web/src/app/admin/InstantMeetingAdminButton.tsx` if wanted). Delete the
    ref once happy: `git update-ref -d refs/backup/main-wip-2026-10-26`.
-2. Commit the infra draft (`hetzner/sites/novicetutor/`) with the rest of the
-   port, and install the timer at cutover (above).
+2. Follow the infra repo's `docs/novicetutor-move.md`: section 0 lists what
+   only you can provide (pushes, the `NEXT_PUBLIC_VAPID_PUBLIC_KEY` repository
+   variable, the `hz-novicetutor` DNS record, secret values).
 
 Done 2026-10-27: `cookies.txt` (expired session cookie) deleted; the repo copy
 of `AuthKey_T479RMTYDJ.p8` removed (byte-identical to
