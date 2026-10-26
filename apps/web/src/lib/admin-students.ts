@@ -557,6 +557,8 @@ export type Student360 = NonNullable<Awaited<ReturnType<typeof loadStudent360>>>
 // ─── Trial pipeline ─────────────────────────────────────────────────────────
 
 export interface TrialRow {
+  /** Row key: one row per trial booking, not per session. */
+  bookingId: string;
   sessionId: string;
   title: string | null;
   startsAt: string;
@@ -579,17 +581,8 @@ export interface TrialRow {
 
 const TRIAL_LIMIT = 500;
 
-/** Latest instant per key. */
-function latestBy<T>(rows: T[], key: (r: T) => string, at: (r: T) => Date | null) {
-  const out = new Map<string, number>();
-  for (const r of rows) {
-    const t = at(r)?.getTime();
-    if (t === undefined) continue;
-    const k = key(r);
-    if (t > (out.get(k) ?? -Infinity)) out.set(k, t);
-  }
-  return out;
-}
+/** Key for "this learner": the profile when known, else the family login. */
+const learnerKey = (profileId: string | null, userId: string) => (profileId ? `p:${profileId}` : `u:${userId}`);
 
 export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: TrialRow[]; truncated: boolean }> {
   const now = new Date();
@@ -602,6 +595,7 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
       endsAt: sessions.scheduledEnd,
       track: sessions.track,
       teacherName: users.name,
+      bookingId: bookings.id,
       bookingStatus: bookings.status,
       bookedAt: bookings.createdAt,
       userId: bookings.userId,
@@ -615,13 +609,27 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
     .limit(TRIAL_LIMIT + 1);
 
   const truncated = trials.length > TRIAL_LIMIT;
-  const list = trials.slice(0, TRIAL_LIMIT);
+  // One trial session can carry more than one booking (a rebooked or
+  // cancelled-and-retried trial). A cancelled booking is dropped when the same
+  // session still has a live one; a session whose bookings are all cancelled
+  // keeps only its newest, so it shows once as CANCELLED rather than not at all.
+  const raw = trials.slice(0, TRIAL_LIMIT);
+  const liveSessions = new Set(raw.filter((t) => t.bookingStatus !== "CANCELLED").map((t) => t.sessionId));
+  const newestCancelled = new Map<string, (typeof raw)[number]>();
+  for (const t of raw) {
+    if (liveSessions.has(t.sessionId)) continue;
+    const prev = newestCancelled.get(t.sessionId);
+    if (!prev || t.bookedAt > prev.bookedAt) newestCancelled.set(t.sessionId, t);
+  }
+  const list = raw.filter((t) =>
+    liveSessions.has(t.sessionId) ? t.bookingStatus !== "CANCELLED" : newestCancelled.get(t.sessionId) === t
+  );
   if (list.length === 0) return { rows: [], truncated: false };
 
   const userIds = [...new Set(list.map((t) => t.userId))];
   const sessionIds = [...new Set(list.map((t) => t.sessionId))];
 
-  const [contacts, profiles, subs, laterBookings, paid, joined, followUps] = await Promise.all([
+  const [contacts, profiles, subs, regularBookings, joined, followUps] = await Promise.all([
     db
       .select({ id: users.id, name: users.name, email: users.email, phone: users.phone })
       .from(users)
@@ -633,9 +641,9 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
     db
       .select({ userId: subscriptions.userId, at: subscriptions.createdAt })
       .from(subscriptions)
-      .where(and(inArray(subscriptions.userId, userIds), ne(subscriptions.status, "CANCELLED"))),
+      .where(inArray(subscriptions.userId, userIds)),
     db
-      .select({ userId: bookings.userId, at: bookings.createdAt })
+      .select({ userId: bookings.userId, profileId: bookings.studentProfileId, at: bookings.createdAt })
       .from(bookings)
       .innerJoin(sessions, eq(sessions.id, bookings.sessionId))
       .where(
@@ -646,10 +654,6 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
           ne(sessions.origin, "TRIAL")
         )
       ),
-    db
-      .select({ userId: invoices.userId, at: invoices.paidAt })
-      .from(invoices)
-      .where(and(inArray(invoices.userId, userIds), eq(invoices.status, "PAID"))),
     db
       .selectDistinct({ sessionId: sessionAttendance.sessionId })
       .from(sessionAttendance)
@@ -683,13 +687,24 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
     else profilesByUser.set(p.userId, [p]);
   }
   const profileById = new Map(profiles.map((p) => [p.id, p]));
-  const lastSignal = new Map<string, number>();
-  for (const m of [
-    latestBy(subs, (r) => r.userId, (r) => r.at),
-    latestBy(laterBookings, (r) => r.userId, (r) => r.at),
-    latestBy(paid, (r) => r.userId, (r) => r.at),
-  ]) {
-    for (const [k, t] of m) if (t > (lastSignal.get(k) ?? -Infinity)) lastSignal.set(k, t);
+  // Conversion evidence, per learner where the data allows it:
+  // - A regular (non-trial) booking is keyed by the child it is for, so a
+  //   family paying for child A does not mark child B's trial converted.
+  // - A subscription belongs to the family, not a child. It counts only when
+  //   it is the family's first — created after this trial with none before —
+  //   so an existing plan that a sibling was later added to does not count.
+  // - Invoices are not used at all: an invoice names the family, never the
+  //   child, so a paid invoice cannot be attributed to one trial.
+  const latestRegular = new Map<string, number>();
+  for (const b of regularBookings) {
+    const k = learnerKey(b.profileId, b.userId);
+    const t = b.at.getTime();
+    if (t > (latestRegular.get(k) ?? -Infinity)) latestRegular.set(k, t);
+  }
+  const firstSub = new Map<string, number>();
+  for (const sub of subs) {
+    const t = sub.at.getTime();
+    if (t < (firstSub.get(sub.userId) ?? Infinity)) firstSub.set(sub.userId, t);
   }
   const attended = new Set(joined.map((j) => j.sessionId));
   const followUpBySession = new Map<string, TrialRow["followUp"]>();
@@ -708,9 +723,11 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
     const own = profilesByUser.get(t.userId) ?? [];
     const profile = (t.profileId ? profileById.get(t.profileId) : undefined) ?? (own.length === 1 ? own[0] : undefined);
     const followUp = followUpBySession.get(t.sessionId) ?? null;
-    // Only evidence dated after the trial counts — a family that was already
-    // paying for one child and trialled another hasn't "converted" from it.
-    const converted = (lastSignal.get(t.userId) ?? -Infinity) >= t.bookedAt.getTime();
+    // Only evidence dated after this trial booking counts.
+    const bookedAt = t.bookedAt.getTime();
+    const converted =
+      (latestRegular.get(learnerKey(profile?.id ?? null, t.userId)) ?? -Infinity) >= bookedAt ||
+      (firstSub.get(t.userId) ?? -Infinity) >= bookedAt;
     const over = t.endsAt <= now;
 
     let stage: TrialStage;
@@ -725,6 +742,7 @@ export async function loadTrialPipeline(admin: AdminContext): Promise<{ rows: Tr
     else stage = attended.has(t.sessionId) ? "ATTENDED" : "NEEDS_OUTCOME";
 
     return {
+      bookingId: t.bookingId,
       sessionId: t.sessionId,
       title: t.title,
       startsAt: t.startsAt.toISOString(),

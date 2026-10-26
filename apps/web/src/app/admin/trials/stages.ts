@@ -38,7 +38,7 @@ export const STAGE_META: Record<TrialStage, { label: string; tone: Tone; hint: s
     hint: "Time has passed but nobody marked it and no student joined.",
   },
   ATTENDED: { label: "Attended", tone: "info", hint: "Came to the trial; not paying or booked yet." },
-  CONVERTED: { label: "Converted", tone: "success", hint: "Paid, subscribed or booked a regular class since." },
+  CONVERTED: { label: "Converted", tone: "success", hint: "This child has a regular class booked since, or the family took out its first plan." },
   NO_SHOW: { label: "No-show", tone: "danger", hint: "Marked as a no-show." },
   CANCELLED: { label: "Cancelled", tone: "neutral", hint: "The trial was cancelled." },
   DECLINED: { label: "Declined", tone: "neutral", hint: "Recorded as not going ahead." },

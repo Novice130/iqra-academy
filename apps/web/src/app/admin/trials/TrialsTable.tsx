@@ -100,7 +100,7 @@ export default function TrialsTable({ rows }: { rows: TrialRow[] }) {
               {visible.map((r) => {
                 const meta = STAGE_META[r.stage];
                 return (
-                  <tr key={r.sessionId} className={table.tr}>
+                  <tr key={r.bookingId} className={table.tr}>
                     <td className={`${table.td} whitespace-nowrap`}>
                       <LocalTime iso={r.startsAt} mode="date-time" withZone />
                       <div className="mt-1">
