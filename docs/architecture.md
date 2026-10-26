@@ -99,7 +99,8 @@ Worth knowing before you trust a file:
 - **Cal.com** — `src/lib/calcom.ts` and `/api/webhooks/calcom` exist and are
   written, but nothing in the product calls out to Cal.com. Booking and
   teacher availability are still mock UI.
-- **Twenty CRM** — `src/lib/crm.ts` exists; same story.
+- **Twenty CRM** — `src/lib/crm.ts` was never called and was removed
+  (2026-10-26). The `crm_sync_events` table is still in the schema, unused.
 - **Push notifications** — `src/lib/push.ts` and the `push_subscriptions` table
   exist and are unused. Everything in the app is polling. This is the main
   thing the mobile app is meant to unlock.

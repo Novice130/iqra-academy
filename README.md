@@ -34,7 +34,6 @@
 │                BUSINESS LOGIC LAYER                         │
 │  ├─ rbac.ts     → Server-side RBAC + org hierarchy          │
 │  ├─ quota.ts    → Per-child ledger-based entitlements       │
-│  ├─ crm.ts      → Twenty CRM sync (outbox pattern)         │
 │  ├─ admin.ts    → AdminJS panel config (25 tables)          │
 │  ├─ audit.ts    → Append-only audit logging                 │
 │  ├─ stripe.ts   → Manual invoice subscriptions             │
@@ -49,10 +48,10 @@
 └─────────────────────────────────────────────────────────────┘
 
        EXTERNAL SERVICES
-  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
-  │  Stripe  │ │  Cal.com │ │  LiveKit │ │  Resend  │ │  Twenty  │
-  │ Payments │ │Scheduling│ │  Video   │ │  Email   │ │   CRM    │
-  └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
+  │  Stripe  │ │  Cal.com │ │  LiveKit │ │  Resend  │
+  │ Payments │ │Scheduling│ │  Video   │ │  Email   │
+  └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
 ---
@@ -71,7 +70,6 @@
 | **Google Sign-In** | One-tap login via Better Auth social provider |
 | **Admin Panel** | Built-in at `/admin` — CRUD for all 25 tables |
 | **RLS Security** | Postgres Row-Level Security as defense-in-depth |
-| **CRM Integration** | Twenty CRM sync via outbox pattern |
 | **Moderated Chat** | Per-room chat with hide/delete + audit trail |
 | **Recording Controls** | Per-role access: NONE, STUDENT_ONLY, ALL |
 | **Audio Feedback** | Teachers record Tajweed pronunciation feedback |
@@ -100,7 +98,6 @@ quran-lms/
 │       ├── db.ts                      # Drizzle client + withRLS() helper
 │       ├── rbac.ts                    # Role-based access control
 │       ├── admin.ts                   # AdminJS resource configuration
-│       ├── crm.ts                     # Twenty CRM integration
 │       ├── quota.ts                   # Per-child ledger quota system
 │       ├── stripe.ts                  # Stripe payment helpers
 │       ├── livekit.ts                 # LiveKit token helper
@@ -276,7 +273,6 @@ npm run db:seed      # Seed database with test data
 | **ORM** | Drizzle ORM | TypeScript-first, zero codegen, lightweight |
 | **Database** | Neon Postgres + RLS | Serverless Postgres, SOC 2 certified |
 | **Admin** | AdminJS (embedded) | Admin panel at `/admin`, no extra container |
-| **CRM** | Twenty (open-source) | Self-hosted, Postgres-based |
 | **Payments** | Stripe | Manual invoice support |
 | **Scheduling** | Cal.com (self-hosted) | Open-source scheduling engine |
 | **Video** | LiveKit Cloud | Token-secured video rooms |

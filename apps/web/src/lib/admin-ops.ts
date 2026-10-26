@@ -14,13 +14,12 @@
  * @module lib/admin-ops
  */
 
-import { and, asc, count, desc, eq, gte, inArray, isNotNull, isNull, lt, max, min, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, isNotNull, isNull, lt, max, min, or, sql, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "@/lib/db";
 import {
   breakoutRooms,
   breakoutSets,
-  crmSyncEvents,
   deviceTokens,
   guestJoinRequests,
   pushSubscriptions,
@@ -249,31 +248,6 @@ export function probeOutbox(scope: OpsScope): Promise<Probe<OutboxStats>> {
       oldestPendingAt: pending.oldest ? new Date(pending.oldest).toISOString() : null,
       deadLettered: dead.n,
       lastPublishedAt: last.at ? new Date(last.at).toISOString() : null,
-    };
-  });
-}
-
-export interface CrmStats {
-  failures7d: number;
-  latestError: { message: string | null; at: string } | null;
-}
-
-export function probeCrm(scope: OpsScope): Promise<Probe<CrmStats>> {
-  return probe(async () => {
-    const since = new Date(Date.now() - 7 * 86_400_000);
-    const failed = and(eq(crmSyncEvents.success, false), scoped(scope, crmSyncEvents.orgId));
-    const [[agg], latest] = await Promise.all([
-      db.select({ n: count() }).from(crmSyncEvents).where(and(failed, gte(crmSyncEvents.createdAt, since))),
-      db
-        .select({ message: crmSyncEvents.errorMessage, at: crmSyncEvents.createdAt })
-        .from(crmSyncEvents)
-        .where(failed)
-        .orderBy(desc(crmSyncEvents.createdAt))
-        .limit(1),
-    ]);
-    return {
-      failures7d: agg.n,
-      latestError: latest[0] ? { message: latest[0].message, at: latest[0].at.toISOString() } : null,
     };
   });
 }

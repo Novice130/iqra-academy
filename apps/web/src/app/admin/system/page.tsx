@@ -16,7 +16,6 @@ import { requireAdminPage } from "@/lib/admin-page";
 import LocalTime from "@/components/LocalTime";
 import {
   STALE_AFTER_MIN,
-  probeCrm,
   probeDatabase,
   probeDeliveryCounts,
   probeLiveKit,
@@ -67,12 +66,11 @@ export default async function AdminSystemPage() {
     // livekit-rooms API route can build too, so the two agree on who sees what.
     const scope = { orgId: admin.orgId, role: admin.role };
 
-    const [database, livekit, stale, outbox, crm, delivery, sidecar] = await Promise.all([
+    const [database, livekit, stale, outbox, delivery, sidecar] = await Promise.all([
       probeDatabase(),
       probeLiveKit(scope),
       probeStaleSessions(scope),
       probeOutbox(scope),
-      probeCrm(scope),
       probeDeliveryCounts(scope),
       probeSidecar(),
     ]);
@@ -153,31 +151,6 @@ export default async function AdminSystemPage() {
               />
             ) : (
               <Failure error={outbox.error} />
-            )}
-          </Panel>
-
-          <Panel
-            title="CRM sync"
-            description={<Checked probe={crm} />}
-            actions={!crm.ok ? <Status tone="danger">Check failed</Status> : crm.data.failures7d > 0 ? <Status tone="warning">Failures</Status> : <Status tone="success">No failures</Status>}
-          >
-            {crm.ok ? (
-              <DefinitionList
-                items={[
-                  { term: "Failed syncs, last 7 days", value: crm.data.failures7d },
-                  {
-                    term: "Latest error",
-                    value: crm.data.latestError ? (
-                      <>
-                        <span className="block">{crm.data.latestError.message || "No message recorded"}</span>
-                        <span className="text-xs text-[var(--text-tertiary)]"><LocalTime iso={crm.data.latestError.at} mode="date-time" withZone /></span>
-                      </>
-                    ) : "None",
-                  },
-                ]}
-              />
-            ) : (
-              <Failure error={crm.error} />
             )}
           </Panel>
 
