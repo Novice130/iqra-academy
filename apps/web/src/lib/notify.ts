@@ -100,11 +100,26 @@ export async function getAdminRecipients(
   }
 }
 
+/**
+ * Title and body are plain text, and often carry names or reasons other
+ * people typed — a child's name from the family, a cancel reason from a
+ * teacher. Unescaped, any of them could put a live link or markup into an
+ * email sent from the school's own domain.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /** Wrap a plain message in the same shell the other emails use. */
 function defaultHtml(title: string, body: string, url?: string): string {
   const button = url
     ? `<div style="text-align:center;margin:28px 0;">
-         <a href="${url}" style="background:#1a5f3a;color:#fff;padding:13px 26px;
+         <a href="${escapeHtml(url)}" style="background:#1a5f3a;color:#fff;padding:13px 26px;
             text-decoration:none;border-radius:8px;font-size:15px;font-weight:bold;">
            Open Novice Tutor
          </a>
@@ -112,8 +127,8 @@ function defaultHtml(title: string, body: string, url?: string): string {
     : "";
   return `
     <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
-      <h2 style="color:#1a5f3a;">${title}</h2>
-      <p style="font-size:16px;line-height:1.6;color:#333;">${body}</p>
+      <h2 style="color:#1a5f3a;">${escapeHtml(title)}</h2>
+      <p style="font-size:16px;line-height:1.6;color:#333;">${escapeHtml(body)}</p>
       ${button}
     </div>
   `;

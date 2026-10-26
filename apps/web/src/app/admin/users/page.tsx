@@ -40,7 +40,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
 
     const initial: AdminUserRow[] = rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
     const count = (pred: (r: AdminUserRow) => boolean) => initial.filter(pred).length;
-    const presetRole = preset ? PRESETS[preset] : undefined;
+    const presetRole = preset && Object.hasOwn(PRESETS, preset) ? PRESETS[preset] : undefined;
 
     return (
       <div className="space-y-6">

@@ -31,7 +31,9 @@ export default function AuditFilters({
   active: boolean;
 }) {
   return (
-    <form method="get" action="/admin/audit" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:items-end" role="search" aria-label="Filter the audit log">
+    // Keyed on the values: a Link back to this route keeps the DOM, and
+    // uncontrolled inputs would go on showing the previous filter.
+    <form key={JSON.stringify(values)} method="get" action="/admin/audit" className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6 lg:items-end" role="search" aria-label="Filter the audit log">
       <div className="lg:col-span-1">
         <label htmlFor="audit-action" className={label}>Action</label>
         <select id="audit-action" name="action" defaultValue={values.action} className={input}>

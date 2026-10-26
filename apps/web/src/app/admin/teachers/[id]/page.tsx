@@ -146,7 +146,7 @@ export default async function AdminTeacherPage({
           description={`${classes.month.classes.length} classes, ${formatHours(classes.month.seconds)} in the room. Months run in ${zone}.`}
           actions={<MonthCsvButton classes={classes.month.classes} teacherName={name} month={selected} />}
         >
-          <form method="get" action={base} className="flex flex-wrap items-end gap-2">
+          <form key={selected} method="get" action={base} className="flex flex-wrap items-end gap-2">
             <Link href={`${base}?month=${shiftMonthKey(selected, -1)}`} className={btn.ghost}>
               Previous month
             </Link>
