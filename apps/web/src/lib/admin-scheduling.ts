@@ -110,7 +110,7 @@ export function addDaysToDateKey(date: string, days: number): string {
 }
 
 /** A short "Mon, Nov 2, 5:30 PM CST" in the recipient's own zone. */
-function formatFor(instant: Date, zone: string | null | undefined): string {
+export function formatFor(instant: Date, zone: string | null | undefined): string {
   try {
     return new Intl.DateTimeFormat("en-US", {
       timeZone: zone && isValidZone(zone) ? zone : "UTC",

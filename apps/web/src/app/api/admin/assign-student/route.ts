@@ -22,11 +22,17 @@
  * in the future, teacher free, no time off, student free — and a week that
  * fails is skipped rather than sinking the rest. The response says which
  * weeks were booked and why any were not.
+ *
+ * After the commit the family and the teacher are told, each in their own
+ * zone: one message for the whole request, naming the first class and how
+ * many weekly ones were booked. Skipped weeks are not mentioned to the family;
+ * the admin sees them in the response and can rebook.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { db, withDb } from "@/lib/db";
-import { sessions, bookings } from "@/db/schema";
+import { inArray } from "drizzle-orm";
+import { sessions, bookings, users } from "@/db/schema";
 import { requireRole } from "@/lib/rbac";
 import { handleApiError, ForbiddenError, AppError } from "@/lib/errors";
 import { createId } from "@paralleldrive/cuid2";
@@ -35,7 +41,8 @@ import { getClientIp, logAuditBatch } from "@/lib/audit";
 import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
-import { addDaysToDateKey, findScheduleConflict, lockTeacherSchedules, wallClockToInstant } from "@/lib/admin-scheduling";
+import { addDaysToDateKey, findScheduleConflict, formatFor, lockTeacherSchedules, wallClockToInstant } from "@/lib/admin-scheduling";
+import { notify } from "@/lib/notify";
 import { z } from "zod";
 
 const assignStudentSchema = z
@@ -213,6 +220,17 @@ export async function POST(request: NextRequest) {
       );
 
       afterResponse(drainOutbox({ orgId: targetOrgId }).catch(() => {}));
+      afterResponse(
+        announceBooking({
+          orgId: targetOrgId,
+          actorId: ctx.userId,
+          familyUserId: profile.userId,
+          studentName: profile.name,
+          teacher,
+          created,
+          weekly: data.repeatWeeks > 1,
+        }).catch((error) => console.error("[assign-student] notify failed", error))
+      );
 
       return NextResponse.json({
         success: true,
@@ -230,4 +248,59 @@ export async function POST(request: NextRequest) {
       return handleApiError(error);
     }
   });
+}
+
+/**
+ * One message to the family and one to the teacher for everything this request
+ * booked. Uses CLASS_MOVED, the closest existing type (the class page is where
+ * tapping it lands either way). Never throws past notify().
+ */
+async function announceBooking(opts: {
+  orgId: string;
+  actorId: string;
+  familyUserId: string;
+  studentName: string;
+  teacher: { id: string; name: string };
+  created: { scheduledStart: string; sessionId: string }[];
+  weekly: boolean;
+}): Promise<void> {
+  const first = opts.created[0];
+  const firstStart = new Date(first.scheduledStart);
+  const zones = await db
+    .select({ id: users.id, timezone: users.timezone })
+    .from(users)
+    .where(inArray(users.id, [opts.familyUserId, opts.teacher.id]));
+  const zoneOf = new Map(zones.map((u) => [u.id, u.timezone]));
+
+  const series = (when: string) =>
+    opts.weekly && opts.created.length > 1
+      ? `${when}, then weekly (${opts.created.length} classes)`
+      : when;
+
+  const messages = [
+    {
+      userId: opts.familyUserId,
+      title: opts.created.length > 1 ? "Weekly classes booked" : "Class booked",
+      body: `${opts.studentName}'s class with ${opts.teacher.name}: ${series(formatFor(firstStart, zoneOf.get(opts.familyUserId)))}.`,
+    },
+    {
+      userId: opts.teacher.id,
+      title: "New class assigned",
+      body: `You are teaching ${opts.studentName}: ${series(formatFor(firstStart, zoneOf.get(opts.teacher.id)))}.`,
+    },
+  ].filter((m) => m.userId !== opts.actorId);
+
+  await Promise.all(
+    messages.map((m) =>
+      notify({
+        orgId: opts.orgId,
+        userIds: [m.userId],
+        type: "CLASS_MOVED",
+        title: m.title,
+        body: m.body,
+        path: `/dashboard/session/${first.sessionId}`,
+        sessionId: first.sessionId,
+      })
+    )
+  );
 }
