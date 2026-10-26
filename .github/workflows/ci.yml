@@ -5,6 +5,10 @@ on:
     branches: [master]
   pull_request:
     branches: [master]
+  # Runs everything and builds and pushes the image for the chosen branch, for
+  # testing a branch on the server before it is merged:
+  #   gh workflow run ci.yml --ref <branch>
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -238,7 +242,8 @@ jobs:
 
   # ── Production image ───────────────────────────────────────────────────────
   # Builds the image, boots it in the runner, and pushes it to GHCR. Runs on a
-  # push to master, after web-quality is green. It does not deploy: the server
+  # push to master, or on a manual run of any branch, after web-quality is
+  # green. Only master moves `latest`. It does not deploy: the server
   # has no public SSH, so a deploy is run from the Mac in the infra repo with
   # `bin/prod deploy novicetutor <full commit sha>` (infra/docs/runbook.md).
   #
@@ -248,7 +253,7 @@ jobs:
   image:
     name: Build & Push Image
     needs: [web-quality]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/master')
     runs-on: ${{ vars.IMAGE_RUNNER || 'ubuntu-latest' }}
     timeout-minutes: 60
     concurrency:
@@ -293,9 +298,10 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      # The image that was just built, started the way compose starts it.
-      # Verifies both web and realtime processes boot, connect to the database,
-      # listen and route.
+      # The image that was just built, started the way compose starts it
+      # (infra hetzner/sites/novicetutor/compose.yml): read-only root, the same
+      # tmpfs mounts, no capabilities. Verifies both web and realtime processes
+      # boot, connect to the database, listen and route.
       - name: Smoke-boot the image
         run: |
           set -euo pipefail
@@ -304,14 +310,18 @@ jobs:
             -e POSTGRES_USER=user -e POSTGRES_PASSWORD=pass -e POSTGRES_DB=db \
             postgres:17-alpine
           common=(--network smoke --init --platform "$PLATFORM"
+            --read-only --cap-drop ALL --security-opt no-new-privileges
             -e DATABASE_URL=postgresql://user:pass@smoke-db:5432/db
             -e BETTER_AUTH_SECRET=smoke-test-secret-not-used-anywhere-32chars
             -e REALTIME_SECRET=smoke-realtime-secret-32-chars-long-min
             -e NEXT_PUBLIC_APP_URL=http://localhost:3000)
           docker run -d --name web "${common[@]}" \
+            --tmpfs /tmp:size=32m \
+            --tmpfs /app/apps/web/.next/cache:uid=1000,gid=1000,size=48m \
             -e REALTIME_INTERNAL_URL=http://realtime:8787 \
             -p 127.0.0.1:3000:3000 "$IMAGE:$GITHUB_SHA"
           docker run -d --name realtime "${common[@]}" \
+            --tmpfs /tmp:size=8m \
             -e APP_INTERNAL_URL=http://web:3000 \
             -p 127.0.0.1:8787:8787 "$IMAGE:$GITHUB_SHA" node realtime-server.mjs
 
@@ -327,6 +337,11 @@ jobs:
           wait_for http://127.0.0.1:8787/healthz
           wait_for http://127.0.0.1:3000/api/health
           wait_for http://127.0.0.1:3000/login
+          # The path compose's healthcheck uses, with its test: any status
+          # under 500.
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3000/favicon.ico || true)
+          echo "favicon.ico: ${code:-none}"
+          if [ "${code:-000}" = "000" ] || [ "$code" -ge 500 ]; then exit 1; fi
 
           # The image must not run as root.
           test "$(docker exec web id -u)" != "0"
@@ -337,9 +352,11 @@ jobs:
           docker logs web || true
           docker logs realtime || true
 
-      - name: Push image (sha + latest)
+      - name: Push image (sha, and latest from master)
         run: |
           set -euo pipefail
           docker push "$IMAGE:$GITHUB_SHA"
-          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
-          docker push "$IMAGE:latest"
+          if [ "$GITHUB_REF" = "refs/heads/master" ]; then
+            docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
