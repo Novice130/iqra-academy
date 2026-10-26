@@ -14,9 +14,9 @@
  * ── What a refund does here ─────────────────────────────────────────────────
  * Every invoice this school raises is paid outside the app (bank transfer,
  * Zelle; see api/admin/invoices), so the money goes back the same way and
- * this route records it: `amountPaidCents` goes down, a line is added to
- * `notes`, and a full refund leaves the invoice VOID, since nothing is owed
- * and nothing is held. The schema has no REFUNDED status and no refund
+ * this route records it: `amountPaidCents` goes down and a line is added to
+ * `notes`. Only a PAID invoice refunded in full becomes VOID; see the status
+ * rule in the handler. The schema has no REFUNDED status and no refund
  * table, and this is the most it can say without a migration; the audit
  * entry carries the detail.
  *
@@ -87,7 +87,13 @@ export async function POST(request: NextRequest) {
         const remaining = existing.amountPaidCents - amount;
         const line = `[Refund ${new Date().toISOString().slice(0, 10)}] ${money(amount, existing.currency)}: ${data.reason}`;
         const notes = (existing.notes ? `${existing.notes}\n${line}` : line).slice(-NOTES_MAX);
-        const status = remaining === 0 ? ("VOID" as const) : existing.status;
+        // A refund is the school giving money back, not a debt coming back
+        // into being. So a PAID invoice stays PAID after a partial refund
+        // (settled, for less), and becomes VOID only when all of it went back
+        // and nothing is held. An OPEN/OVERDUE/DRAFT invoice keeps its status
+        // whatever is refunded: the full amount is still owed, and voiding it
+        // would drop that debt out of the open and overdue totals.
+        const status = existing.status === "PAID" && remaining === 0 ? ("VOID" as const) : existing.status;
 
         // Matching on the amount we read makes two refunds racing each other
         // fail rather than both subtract from the same balance.

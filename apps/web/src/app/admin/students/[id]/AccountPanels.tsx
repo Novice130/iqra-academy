@@ -93,7 +93,7 @@ export function BillingPanel({ data }: { data: Student360 }) {
           <EmptyState
             title="No invoices"
             body="Nothing has been invoiced to this family yet."
-            action={<Link href={invoicesHref} className={btn.secondary}>Issue invoice</Link>}
+            action={<Link href={`${invoicesHref}&new=1`} className={btn.secondary}>Issue invoice</Link>}
           />
         ) : (
           <div className={table.wrap}>

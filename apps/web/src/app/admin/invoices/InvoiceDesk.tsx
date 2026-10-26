@@ -26,6 +26,7 @@ export default function InvoiceDesk({
   families,
   invoices,
   prefillUserId,
+  openForm,
   prefillMissing,
   limitHit,
   filtered,
@@ -33,13 +34,15 @@ export default function InvoiceDesk({
   families: FamilyOption[];
   invoices: InvoiceRow[];
   prefillUserId: string;
+  /** ?new=1: arrive with the issue form open. */
+  openForm: boolean;
   prefillMissing: boolean;
   limitHit: boolean;
   filtered: boolean;
 }) {
   const router = useRouter();
   const [refreshing, startRefresh] = useTransition();
-  const [formOpen, setFormOpen] = useState(!!prefillUserId);
+  const [formOpen, setFormOpen] = useState(openForm);
   const [message, setMessage] = useState<DeskMessage | null>(
     prefillMissing ? { text: "That family wasn't found in this school, so nothing was picked.", bad: true } : null
   );

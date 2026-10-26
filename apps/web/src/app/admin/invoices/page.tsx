@@ -2,8 +2,11 @@
  * @fileoverview /admin/invoices — raise invoices, record payments and refunds.
  *
  * Query params (all optional):
- *   userId  a family's user id: opens "Issue invoice" with that family picked
- *   status  OPEN | OVERDUE | PAID | VOID | DRAFT | UNCOLLECTIBLE
+ *   userId  a family's user id: filters the ledger to that family (shown as a
+ *           removable chip) and preselects them in "Issue invoice"
+ *   new     "1" opens the "Issue invoice" form on arrival
+ *   status  UNPAID | OPEN | OVERDUE | PAID | VOID | DRAFT | UNCOLLECTIBLE
+ *           (UNPAID = OPEN or OVERDUE; OPEN = open and not yet due)
  *   q       family name or email, substring
  *   from/to YYYY-MM-DD issue-date range, inclusive, in the viewer's zone
  *   tz      the browser's zone, sent by the filter form; used only when the
@@ -63,7 +66,8 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
     const q = (one(sp.q) ?? "").trim().slice(0, 100);
     const from = DAY.test(one(sp.from) ?? "") ? one(sp.from)! : "";
     const to = DAY.test(one(sp.to) ?? "") ? one(sp.to)! : "";
-    const prefillParam = one(sp.userId) ?? "";
+    const familyParam = one(sp.userId) ?? "";
+    const openForm = one(sp.new) === "1";
 
     const now = new Date();
     const pastDue = and(eq(invoices.status, "OPEN"), lt(invoices.dueDate, now));
@@ -72,8 +76,19 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
     const monthStart = zonedWallClockToInstant(today.y, today.m, 1, 0, 0, zone);
     const scope = orgFilter(admin, invoices.orgId);
 
+    // The family named by ?userId=, if it is one this admin can see.
+    const family = familyParam
+      ? ((await db
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(and(eq(users.id, familyParam), orgFilter(admin, users.orgId), isNull(users.deletedAt)))
+          .limit(1))[0] ?? null)
+      : null;
+
     const filters: (SQL | undefined)[] = [scope];
-    if (status === "OVERDUE") filters.push(overdueCond);
+    if (family) filters.push(eq(invoices.userId, family.id));
+    if (status === "UNPAID") filters.push(inArray(invoices.status, ["OPEN", "OVERDUE"]));
+    else if (status === "OVERDUE") filters.push(overdueCond);
     else if (status === "OPEN")
       filters.push(and(eq(invoices.status, "OPEN"), or(isNull(invoices.dueDate), gte(invoices.dueDate, now))));
     else if (status) filters.push(eq(invoices.status, status));
@@ -184,7 +199,7 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
       sumByCurrency(statRows.map((s) => ({ currency: s.currency, cents: s[k] })));
     const count = (k: "openCount" | "overdueCount" | "voidCount") => statRows.reduce((n, s) => n + s[k], 0);
     const overdueCount = count("overdueCount");
-    const prefillUserId = families.some((f) => f.id === prefillParam) ? prefillParam : "";
+    const prefillUserId = family && families.some((f) => f.id === family.id) ? family.id : "";
 
     return (
       <div className="space-y-6">
@@ -200,7 +215,7 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
         />
 
         <StatGrid>
-          <StatCard label="Open balance" value={pick("openCents")} hint={`${count("openCount")} open invoices`} href="/admin/invoices?status=OPEN" />
+          <StatCard label="Open balance" value={pick("openCents")} hint={`${count("openCount")} unpaid invoices`} href="/admin/invoices?status=UNPAID" />
           <StatCard
             label="Overdue"
             value={overdueCount}
@@ -212,15 +227,22 @@ export default async function AdminInvoicesPage({ searchParams }: { searchParams
           <StatCard label="Voided" value={count("voidCount")} href="/admin/invoices?status=VOID" />
         </StatGrid>
 
-        <InvoiceFilters status={status} q={q} from={from} to={to} />
+        <InvoiceFilters
+          status={status}
+          q={q}
+          from={from}
+          to={to}
+          family={family ? { id: family.id, label: family.name || family.email } : null}
+        />
 
         <InvoiceDesk
           families={families}
           invoices={initial}
           prefillUserId={prefillUserId}
-          prefillMissing={!!prefillParam && !prefillUserId}
+          openForm={openForm}
+          prefillMissing={!!familyParam && !family}
           limitHit={rows.length === LIST_LIMIT}
-          filtered={!!(status || q || from || to)}
+          filtered={!!(status || q || from || to || family)}
         />
       </div>
     );

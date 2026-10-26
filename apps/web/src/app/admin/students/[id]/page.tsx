@@ -49,7 +49,7 @@ export default async function AdminStudentPage({ params }: { params: Promise<{ i
               <Link href={`/dashboard/chat?studentId=${encodeURIComponent(family.id)}&studentName=${encodeURIComponent(family.name)}`} className={btn.secondary}>
                 Message family
               </Link>
-              <Link href={`/admin/invoices?userId=${encodeURIComponent(family.id)}`} className={btn.secondary}>
+              <Link href={`/admin/invoices?userId=${encodeURIComponent(family.id)}&new=1`} className={btn.secondary}>
                 Issue invoice
               </Link>
               <Link href={`/admin/assign-student?studentId=${encodeURIComponent(profile.id)}`} className={btn.primary}>

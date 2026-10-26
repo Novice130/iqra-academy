@@ -329,6 +329,10 @@ export async function POST(request: NextRequest) {
  * A payment arrives in a bank account, not through this app, so somebody has
  * to say so. Marking PAID stamps `paidAt` and fills `amountPaidCents` with
  * the full amount unless a part payment was named.
+ *
+ * The recorded payment only ever goes up here. Lowering it is a refund, and
+ * goes through api/admin/refunds, which caps it, notes it and audits it as
+ * REFUND_ISSUED; a PATCH that quietly lowered it used to leave no trace.
  */
 export async function PATCH(request: NextRequest) {
   return withDb(async () => {
@@ -347,7 +351,7 @@ export async function PATCH(request: NextRequest) {
           where: and(eq(invoices.id, data.invoiceId), orgScope(ctx, invoices.orgId)),
           columns: {
             id: true, orgId: true, status: true, amountDueCents: true,
-            amountPaidCents: true, userId: true, currency: true,
+            amountPaidCents: true, userId: true, currency: true, notes: true,
           },
         });
         if (!existing) throw new NotFoundError("Invoice");
@@ -360,6 +364,12 @@ export async function PATCH(request: NextRequest) {
         ) {
           throw new BusinessRuleError(
             "This invoice is already paid. Issue a refund rather than voiding it."
+          );
+        }
+
+        if (data.status === "VOID" && existing.amountPaidCents > 0) {
+          throw new BusinessRuleError(
+            "Money has been recorded against this invoice. Record a refund before voiding it."
           );
         }
 
@@ -378,41 +388,63 @@ export async function PATCH(request: NextRequest) {
           updates.paidAt = null;
         }
 
+        const newPaid = (updates.amountPaidCents as number | undefined) ?? existing.amountPaidCents;
+        if (newPaid < existing.amountPaidCents) {
+          throw new BusinessRuleError(
+            "That would lower the amount paid. Use Record refund on the invoice instead."
+          );
+        }
+
         const [invoice] = await tx
           .update(invoices)
           .set(updates)
           .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, existing.orgId)))
           .returning();
 
-        return { invoice, previousStatus: existing.status };
+        return { invoice, previous: existing };
       });
 
-      // Only the two statuses that move money get their own audit line.
-      // OVERDUE and OPEN are bookkeeping, and a log full of them buries the
+      const { invoice, previous } = result;
+      const paidChanged = invoice.amountPaidCents !== previous.amountPaidCents;
+      const notesChanged = (invoice.notes ?? null) !== (previous.notes ?? null);
+
+      // The statuses that move money get their own action. A payment or a
+      // note changed without one is audited too, under the closest existing
+      // action with `op` saying what happened. A bare OPEN/OVERDUE/DRAFT
+      // flip is bookkeeping and is not logged; a log full of them buries the
       // entries somebody actually goes looking for.
       const auditAction =
         data.status === "PAID"
           ? ("INVOICE_PAID" as const)
           : data.status === "VOID" || data.status === "UNCOLLECTIBLE"
             ? ("INVOICE_VOIDED" as const)
-            : null;
+            : paidChanged
+              ? ("INVOICE_PAID" as const)
+              : notesChanged
+                ? ("SETTINGS_CHANGED" as const)
+                : null;
 
       if (auditAction) {
         await logAudit({
-          orgId: result.invoice.orgId,
+          orgId: invoice.orgId,
           actorId: ctx.userId,
           action: auditAction,
-          target: `invoice:${result.invoice.id}`,
+          target: `invoice:${invoice.id}`,
           metadata: {
-            previousStatus: result.previousStatus,
-            status: result.invoice.status,
-            amountPaidCents: result.invoice.amountPaidCents,
+            op: data.status
+              ? `invoice.status.${data.status.toLowerCase()}`
+              : paidChanged ? "invoice.payment_recorded" : "invoice.notes",
+            previousStatus: previous.status,
+            status: invoice.status,
+            previousAmountPaidCents: previous.amountPaidCents,
+            amountPaidCents: invoice.amountPaidCents,
+            ...(notesChanged ? { previousNotes: previous.notes, notes: invoice.notes } : {}),
           },
           ipAddress: getClientIp(request.headers),
         });
       }
 
-      return NextResponse.json({ invoice: result.invoice });
+      return NextResponse.json({ invoice });
     } catch (error) {
       return handleApiError(error);
     }

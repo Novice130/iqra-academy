@@ -36,7 +36,11 @@ export interface InvoiceRow {
   createdAt: string;
 }
 
-export const STATUS_FILTERS = ["OPEN", "OVERDUE", "PAID", "VOID", "DRAFT", "UNCOLLECTIBLE"] as const;
+/**
+ * UNPAID is OPEN or OVERDUE whatever the due date: the same set the "Open
+ * balance" card adds up. OPEN alone means open and not yet due.
+ */
+export const STATUS_FILTERS = ["UNPAID", "OPEN", "OVERDUE", "PAID", "VOID", "DRAFT", "UNCOLLECTIBLE"] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 /** The message an API error response carries, whichever shape it came in. */

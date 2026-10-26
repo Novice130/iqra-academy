@@ -5,7 +5,7 @@
  *
  * It records money already sent back by bank transfer or Zelle; it does not
  * move money. The server caps the amount at what the invoice says was paid
- * and a full refund leaves the invoice void (see api/admin/refunds).
+ * and only a paid invoice refunded in full becomes void (see api/admin/refunds).
  */
 
 import { useState } from "react";
@@ -59,8 +59,10 @@ export default function RefundForm({
   return (
     <form onSubmit={submit} className="space-y-3 rounded-xl border border-[var(--border)] bg-[var(--bg-primary)] p-4" noValidate>
       <p className="text-xs text-[var(--text-secondary)]">
-        Records a refund you have already sent back outside the app. It does not move money. Refunding the full{" "}
-        {money(row.amountPaidCents, row.currency)} marks the invoice void.
+        Records a refund you have already sent back outside the app. It does not move money.{" "}
+        {row.status === "PAID"
+          ? `Refunding the full ${money(row.amountPaidCents, row.currency)} marks the invoice void.`
+          : "The invoice stays open, and the refunded amount is owed again."}
       </p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[10rem_1fr]">
         <div>
