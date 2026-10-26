@@ -74,6 +74,19 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
 };
 
 /**
+ * Whether a role may open the admin panel: ORG_ADMIN or anything above it.
+ * Takes a plain string because page code reads the role straight off a row.
+ */
+export function canAccessAdmin(role: string | null | undefined): boolean {
+  return (
+    role !== null &&
+    role !== undefined &&
+    role in ROLE_HIERARCHY &&
+    ROLE_HIERARCHY[role as UserRole] >= ROLE_HIERARCHY.ORG_ADMIN
+  );
+}
+
+/**
  * Extracts and validates the user's session from the request.
  * Returns null if the user is not authenticated.
  *

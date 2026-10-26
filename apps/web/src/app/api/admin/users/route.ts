@@ -21,8 +21,8 @@ import {
 } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 import { notify } from "@/lib/notify";
+import { ROOT_ADMIN_EMAIL as ROOT_SUPER_ADMIN_EMAIL } from "@/lib/root-admin";
 
-const ROOT_SUPER_ADMIN_EMAIL = "syedamer130@gmail.com";
 
 const createUserSchema = z.object({
   email: z.string().email(),

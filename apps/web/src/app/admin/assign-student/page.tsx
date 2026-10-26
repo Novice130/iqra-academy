@@ -8,7 +8,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/admin";
+import { canAccessAdmin } from "@/lib/rbac";
 import { db, withDb } from "@/lib/db";
 import { studentProfiles, users } from "@/db/schema";
 import { and, eq, inArray, isNull } from "drizzle-orm";

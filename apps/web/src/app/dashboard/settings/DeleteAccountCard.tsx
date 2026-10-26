@@ -19,6 +19,7 @@
 
 import { useEffect, useState } from "react";
 import { authClient } from "@/lib/auth-client";
+import { isRootAdminEmail } from "@/lib/root-admin";
 
 export default function DeleteAccountCard() {
   const [open, setOpen] = useState(false);
@@ -36,7 +37,7 @@ export default function DeleteAccountCard() {
       .then((d: { canDelete?: boolean; isProtected?: boolean; email?: string } | null) => {
         if (live) {
           const email = d?.email?.toLowerCase() ?? "";
-          if (d?.isProtected || email === "syedamer130@gmail.com") {
+          if (d?.isProtected || isRootAdminEmail(email)) {
             setIsProtected(true);
             setCanDelete(false);
           } else {

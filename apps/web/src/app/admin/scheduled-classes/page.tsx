@@ -10,7 +10,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/admin";
+import { canAccessAdmin } from "@/lib/rbac";
 import { db, withDb } from "@/lib/db";
 import { sessions, users } from "@/db/schema";
 import { asc, and, eq, isNull, inArray, gte } from "drizzle-orm";

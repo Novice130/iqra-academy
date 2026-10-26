@@ -17,6 +17,7 @@ import IncomingCallOverlay from "./IncomingCallOverlay";
 import PushRegistrar from "./PushRegistrar";
 import TeacherAvailabilityModal from "@/components/TeacherAvailabilityModal";
 import { authClient } from "@/lib/auth-client";
+import { NAV, navRole, isActive, moreItems, titleFor, type NavIcon, type NavGroup } from "./nav";
 
 interface DashboardUser {
   name?: string;
@@ -59,33 +60,10 @@ export default function DashboardChrome({
   }
 
   const initials = (user.name || "U").charAt(0).toUpperCase();
-  const isAdminRole =
-    user.role === "ORG_ADMIN" ||
-    user.role === "SUPER_ADMIN";
-  const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
-  const isStudentRole = !isAdminRole && !isTeacherOnly;
-  const isTeachingRole = isTeacherOnly || isAdminRole;
-
-  const tabs = isAdminRole
-    ? [
-        { href: "/admin", label: "Admin", icon: HomeIcon },
-        { href: "/admin/assign-student", label: "Assign", icon: CalendarIcon },
-        { href: "/dashboard/attendance", label: "Attendance", icon: ChartIcon },
-        { href: "/admin/users", label: "Users", icon: PeopleIcon },
-      ]
-    : isTeacherOnly
-    ? [
-        { href: "/dashboard/teacher", label: "Home", icon: HomeIcon },
-        { href: "/dashboard/schedule", label: "Schedule", icon: CalendarIcon },
-        { href: "/dashboard/teacher/students", label: "Students", icon: PeopleIcon },
-        { href: "/dashboard/teacher/messages", label: "Messages", icon: ChatIcon },
-      ]
-    : [
-        { href: "/dashboard", label: "Home", icon: HomeIcon },
-        { href: "/dashboard/booking", label: "Book", icon: CalendarIcon },
-        { href: "/dashboard/progress", label: "Progress", icon: ChartIcon },
-        { href: "/dashboard/chat", label: "Messages", icon: ChatIcon },
-      ];
+  const role = navRole(user.role);
+  const nav = NAV[role];
+  const isTeachingRole = role !== "student";
+  const tabs = nav.tabs;
 
   return (
     <div
@@ -123,90 +101,7 @@ export default function DashboardChrome({
 
         {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5">
-          {/* Admin Navigation */}
-          {isAdminRole && (
-            <>
-              <div className="pb-1.5 px-3">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
-                >
-                  Admin Management
-                </div>
-              </div>
-              <SidebarItem href="/admin" label="Overview" />
-              <SidebarItem href="/admin/live-classes" label="Live Classes" />
-              <SidebarItem href="/admin/scheduled-classes" label="Scheduled Classes" />
-              <SidebarItem href="/admin/teacher-schedules" label="Teacher Schedules" />
-              <SidebarItem href="/admin/assign-student" label="Assign Students" />
-              <SidebarItem href="/dashboard/attendance" label="Attendance Logs" />
-              <SidebarItem href="/admin/users" label="Users & Roles" />
-              <SidebarItem href="/admin/invoices" label="Invoices & Billing" />
-              <SidebarItem href="/join" label="📹 Join with Code" />
-
-              <div className="pt-5 pb-1.5 px-3">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-widest"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  Account
-                </div>
-              </div>
-              <SidebarItem href="/dashboard/settings" label="Settings" />
-            </>
-          )}
-
-          {/* Teacher Navigation */}
-          {isTeacherOnly && (
-            <>
-              <div className="pb-1.5 px-3">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-widest text-emerald-600 dark:text-emerald-400"
-                >
-                  Teaching
-                </div>
-              </div>
-              <SidebarItem href="/dashboard/teacher" label="Teacher Home" />
-              <SidebarItem href="/dashboard/teacher/messages" label="Messages" />
-              <SidebarItem href="/dashboard/teacher/students" label="My Students" />
-              <SidebarItem href="/dashboard/teacher/availability" label="Availability" />
-              <SidebarItem href="/dashboard/attendance" label="Attendance" />
-              <SidebarItem href="/dashboard/schedule" label="Schedule" />
-              <SidebarItem href="/join" label="📹 Join with Code" />
-
-              <div className="pt-5 pb-1.5 px-3">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-widest"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  Account
-                </div>
-              </div>
-              <SidebarItem href="/dashboard/settings" label="Settings" />
-            </>
-          )}
-
-          {/* Student Navigation */}
-          {isStudentRole && (
-            <>
-              <SidebarItem href="/dashboard" label="Home" />
-              <SidebarItem href="/dashboard/booking" label="Book a Class" />
-              <SidebarItem href="/dashboard/progress" label="Progress" />
-              <SidebarItem href="/dashboard/chat" label="Messages" />
-              <SidebarItem href="/dashboard/schedule" label="Schedule" />
-              <SidebarItem href="/join" label="📹 Join with Code" />
-
-              <div className="pt-5 pb-1.5 px-3">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-widest"
-                  style={{ color: "var(--text-tertiary)" }}
-                >
-                  Account
-                </div>
-              </div>
-              <SidebarItem href="/dashboard/settings" label="Settings" />
-              <SidebarItem href="/dashboard/billing" label="Billing" />
-            </>
-          )}
+          <NavGroups groups={nav.groups} />
         </nav>
 
         {/* User */}
@@ -260,10 +155,7 @@ export default function DashboardChrome({
         </div>
         <nav className="flex-1 flex flex-col items-center gap-2 w-full px-1">
           {tabs.map((tab) => {
-            const active =
-              tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
-                ? pathname === tab.href
-                : (pathname?.startsWith(tab.href) ?? false);
+            const active = isActive(tab.href, pathname);
             return (
               <Link
                 key={tab.href}
@@ -275,7 +167,7 @@ export default function DashboardChrome({
                     : "text-[var(--text-tertiary)] hover:bg-white/5 hover:text-[var(--text-primary)]"
                 }`}
               >
-                <tab.icon filled={active} />
+                <TabIcon icon={tab.icon} filled={active} />
               </Link>
             );
           })}
@@ -317,7 +209,7 @@ export default function DashboardChrome({
             </div>
             <div className="hidden lg:flex items-center gap-2">
               <span className="text-xs font-semibold uppercase tracking-wider text-neutral-400">
-                {titleFor(pathname ?? "", isTeachingRole)}
+                {titleFor(pathname ?? "", role)}
               </span>
             </div>
           </div>
@@ -378,46 +270,7 @@ export default function DashboardChrome({
                 </div>
 
                 <nav className="p-2 space-y-0.5 max-h-[60vh] overflow-auto">
-                  {isAdminRole && (
-                    <>
-                      <SidebarItem href="/admin" label="Overview" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/live-classes" label="Live Classes" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/assign-student" label="Assign Students" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/attendance" label="Attendance Logs" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/users" label="Users & Roles" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/admin/invoices" label="Invoices & Billing" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
-                    </>
-                  )}
-
-                  {isTeacherOnly && (
-                    <>
-                      <SidebarItem href="/dashboard/teacher" label="Teacher Home" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/teacher/messages" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/teacher/students" label="My Students" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/teacher/availability" label="Availability" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/attendance" label="Attendance" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
-                    </>
-                  )}
-
-                  {isStudentRole && (
-                    <>
-                      <SidebarItem href="/dashboard" label="Home" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/booking" label="Book a Class" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/progress" label="Progress" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/chat" label="Messages" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/schedule" label="Schedule" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/join" label="📹 Join with Code" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/settings" label="Settings" onNavigate={() => setMobileMenuOpen(false)} />
-                      <SidebarItem href="/dashboard/billing" label="Billing" onNavigate={() => setMobileMenuOpen(false)} />
-                    </>
-                  )}
+                  <NavGroups groups={nav.groups} onNavigate={() => setMobileMenuOpen(false)} />
                 </nav>
 
                 <div className="p-2" style={{ borderTop: "1px solid var(--border)" }}>
@@ -449,17 +302,14 @@ export default function DashboardChrome({
           aria-label="Mobile Navigation"
         >
           {tabs.map((tab) => {
-            const active =
-              tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
-                ? pathname === tab.href
-                : (pathname?.startsWith(tab.href) ?? false);
+            const active = isActive(tab.href, pathname);
             return (
               <Link
                 key={tab.href}
                 href={tab.href}
                 className={`app-tab${active ? " is-active text-[var(--accent)] font-semibold" : ""}`}
               >
-                <tab.icon filled={active} />
+                <TabIcon icon={tab.icon} filled={active} />
                 <span>{tab.label}</span>
               </Link>
             );
@@ -515,34 +365,12 @@ function AppChrome({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [moreOpen, closeMore]);
 
-  const isAdminRole =
-    user.role === "ORG_ADMIN" ||
-    user.role === "SUPER_ADMIN";
-  const isTeacherOnly = user.role === "TEACHER" && !isAdminRole;
-  const isTeachingRole = isTeacherOnly || isAdminRole;
+  const role = navRole(user.role);
+  const nav = NAV[role];
+  const isTeachingRole = role !== "student";
+  const tabs = nav.tabs;
 
-  const tabs = isAdminRole
-    ? [
-        { href: "/admin", label: "Admin", icon: HomeIcon },
-        { href: "/admin/assign-student", label: "Assign", icon: CalendarIcon },
-        { href: "/dashboard/attendance", label: "Attendance", icon: ChartIcon },
-        { href: "/admin/users", label: "Users", icon: PeopleIcon },
-      ]
-    : isTeacherOnly
-    ? [
-        { href: "/dashboard/teacher", label: "Home", icon: HomeIcon },
-        { href: "/dashboard/schedule", label: "Schedule", icon: CalendarIcon },
-        { href: "/dashboard/teacher/students", label: "Students", icon: PeopleIcon },
-        { href: "/dashboard/teacher/messages", label: "Messages", icon: ChatIcon },
-      ]
-    : [
-        { href: "/dashboard", label: "Home", icon: HomeIcon },
-        { href: "/dashboard/booking", label: "Book", icon: CalendarIcon },
-        { href: "/dashboard/progress", label: "Progress", icon: ChartIcon },
-        { href: "/dashboard/chat", label: "Messages", icon: ChatIcon },
-      ];
-
-  const title = titleFor(pathname, isTeachingRole);
+  const title = titleFor(pathname, role);
   const isHome = pathname === "/dashboard" || pathname === "/dashboard/teacher" || pathname === "/admin";
 
   return (
@@ -562,13 +390,10 @@ function AppChrome({
 
       <nav className="app-tabbar" aria-label="Main">
         {tabs.map((tab) => {
-          const active =
-            tab.href === "/dashboard" || tab.href === "/dashboard/teacher" || tab.href === "/admin"
-              ? pathname === tab.href
-              : pathname.startsWith(tab.href);
+          const active = isActive(tab.href, pathname);
           return (
             <Link key={tab.href} href={tab.href} className={`app-tab${active ? " is-active" : ""}`}>
-              <tab.icon filled={active} />
+              <TabIcon icon={tab.icon} filled={active} />
               <span>{tab.label}</span>
             </Link>
           );
@@ -601,32 +426,9 @@ function AppChrome({
               </div>
             </div>
             <div className="app-sheet-list">
-              {isAdminRole && (
-                <>
-                  <SheetLink href="/admin/live-classes" label="Live Classes" onNavigate={closeMore} />
-                  <SheetLink href="/admin/scheduled-classes" label="Scheduled Classes" onNavigate={closeMore} />
-                  <SheetLink href="/admin/teacher-schedules" label="Teacher Schedules" onNavigate={closeMore} />
-                  <SheetLink href="/admin/invoices" label="Invoices & Billing" onNavigate={closeMore} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
-                </>
-              )}
-              {isTeacherOnly && (
-                <>
-                  <SheetLink href="/dashboard/teacher/availability" label="Availability" onNavigate={closeMore} />
-                  <SheetLink href="/dashboard/attendance" label="Attendance" onNavigate={closeMore} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
-                </>
-              )}
-              {!isAdminRole && !isTeacherOnly && (
-                <>
-                  <SheetLink href="/dashboard/schedule" label="Schedule" onNavigate={closeMore} />
-                  <SheetLink href="/join" label="📹 Join with Code" onNavigate={closeMore} />
-                  <SheetLink href="/dashboard/settings" label="Settings" onNavigate={closeMore} />
-                  <SheetLink href="/dashboard/billing" label="Billing" onNavigate={closeMore} />
-                </>
-              )}
+              {moreItems(nav).map((item) => (
+                <SheetLink key={item.href} href={item.href} label={item.label} onNavigate={closeMore} />
+              ))}
             </div>
             <button
               onClick={() => {
@@ -642,37 +444,6 @@ function AppChrome({
       )}
     </div>
   );
-}
-
-function titleFor(pathname: string, isTeachingRole: boolean): string {
-  if (pathname.startsWith("/dashboard/teacher/students/")) {
-    return "Student Details";
-  }
-  if (pathname === "/join" || pathname.startsWith("/join/")) {
-    return "Join Class";
-  }
-  const map: Record<string, string> = {
-    "/admin": "Admin Overview",
-    "/admin/live-classes": "Live Classes Monitor",
-    "/admin/scheduled-classes": "Scheduled Classes",
-    "/admin/teacher-schedules": "Teacher Schedules",
-    "/admin/assign-student": "Assign Students",
-    "/admin/users": "Users & Roles",
-    "/admin/invoices": "Invoices & Billing",
-    "/dashboard": "Home",
-    "/dashboard/booking": "Book a Class",
-    "/dashboard/progress": "Progress",
-    "/dashboard/chat": "Messages",
-    "/dashboard/schedule": "Schedule",
-    "/dashboard/settings": "Settings",
-    "/dashboard/billing": "Billing",
-    "/dashboard/teacher": "Home",
-    "/dashboard/teacher/messages": "Messages",
-    "/dashboard/teacher/students": "My Students",
-    "/dashboard/teacher/availability": "Availability",
-    "/dashboard/attendance": "Attendance",
-  };
-  return map[pathname] ?? (isTeachingRole ? "Teaching" : "Novice Tutor");
 }
 
 function SheetLink({ href, label, onNavigate }: { href: string; label: string; onNavigate: () => void }) {
@@ -737,6 +508,51 @@ function PeopleIcon({ filled }: { filled?: boolean }) {
   );
 }
 
+function NavGroups({ groups, onNavigate }: { groups: NavGroup[]; onNavigate?: () => void }) {
+  return (
+    <>
+      {groups.map((group, i) => (
+        <div key={group.label ?? i} className={i > 0 ? "pt-4" : ""}>
+          {group.label && (
+            <div className="pb-1.5 px-3 text-[11px] font-semibold uppercase tracking-widest" style={{ color: "var(--text-tertiary)" }}>
+              {group.label}
+            </div>
+          )}
+          {group.items.map((item) => (
+            <SidebarItem key={item.href} href={item.href} label={item.label} onNavigate={onNavigate} />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
+function TabIcon({ icon, filled }: { icon: NavIcon; filled?: boolean }) {
+  switch (icon) {
+    case "home":
+      return <HomeIcon filled={filled} />;
+    case "calendar":
+      return <CalendarIcon filled={filled} />;
+    case "chart":
+      return <ChartIcon filled={filled} />;
+    case "chat":
+      return <ChatIcon filled={filled} />;
+    case "people":
+      return <PeopleIcon filled={filled} />;
+    case "receipt":
+      return <ReceiptIcon filled={filled} />;
+  }
+}
+
+function ReceiptIcon({ filled }: { filled?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.8">
+      <path d="M6 3h12v18l-3-2-3 2-3-2-3 2z" strokeLinejoin="round" />
+      <path d="M9 8h6M9 12h6" strokeLinecap="round" stroke={filled ? "var(--bg-elevated)" : "currentColor"} />
+    </svg>
+  );
+}
+
 function SidebarItem({
   href,
   label,
@@ -747,10 +563,7 @@ function SidebarItem({
   onNavigate?: () => void;
 }) {
   const pathname = usePathname();
-  const active =
-    href === "/admin" || href === "/dashboard" || href === "/dashboard/teacher"
-      ? pathname === href
-      : (pathname?.startsWith(href) ?? false);
+  const active = isActive(href, pathname);
 
   return (
     <Link

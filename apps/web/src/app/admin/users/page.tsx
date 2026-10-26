@@ -9,7 +9,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { headers } from "next/headers";
 import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/admin";
+import { canAccessAdmin } from "@/lib/rbac";
 import { db, withDb } from "@/lib/db";
 import { users } from "@/db/schema";
 import { and, desc, eq, isNull } from "drizzle-orm";

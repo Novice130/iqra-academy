@@ -55,6 +55,7 @@ import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
 import { notify, getAdminRecipients } from "@/lib/notify";
+import { ROOT_ADMIN_EMAIL, isRootAdminEmail } from "@/lib/root-admin";
 
 const schema = z.object({
   /**
@@ -80,7 +81,7 @@ export async function GET(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const isRootAdmin = ctx.email?.toLowerCase() === "syedamer130@gmail.com";
+      const isRootAdmin = isRootAdminEmail(ctx.email);
 
       return NextResponse.json({
         role: ctx.role,
@@ -103,9 +104,9 @@ export async function DELETE(request: NextRequest) {
 
       schema.parse(await request.json().catch(() => ({})));
 
-      if (ctx.email?.toLowerCase() === "syedamer130@gmail.com") {
+      if (isRootAdminEmail(ctx.email)) {
         throw new ForbiddenError(
-          "The root administrator account (syedamer130@gmail.com) is permanently protected and cannot be deleted."
+          `The root administrator account (${ROOT_ADMIN_EMAIL}) is permanently protected and cannot be deleted.`
         );
       }
       if (ctx.isImpersonating) {
