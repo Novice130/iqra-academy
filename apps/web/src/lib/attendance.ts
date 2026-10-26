@@ -22,7 +22,7 @@
 import { and, eq, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bookings, sessionAttendance, sessions, studentProfiles, users } from "@/db/schema";
-import { groupIntoOccurrences } from "@/lib/class-room";
+import { groupIntoOccurrences, SIBLING_WINDOW_MS } from "@/lib/class-room";
 
 /**
  * Fill `leftAt`/`durationSeconds` on still-open attendance rows.
@@ -366,10 +366,26 @@ export async function getAttendanceStats(opts: {
     conditions.push(eq(sessions.teacherId, opts.teacherId));
   }
 
+  // A student's booking sits on their own session row, but attendance is
+  // recorded on the occurrence's canonical row — whichever sibling row the
+  // room was opened from (see lib/class-room.ts). Matching attendance to the
+  // booking's own row only counted students whose row happened to be the
+  // canonical one, so group classes read as mostly absent. Match on the
+  // occurrence instead: same teacher, start within SIBLING_WINDOW_MS.
+  const windowSeconds = SIBLING_WINDOW_MS / 1000;
+  const attendedOccurrence = sql`exists (
+    select 1 from ${sessionAttendance} sa
+    join ${sessions} s2 on s2.id = sa.session_id
+    where sa.user_id = ${bookings.userId}
+      and sa.role = 'STUDENT'
+      and s2.teacher_id = ${sessions.teacherId}
+      and abs(extract(epoch from (s2.scheduled_start - ${sessions.scheduledStart}))) <= ${windowSeconds}
+  )`;
+
   const res = await db
     .select({
       expected: sql<number>`count(distinct ${bookings.id})::int`,
-      attended: sql<number>`count(distinct case when ${sessionAttendance.id} is not null then ${bookings.id} end)::int`,
+      attended: sql<number>`count(distinct case when ${attendedOccurrence} then ${bookings.id} end)::int`,
     })
     .from(sessions)
     .innerJoin(
@@ -377,14 +393,6 @@ export async function getAttendanceStats(opts: {
       and(
         eq(bookings.sessionId, sessions.id),
         ne(bookings.status, "CANCELLED")
-      )
-    )
-    .leftJoin(
-      sessionAttendance,
-      and(
-        eq(sessionAttendance.sessionId, sessions.id),
-        eq(sessionAttendance.userId, bookings.userId),
-        eq(sessionAttendance.role, "STUDENT")
       )
     )
     .where(and(...conditions));
