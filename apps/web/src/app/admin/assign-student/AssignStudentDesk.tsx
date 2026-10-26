@@ -1,8 +1,22 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+/**
+ * @fileoverview The booking form behind /admin/assign-student.
+ *
+ * Sends the date and time as typed plus the zone they were typed in; the API
+ * turns that into an instant (and steps it a week at a time for repeats).
+ * Building the instant here with `new Date("…T17:30")` would use the device
+ * zone, which is wrong whenever the account has its own zone.
+ *
+ * For a SUPER_ADMIN the teacher list is narrowed to the chosen student's org,
+ * because the API refuses a booking across two orgs.
+ */
+
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useViewerTimeZone } from "@/components/LocalTime";
+import { Panel, btn, input, label } from "@/app/admin/_components/ui";
+import AssignResult, { type AssignOutcome } from "./AssignResult";
 
 export interface StudentProfileOption {
   id: string;
@@ -10,267 +24,222 @@ export interface StudentProfileOption {
   userId: string;
   userEmail: string;
   track: string;
+  orgId: string;
+  /** Set for a SUPER_ADMIN, who sees every org. */
+  orgName: string | null;
 }
 
 export interface TeacherOption {
   id: string;
-  name: string | null;
+  name: string;
   email: string;
   timezone: string | null;
+  orgId: string;
 }
+
+export interface AssignPrefill {
+  studentId: string | null;
+  teacherId: string | null;
+  date: string | null;
+  time: string | null;
+  timeZone: string | null;
+}
+
+const TRACKS = [
+  { value: "QAIDAH", label: "Qaidah" },
+  { value: "QURAN_READING", label: "Quran reading" },
+  { value: "HIFZ", label: "Hifz" },
+];
 
 export default function AssignStudentDesk({
   students,
   teachers,
+  prefill,
+  defaultDate,
 }: {
   students: StudentProfileOption[];
   teachers: TeacherOption[];
+  prefill: AssignPrefill;
+  defaultDate: string;
 }) {
   const router = useRouter();
-  const [selectedStudent, setSelectedStudent] = useState<string>(students[0]?.id || "");
-  const [selectedTeacher, setSelectedTeacher] = useState<string>(teachers[0]?.id || "");
-  const [track, setTrack] = useState<string>("QAIDAH");
-  const [scheduledDate, setScheduledDate] = useState<string>(
-    new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-  );
-  const [scheduledTime, setScheduledTime] = useState<string>("10:00");
-  const [durationMinutes, setDurationMinutes] = useState<number>(30);
-  const [customTitle, setCustomTitle] = useState<string>("");
+  const viewerZone = useViewerTimeZone();
+  const zone = prefill.timeZone || viewerZone;
+
+  // A prefilled teacher decides the org when no student was given.
+  const prefillTeacher = teachers.find((t) => t.id === prefill.teacherId);
+  const firstStudent =
+    students.find((s) => s.id === prefill.studentId) ??
+    (prefillTeacher ? students.find((s) => s.orgId === prefillTeacher.orgId) : undefined) ??
+    students[0];
+
+  const [studentId, setStudentId] = useState(firstStudent?.id ?? "");
+  const student = students.find((s) => s.id === studentId);
+  const orgTeachers = useMemo(() => teachers.filter((t) => !student || t.orgId === student.orgId), [teachers, student]);
+  const [teacherChoice, setTeacherChoice] = useState(prefillTeacher?.id ?? "");
+  // Fall back to the org's first teacher whenever the chosen one is not in it.
+  const teacherId = orgTeachers.some((t) => t.id === teacherChoice) ? teacherChoice : orgTeachers[0]?.id ?? "";
+  const teacher = orgTeachers.find((t) => t.id === teacherId);
+
+  const [track, setTrack] = useState(firstStudent?.track ?? "QAIDAH");
+  const [date, setDate] = useState(prefill.date ?? defaultDate);
+  const [time, setTime] = useState(prefill.time ?? "17:00");
+  const [duration, setDuration] = useState(30);
+  const [repeatWeeks, setRepeatWeeks] = useState(1);
+  const [title, setTitle] = useState("");
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
+  const [outcome, setOutcome] = useState<AssignOutcome | null>(null);
 
-  const activeStudent = students.find((s) => s.id === selectedStudent);
-  const activeTeacher = teachers.find((t) => t.id === selectedTeacher);
-
-  const handleSubmit = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedStudent || !selectedTeacher) {
-      setError("Please select both a student and a teacher.");
-      return;
-    }
-
+    if (!studentId || !teacherId) return setError("Choose a student and a teacher.");
+    if (!zone) return setError("Your time zone is still loading. Try again in a moment.");
     setSaving(true);
     setError(null);
-    setSuccess(null);
-
+    setOutcome(null);
     try {
-      const scheduledStart = new Date(`${scheduledDate}T${scheduledTime}:00`).toISOString();
       const res = await fetch("/api/admin/assign-student", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          studentProfileId: selectedStudent,
-          teacherId: selectedTeacher,
+          studentProfileId: studentId,
+          teacherId,
           track,
-          scheduledStart,
-          durationMinutes,
-          title: customTitle.trim() || undefined,
+          date,
+          time,
+          timeZone: zone,
+          durationMinutes: duration,
+          repeatWeeks,
+          title: title.trim() || undefined,
         }),
       });
-
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to assign student.");
-
-      setSuccess(`✓ Successfully assigned ${activeStudent?.name} to teacher ${activeTeacher?.name || activeTeacher?.email}!`);
-      setTimeout(() => {
-        router.refresh();
-      }, 1500);
-    } catch (err: any) {
-      setError(err.message || "An error occurred.");
+      const data = await res.json().catch(() => ({}));
+      if (Array.isArray(data.created)) {
+        setOutcome({ message: data.message, error: data.error, created: data.created, skipped: data.skipped ?? [] });
+        if (data.created.length > 0) router.refresh();
+      } else {
+        const detail = Array.isArray(data.details) ? data.details.map((d: { message: string }) => d.message).join(" ") : "";
+        setError(detail || data.error || `Request failed (${res.status}).`);
+      }
+    } catch {
+      setError("Network error. Check your connection and try again.");
     } finally {
       setSaving(false);
     }
   };
 
+  if (students.length === 0 || teachers.length === 0) {
+    return (
+      <Panel>
+        <p className="text-sm text-[var(--text-secondary)]">
+          {students.length === 0 ? "There are no student profiles yet." : "There are no teachers yet. Give someone the teacher role first."}
+        </p>
+      </Panel>
+    );
+  }
+
   return (
-    <div className="space-y-6 max-w-4xl">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="text-2xl">🎓</span>
-            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              Assign Student to Teacher
-            </h1>
-          </div>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">
-            Pair students with qualified teachers and schedule their Quran lessons.
-          </p>
-        </div>
-
-        <Link
-          href="/admin"
-          className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition self-start sm:self-auto"
-        >
-          ← Back to Admin
-        </Link>
-      </div>
-
-      {error && (
-        <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-600 dark:text-red-400 text-sm font-medium">
-          {error}
-        </div>
-      )}
-
-      {success && (
-        <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 text-sm font-medium">
-          {success}
-        </div>
-      )}
-
-      {/* Assignment Form */}
-      <form onSubmit={handleSubmit} className="p-6 sm:p-8 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm space-y-6">
-        <div className="grid sm:grid-cols-2 gap-6">
-          {/* Student Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Select Student Profile *
-            </label>
-            {students.length === 0 ? (
-              <div className="p-3 text-xs text-[var(--text-tertiary)] bg-[var(--bg-secondary)] rounded-xl border border-[var(--border)]">
-                No student profiles found.
-              </div>
-            ) : (
+    <div className="space-y-6 max-w-3xl">
+      <Panel title="Class details">
+        <form onSubmit={submit} className="space-y-5" aria-describedby={error ? "assign-error" : undefined}>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="assign-student" className={label}>Student</label>
               <select
-                value={selectedStudent}
-                onChange={(e) => setSelectedStudent(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                id="assign-student"
+                value={studentId}
+                onChange={(e) => {
+                  setStudentId(e.target.value);
+                  const next = students.find((s) => s.id === e.target.value);
+                  if (next) setTrack(next.track);
+                }}
+                className={input}
               >
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.name} ({s.userEmail}) • {s.track}
+                    {s.name} ({s.userEmail}){s.orgName ? ` · ${s.orgName}` : ""}
                   </option>
                 ))}
               </select>
-            )}
-          </div>
-
-          {/* Teacher Selector */}
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Select Teacher *
-            </label>
-            {teachers.length === 0 ? (
-              <div className="p-3 text-xs text-[var(--text-tertiary)] bg-[var(--bg-secondary)] rounded-xl border border-[var(--border)]">
-                No teachers available. Promote a user to teacher first.
-              </div>
-            ) : (
-              <select
-                value={selectedTeacher}
-                onChange={(e) => setSelectedTeacher(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-              >
-                {teachers.map((t) => (
+            </div>
+            <div>
+              <label htmlFor="assign-teacher" className={label}>Teacher</label>
+              <select id="assign-teacher" value={teacherId} onChange={(e) => setTeacherChoice(e.target.value)} className={input} disabled={orgTeachers.length === 0}>
+                {orgTeachers.length === 0 && <option value="">No teachers in this student&apos;s school</option>}
+                {orgTeachers.map((t) => (
                   <option key={t.id} value={t.id}>
-                    {t.name || t.email} ({t.email})
+                    {t.name}{t.timezone ? ` (${t.timezone})` : ""}
                   </option>
                 ))}
               </select>
-            )}
-          </div>
-        </div>
-
-        {/* Track & Duration */}
-        <div className="grid sm:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Curriculum Track
-            </label>
-            <select
-              value={track}
-              onChange={(e) => setTrack(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-            >
-              <option value="QAIDAH">Noorani Qaida (Beginner)</option>
-              <option value="NAZRA">Nazra Quran (Reading)</option>
-              <option value="HIFZ">Hifz (Memorization)</option>
-              <option value="TAJWEED">Tajweed Rules & Practice</option>
-              <option value="ARABIC">Quranic Arabic</option>
-            </select>
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Lesson Duration
-            </label>
-            <select
-              value={durationMinutes}
-              onChange={(e) => setDurationMinutes(Number(e.target.value))}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-            >
-              <option value={30}>30 Minutes</option>
-              <option value={45}>45 Minutes</option>
-              <option value={60}>60 Minutes (1 Hour)</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Date & Time */}
-        <div className="grid sm:grid-cols-2 gap-6">
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Scheduled Date *
-            </label>
-            <input
-              type="date"
-              value={scheduledDate}
-              onChange={(e) => setScheduledDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-              Start Time *
-            </label>
-            <input
-              type="time"
-              value={scheduledTime}
-              onChange={(e) => setScheduledTime(e.target.value)}
-              className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-            />
-          </div>
-        </div>
-
-        {/* Custom Class Title */}
-        <div className="space-y-2">
-          <label className="text-xs font-bold uppercase tracking-wider text-[var(--text-secondary)]">
-            Custom Session Title (Optional)
-          </label>
-          <input
-            type="text"
-            placeholder={`e.g. ${activeStudent?.name || "Student"}'s Quran Class with ${activeTeacher?.name || "Teacher"}`}
-            value={customTitle}
-            onChange={(e) => setCustomTitle(e.target.value)}
-            className="w-full px-3.5 py-2.5 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-[var(--text-primary)] text-sm placeholder:text-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-          />
-        </div>
-
-        {/* Summary Card */}
-        <div className="p-4 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] flex items-center justify-between">
-          <div className="text-xs text-[var(--text-secondary)] space-y-0.5">
-            <div>
-              <strong className="text-[var(--text-primary)]">Student:</strong> {activeStudent?.name || "—"} ({activeStudent?.userEmail})
             </div>
             <div>
-              <strong className="text-[var(--text-primary)]">Teacher:</strong> {activeTeacher?.name || activeTeacher?.email || "—"}
+              <label htmlFor="assign-track" className={label}>Track</label>
+              <select id="assign-track" value={track} onChange={(e) => setTrack(e.target.value)} className={input}>
+                {TRACKS.map((t) => (
+                  <option key={t.value} value={t.value}>{t.label}</option>
+                ))}
+              </select>
             </div>
             <div>
-              <strong className="text-[var(--text-primary)]">Schedule:</strong> {scheduledDate} at {scheduledTime} ({durationMinutes} mins)
+              <label htmlFor="assign-duration" className={label}>Length</label>
+              <select id="assign-duration" value={duration} onChange={(e) => setDuration(Number(e.target.value))} className={input}>
+                {[30, 45, 60].map((m) => (
+                  <option key={m} value={m}>{m} minutes</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="assign-date" className={label}>{repeatWeeks > 1 ? "First class date" : "Date"}</label>
+              <input id="assign-date" type="date" required value={date} onChange={(e) => setDate(e.target.value)} className={input} />
+            </div>
+            <div>
+              <label htmlFor="assign-time" className={label}>
+                Start time {zone && <span className="font-normal">({zone})</span>}
+              </label>
+              <input id="assign-time" type="time" required value={time} onChange={(e) => setTime(e.target.value)} className={input} />
+            </div>
+            <div>
+              <label htmlFor="assign-repeat" className={label}>Repeat weekly</label>
+              <select id="assign-repeat" value={repeatWeeks} onChange={(e) => setRepeatWeeks(Number(e.target.value))} className={input}>
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
+                  <option key={n} value={n}>{n === 1 ? "Just this once" : `For ${n} weeks`}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="assign-title" className={label}>Title (optional)</label>
+              <input
+                id="assign-title"
+                type="text"
+                maxLength={120}
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder={`${track} Lesson with ${teacher?.name ?? "teacher"}`}
+                className={input}
+              />
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={saving || !selectedStudent || !selectedTeacher}
-            className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-md disabled:opacity-50 transition cursor-pointer"
-          >
-            {saving ? "Assigning..." : "Assign & Schedule Class"}
-          </button>
-        </div>
-      </form>
+          {error && (
+            <p id="assign-error" role="alert" className="text-sm font-medium text-[var(--color-danger)]">{error}</p>
+          )}
+
+          <div className="flex flex-col gap-3 border-t border-[var(--border)] pt-4 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-xs text-[var(--text-secondary)]">
+              {student?.name ?? "Student"} with {teacher?.name ?? "teacher"}, {date} at {time}
+              {repeatWeeks > 1 ? `, then the same time weekly for ${repeatWeeks} weeks` : ""}. Weeks that clash are skipped and listed.
+            </p>
+            <button type="submit" className={btn.primary} disabled={saving || !studentId || !teacherId}>
+              {saving ? "Booking…" : repeatWeeks > 1 ? `Book ${repeatWeeks} classes` : "Book class"}
+            </button>
+          </div>
+        </form>
+      </Panel>
+
+      {outcome && <AssignResult outcome={outcome} />}
     </div>
   );
 }

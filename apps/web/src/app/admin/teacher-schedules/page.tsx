@@ -1,241 +1,185 @@
 /**
- * @fileoverview Teacher Schedules Spreadsheet Page
+ * @fileoverview /admin/teacher-schedules — one week, teachers down the side,
+ * days across: availability, booked classes and time off.
  *
- * Route: /admin/teacher-schedules
- * Server component that aggregates teacher availability, time-off, and scheduled sessions
- * for the selected week, rendering the dense TeacherSpreadsheet.
+ * THE WEEK IS THE VIEWER'S WEEK. It used to be computed with date-fns in the
+ * server's zone (UTC in production) and then `addDays(start, 7)` was pushed
+ * to 23:59, which made an eight-day "week" starting at the wrong midnight for
+ * everyone not in UTC. Now: Sunday 00:00 to the next Sunday 00:00 in the
+ * viewer's zone, exactly seven days, and every day boundary and half-hour
+ * slot is computed here as an instant so the client only formats.
+ *
+ * Availability is stored as wall-clock ranges in each *teacher's* zone; it is
+ * expanded to instants with lib/slots.ts `expandAvailability`, the same code
+ * that offers slots to families, so this grid and the booking page agree.
  */
 
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/rbac";
-import { db, withDb } from "@/lib/db";
-import { users, teacherAvailability, teacherTimeOff, sessions } from "@/db/schema";
-import { startOfWeek, addDays } from "date-fns";
-import { asc, and, eq, isNull, inArray, gte, lte } from "drizzle-orm";
-import TeacherSpreadsheet, { type TeacherScheduleData } from "./TeacherSpreadsheet";
+import { and, asc, eq, gt, gte, inArray, isNull, lt } from "drizzle-orm";
+import { db, withHttpDb } from "@/lib/db";
+import { sessions, teacherAvailability, teacherTimeOff, users } from "@/db/schema";
+import { orgFilter, requireAdminPage } from "@/lib/admin-page";
+import { resolveViewerZone } from "@/lib/viewer-zone";
+import { expandAvailability, wallClockRoundTrips, zonedDayParts, zonedWallClockToInstant } from "@/lib/slots";
+import { addDaysToDateKey } from "@/lib/admin-scheduling";
+import { EmptyState, PageHeader, Panel, btn } from "@/app/admin/_components/ui";
+import TeacherSpreadsheet, { type ScheduleDay, type TeacherScheduleData } from "./TeacherSpreadsheet";
+
+export const dynamic = "force-dynamic";
 
 interface Props {
   searchParams: Promise<{ week?: string }>;
 }
 
-export default async function AdminTeacherSchedulesPage({ searchParams }: Props) {
-  return withDb(async () => {
-    const p = await searchParams;
-    const weekOffset = parseInt(p.week || "0", 10) || 0;
+const WEEKDAYS = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"];
+const FIRST_HOUR = 6;
+const LAST_HOUR = 22;
 
-    const headersList = await headers();
-    const session = await auth.api.getSession({ headers: headersList });
-    if (!session) redirect("/login?redirect=/admin/teacher-schedules");
+function parts(key: string): [number, number, number] {
+  const [y, m, d] = key.split("-").map(Number);
+  return [y, m, d];
+}
 
-    const dbUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-      columns: { id: true, role: true, orgId: true },
-    });
+/** Seven days of the requested week in `zone`, with their half-hour slots. */
+function buildWeek(zone: string, weekOffset: number): ScheduleDay[] {
+  const today = zonedDayParts(new Date(), zone);
+  const todayKey = `${today.y}-${String(today.m).padStart(2, "0")}-${String(today.d).padStart(2, "0")}`;
+  const sunday = addDaysToDateKey(todayKey, -WEEKDAYS.indexOf(today.weekday) + weekOffset * 7);
 
-    const role = dbUser?.role || "STUDENT";
-    if (!canAccessAdmin(role) || !dbUser?.orgId) {
-      redirect("/dashboard?error=unauthorized");
+  return Array.from({ length: 7 }, (_, i) => {
+    const key = addDaysToDateKey(sunday, i);
+    const next = addDaysToDateKey(sunday, i + 1);
+    const slots: ScheduleDay["slots"] = [];
+    for (let h = FIRST_HOUR; h <= LAST_HOUR; h++) {
+      for (const m of [0, 30]) {
+        const at = zonedWallClockToInstant(...parts(key), h, m, zone);
+        // A half hour lost to the spring-forward change does not exist.
+        if (!wallClockRoundTrips(at, zone, h, m)) continue;
+        slots.push({ label: `${String(h).padStart(2, "0")}:${m === 0 ? "00" : "30"}`, iso: at.toISOString() });
+      }
     }
+    return {
+      key,
+      startIso: zonedWallClockToInstant(...parts(key), 0, 0, zone).toISOString(),
+      endIso: zonedWallClockToInstant(...parts(next), 0, 0, zone).toISOString(),
+      slots,
+    };
+  });
+}
 
-    const isSuperAdmin = role === "SUPER_ADMIN";
-    const orgId = dbUser.orgId;
+export default async function AdminTeacherSchedulesPage({ searchParams }: Props) {
+  return withHttpDb(async () => {
+    const admin = await requireAdminPage("/admin/teacher-schedules");
+    const p = await searchParams;
+    const weekOffset = Math.max(-52, Math.min(52, parseInt(p.week || "0", 10) || 0));
+    // Without an account or IP zone there is no viewer zone to be had on the
+    // server; UTC is then said out loud in the grid rather than guessed.
+    const zone = (await resolveViewerZone(admin.timezone)).timeZone ?? "UTC";
 
-    // Compute week window
-    const today = new Date();
-    const currentWeekStart = startOfWeek(today, { weekStartsOn: 0 }); // Sunday start
-    const weekStart = addDays(currentWeekStart, weekOffset * 7);
-    weekStart.setHours(0, 0, 0, 0);
-    const weekEnd = addDays(weekStart, 7);
-    weekEnd.setHours(23, 59, 59, 999);
+    const days = buildWeek(zone, weekOffset);
+    const weekStart = new Date(days[0].startIso);
+    const weekEnd = new Date(days[6].endIso);
 
-    // 1. Fetch active teachers in org
     const teacherRows = await db.query.users.findMany({
-      where: isSuperAdmin
-        ? and(inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]), isNull(users.deletedAt))
-        : and(
-            inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
-            eq(users.orgId, orgId),
-            isNull(users.deletedAt)
-          ),
+      where: and(
+        inArray(users.role, ["TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]),
+        isNull(users.deletedAt),
+        orgFilter(admin, users.orgId)
+      ),
       columns: { id: true, name: true, email: true, timezone: true },
       orderBy: [asc(users.name)],
     });
-
     const teacherIds = teacherRows.map((t) => t.id);
 
-    if (teacherIds.length === 0) {
-      return (
-        <div className="space-y-6">
-          <div className="pb-6 border-b border-[var(--border)]">
-            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              Teacher Schedules Spreadsheet
-            </h1>
-          </div>
-          <div className="p-12 text-center card">
-            <p className="text-sm text-[var(--text-secondary)]">No teachers found in this organization.</p>
-          </div>
-        </div>
-      );
-    }
+    const [availabilityRows, timeOffRows, sessionRows] =
+      teacherIds.length === 0
+        ? [[], [], []]
+        : await Promise.all([
+            db.query.teacherAvailability.findMany({
+              where: and(
+                inArray(teacherAvailability.teacherId, teacherIds),
+                eq(teacherAvailability.isActive, true),
+                orgFilter(admin, teacherAvailability.orgId)
+              ),
+            }),
+            db.query.teacherTimeOff.findMany({
+              where: and(
+                inArray(teacherTimeOff.teacherId, teacherIds),
+                lt(teacherTimeOff.startsAt, weekEnd),
+                gt(teacherTimeOff.endsAt, weekStart),
+                orgFilter(admin, teacherTimeOff.orgId)
+              ),
+            }),
+            db.query.sessions.findMany({
+              where: and(
+                inArray(sessions.teacherId, teacherIds),
+                gte(sessions.scheduledStart, weekStart),
+                lt(sessions.scheduledStart, weekEnd),
+                isNull(sessions.mergedIntoId),
+                orgFilter(admin, sessions.orgId)
+              ),
+              columns: { id: true, teacherId: true, title: true, track: true, status: true, scheduledStart: true, scheduledEnd: true },
+              with: { bookings: { columns: { status: true }, with: { studentProfile: { columns: { name: true } } } } },
+              orderBy: [asc(sessions.scheduledStart)],
+            }),
+          ]);
 
-    // 2. Fetch all availability, time-off, and sessions for these teachers concurrently
-    const [availabilityRows, timeOffRows, sessionRows] = await Promise.all([
-      db.query.teacherAvailability.findMany({
-        where: isSuperAdmin
-          ? inArray(teacherAvailability.teacherId, teacherIds)
-          : and(
-              eq(teacherAvailability.orgId, orgId),
-              inArray(teacherAvailability.teacherId, teacherIds)
-            ),
-      }),
-      db.query.teacherTimeOff.findMany({
-        where: isSuperAdmin
-          ? and(
-              inArray(teacherTimeOff.teacherId, teacherIds),
-              gte(teacherTimeOff.endsAt, weekStart),
-              lte(teacherTimeOff.startsAt, weekEnd)
-            )
-          : and(
-              eq(teacherTimeOff.orgId, orgId),
-              inArray(teacherTimeOff.teacherId, teacherIds),
-              gte(teacherTimeOff.endsAt, weekStart),
-              lte(teacherTimeOff.startsAt, weekEnd)
-            ),
-      }),
-      db.query.sessions.findMany({
-        where: isSuperAdmin
-          ? and(
-              inArray(sessions.teacherId, teacherIds),
-              gte(sessions.scheduledStart, weekStart),
-              lte(sessions.scheduledStart, weekEnd),
-              isNull(sessions.mergedIntoId)
-            )
-          : and(
-              eq(sessions.orgId, orgId),
-              inArray(sessions.teacherId, teacherIds),
-              gte(sessions.scheduledStart, weekStart),
-              lte(sessions.scheduledStart, weekEnd),
-              isNull(sessions.mergedIntoId)
-            ),
-        with: {
-          bookings: {
-            with: {
-              studentProfile: { columns: { name: true, track: true } },
-            },
-          },
-        },
-      }),
-    ]);
+    const names = new Map(teacherRows.map((t) => [t.id, t.name || t.email]));
+    const offered = expandAvailability(availabilityRows, names, weekStart, weekEnd);
 
-    // Group data by teacher
-    const availabilityByTeacher = new Map<string, typeof availabilityRows>();
-    for (const a of availabilityRows) {
-      const list = availabilityByTeacher.get(a.teacherId) || [];
-      list.push(a);
-      availabilityByTeacher.set(a.teacherId, list);
-    }
-
-    const timeOffByTeacher = new Map<string, typeof timeOffRows>();
-    for (const to of timeOffRows) {
-      const list = timeOffByTeacher.get(to.teacherId) || [];
-      list.push(to);
-      timeOffByTeacher.set(to.teacherId, list);
-    }
-
-    const sessionsByTeacher = new Map<string, typeof sessionRows>();
-    for (const s of sessionRows) {
-      const list = sessionsByTeacher.get(s.teacherId) || [];
-      list.push(s);
-      sessionsByTeacher.set(s.teacherId, list);
-    }
-
-    const DAY_ENUM_TO_INT: Record<string, number> = {
-      SUNDAY: 0,
-      MONDAY: 1,
-      TUESDAY: 2,
-      WEDNESDAY: 3,
-      THURSDAY: 4,
-      FRIDAY: 5,
-      SATURDAY: 6,
-    };
-
-    const teacherData: TeacherScheduleData[] = teacherRows.map((t) => {
-      const rawAvail = availabilityByTeacher.get(t.id) || [];
-      const rawTimeOff = timeOffByTeacher.get(t.id) || [];
-      const rawSessions = sessionsByTeacher.get(t.id) || [];
-
-      return {
-        id: t.id,
-        name: t.name || t.email || "Teacher",
-        email: t.email || "",
-        timezone: t.timezone || "UTC",
-        availability: rawAvail.map((a) => ({
-          dayOfWeek: DAY_ENUM_TO_INT[a.dayOfWeek] ?? 0,
-          startTime: a.startTime,
-          endTime: a.endTime,
-        })),
-        timeOff: rawTimeOff.map((to) => ({
-          startsAt: to.startsAt ? new Date(to.startsAt).toISOString() : new Date().toISOString(),
-          endsAt: to.endsAt ? new Date(to.endsAt).toISOString() : new Date().toISOString(),
-          reason: to.reason,
-        })),
-        sessions: rawSessions.map((s) => ({
+    const teachers: TeacherScheduleData[] = teacherRows.map((t) => ({
+      id: t.id,
+      name: t.name || t.email,
+      email: t.email,
+      timezone: t.timezone,
+      available: offered
+        .filter((s) => s.teacherId === t.id)
+        .map((s) => ({ startIso: s.startsAt.toISOString(), endIso: s.endsAt.toISOString() })),
+      timeOff: timeOffRows
+        .filter((o) => o.teacherId === t.id)
+        .map((o) => ({ startIso: new Date(o.startsAt).toISOString(), endIso: new Date(o.endsAt).toISOString(), reason: o.reason })),
+      sessions: sessionRows
+        .filter((s) => s.teacherId === t.id)
+        .map((s) => ({
           id: s.id,
           title: s.title || "Lesson",
           track: s.track || "QAIDAH",
-          studentNames: s.bookings.map((b) => b.studentProfile?.name).filter(Boolean).join(", ") || "No student",
-          scheduledStart: s.scheduledStart ? new Date(s.scheduledStart).toISOString() : new Date().toISOString(),
-          scheduledEnd: s.scheduledEnd ? new Date(s.scheduledEnd).toISOString() : new Date().toISOString(),
           status: s.status,
+          studentNames:
+            s.bookings
+              .filter((b) => b.status !== "CANCELLED" || s.status === "CANCELLED")
+              .map((b) => b.studentProfile?.name)
+              .filter(Boolean)
+              .join(", ") || "No student",
+          startIso: new Date(s.scheduledStart).toISOString(),
+          endIso: new Date(s.scheduledEnd).toISOString(),
         })),
-      };
-    });
+    }));
 
     return (
-      <div className="space-y-6 animate-fadeIn">
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] mb-1">
-              <Link href="/admin" className="hover:text-[var(--accent)] transition">
-                Admin
+      <div className="space-y-6">
+        <PageHeader
+          crumbs={[{ label: "Admin", href: "/admin" }, { label: "Teacher schedules" }]}
+          title="Teacher schedules"
+          description="One week of availability, booked classes and time off. Open slots link to a prefilled booking form; booked ones to the class."
+          actions={
+            <>
+              <Link href="/admin/scheduled-classes" className={btn.secondary}>
+                Scheduled classes
               </Link>
-              <span>/</span>
-              <span>Teacher Schedules</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              Teacher Schedules Spreadsheet
-            </h1>
-            <p className="text-sm text-[var(--text-secondary)] mt-1">
-              Dense weekly grid mapping teacher declared availability, booked classes, and approved time off.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            <Link
-              href="/admin/scheduled-classes"
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition flex items-center gap-1.5"
-            >
-              <span>📅</span> Scheduled Matrix
-            </Link>
-            <Link
-              href="/admin/assign-student"
-              className="px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition flex items-center gap-1.5"
-            >
-              <span>+</span> Assign Student
-            </Link>
-          </div>
-        </div>
-
-        {/* Dense Spreadsheet Component */}
-        <TeacherSpreadsheet
-          teachers={teacherData}
-          weekOffset={weekOffset}
-          weekStartIso={weekStart.toISOString()}
+              <Link href="/admin/assign-student" className={btn.primary}>
+                Assign student
+              </Link>
+            </>
+          }
         />
+        {teachers.length === 0 ? (
+          <Panel>
+            <EmptyState title="No teachers yet" body="Give someone the teacher role and their week appears here." />
+          </Panel>
+        ) : (
+          <TeacherSpreadsheet teachers={teachers} days={days} zone={zone} weekOffset={weekOffset} />
+        )}
       </div>
     );
   });

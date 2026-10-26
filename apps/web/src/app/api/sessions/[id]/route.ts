@@ -4,6 +4,20 @@
  * RBAC: TEACHER (owner), ORG_ADMIN, SUPER_ADMIN
  * DELETE /api/sessions/[id] — Permanently deletes a session and its
  * dependent rows (bookings, attendees, chat rooms, feedback, progress).
+ * PATCH  /api/sessions/[id] — Cancel, reschedule, reassign, rename, or mark
+ * the outcome (COMPLETED / NO_SHOW). The rules, audit and notifications live
+ * in lib/admin-scheduling.ts; this handler only parses the body.
+ *
+ * PATCH body (all optional, combine as needed):
+ *   status          SCHEDULED | IN_PROGRESS | CANCELLED | COMPLETED | NO_SHOW
+ *   reason          why it was cancelled — sent to the family and teacher
+ *                   (`notes` is accepted as an older alias)
+ *   scheduledStart  ISO instant; scheduledEnd ISO instant
+ *   localStart      "YYYY-MM-DDTHH:mm" read in `timeZone` (a form's
+ *                   datetime-local); use instead of scheduledStart
+ *   durationMinutes length of the class from the (new) start
+ *   teacherId       give the class to another teacher of its org (admin only)
+ *   title           rename
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -12,7 +26,10 @@ import { eq } from "drizzle-orm";
 import { sessions, users } from "@/db/schema";
 import { deleteSessionCascade } from "@/lib/session-cleanup";
 import { requireAuth } from "@/lib/rbac";
-import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { handleApiError, NotFoundError, ForbiddenError, AppError } from "@/lib/errors";
+import { getClientIp, logAudit } from "@/lib/audit";
+import { updateSession, wallClockToInstant } from "@/lib/admin-scheduling";
+import { z } from "zod";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
 
 export async function DELETE(
@@ -56,11 +73,47 @@ export async function DELETE(
         await deleteSessionCascade(tx as never, sessionId);
       });
 
+      // The row is gone, so the log is the only record it ever existed.
+      await logAudit({
+        orgId: session.orgId,
+        actorId: ctx.userId,
+        action: "BOOKING_CANCELLED",
+        target: `session:${sessionId}`,
+        metadata: {
+          op: "session.delete",
+          title: session.title,
+          status: session.status,
+          teacherId: session.teacherId,
+          scheduledStart: new Date(session.scheduledStart).toISOString(),
+        },
+        ipAddress: getClientIp(request.headers),
+      });
+
       return NextResponse.json({ success: true });
     } catch (error) {
       return handleApiError(error);
     }
   });
+}
+
+const patchSchema = z.object({
+  status: z.enum(["SCHEDULED", "IN_PROGRESS", "CANCELLED", "COMPLETED", "NO_SHOW"]).optional(),
+  title: z.string().trim().min(1).max(200).optional(),
+  scheduledStart: z.string().optional(),
+  scheduledEnd: z.string().optional(),
+  localStart: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, "localStart must be YYYY-MM-DDTHH:mm").optional(),
+  timeZone: z.string().min(1).max(64).optional(),
+  durationMinutes: z.number().int().min(15).max(240).optional(),
+  teacherId: z.string().min(1).optional(),
+  reason: z.string().trim().max(500).optional(),
+  notes: z.string().trim().max(500).optional(),
+});
+
+function parseInstant(value: string | undefined, field: string): Date | undefined {
+  if (!value) return undefined;
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) throw new AppError(`Invalid date format for ${field}.`, 400, "BAD_REQUEST");
+  return d;
 }
 
 export async function PATCH(
@@ -73,104 +126,55 @@ export async function PATCH(
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
       const { id: sessionId } = await params;
-      const body = await request.json().catch(() => ({}));
+      const body = patchSchema.parse(await request.json().catch(() => ({})));
 
-      const session = await db.query.sessions.findFirst({
-        where: eq(sessions.id, sessionId),
-      });
-      if (!session) throw new NotFoundError("Session");
-
-      const user = await db.query.users.findFirst({
-        where: eq(users.id, ctx.userId),
-      });
-      const isAdmin = user
-        ? user.role === "SUPER_ADMIN" ||
-          (user.role === "ORG_ADMIN" && user.orgId === session.orgId)
-        : false;
-      const isOwner = session.teacherId === ctx.userId || isAdmin;
-
-      if (!isOwner) {
-        throw new ForbiddenError("Only the teacher or an admin can update this session.");
+      let scheduledStart = parseInstant(body.scheduledStart, "scheduledStart");
+      let scheduledEnd = parseInstant(body.scheduledEnd, "scheduledEnd");
+      if (body.localStart) {
+        if (!body.timeZone) throw new AppError("timeZone is required with localStart.", 400, "BAD_REQUEST");
+        const [date, time] = body.localStart.split("T");
+        scheduledStart = wallClockToInstant(date, time, body.timeZone);
       }
-
-      const allowedStatuses = ["SCHEDULED", "IN_PROGRESS", "CANCELLED", "COMPLETED"];
-      if (body.status && !allowedStatuses.includes(body.status)) {
-        return NextResponse.json(
-          { error: `Invalid status. Allowed: ${allowedStatuses.join(", ")}` },
-          { status: 400 }
-        );
-      }
-
-      const newStart = body.scheduledStart ? new Date(body.scheduledStart) : undefined;
-      const newEnd = body.scheduledEnd ? new Date(body.scheduledEnd) : undefined;
-      if ((newStart && isNaN(newStart.getTime())) || (newEnd && isNaN(newEnd.getTime()))) {
-        return NextResponse.json(
-          { error: "Invalid date format for scheduledStart or scheduledEnd." },
-          { status: 400 }
-        );
-      }
-      const effectiveStart = newStart ?? new Date(session.scheduledStart);
-      const effectiveEnd = newEnd ?? new Date(session.scheduledEnd);
-      if (effectiveEnd.getTime() <= effectiveStart.getTime()) {
-        return NextResponse.json(
-          { error: "scheduledEnd must be after scheduledStart." },
-          { status: 400 }
-        );
-      }
-
-      await db.transaction(async (tx) => {
-        const updateData: Record<string, any> = { updatedAt: new Date() };
-        if (body.status) updateData.status = body.status;
-        if (body.title) updateData.title = body.title;
-        if (body.teacherId && isAdmin) updateData.teacherId = body.teacherId;
-        if (newStart) updateData.scheduledStart = effectiveStart;
-        if (newEnd) updateData.scheduledEnd = effectiveEnd;
-
-        await tx.update(sessions).set(updateData).where(eq(sessions.id, sessionId));
-
-        if (body.status === "CANCELLED") {
-          const { bookings } = await import("@/db/schema");
-          const cancelledBookings = await tx
-            .update(bookings)
-            .set({ status: "CANCELLED", updatedAt: new Date() })
-            .where(eq(bookings.sessionId, sessionId))
-            .returning({ id: bookings.id });
-          for (const b of cancelledBookings) {
-            const { insertSchedulingEvent: insertCancel } = await import("@/lib/realtime/outbox");
-            await insertCancel(tx as never, {
-              orgId: session.orgId,
-              teacherId: session.teacherId,
-              actorId: ctx.userId,
-              type: "booking.cancelled",
-              aggregateType: "booking",
-              aggregateId: b.id,
-            });
-          }
+      if (body.durationMinutes) {
+        // Length from the new start, or from the current one when only the
+        // length is changing.
+        let base = scheduledStart;
+        if (!base) {
+          const current = await db.query.sessions.findFirst({
+            where: eq(sessions.id, sessionId),
+            columns: { scheduledStart: true },
+          });
+          if (!current) throw new NotFoundError("Session");
+          base = new Date(current.scheduledStart);
         }
+        scheduledStart = base;
+        scheduledEnd = new Date(base.getTime() + body.durationMinutes * 60_000);
+      }
 
-        const { insertSchedulingEvent } = await import("@/lib/realtime/outbox");
-        await insertSchedulingEvent(tx as never, {
-          orgId: session.orgId,
-          teacherId: session.teacherId,
-          actorId: ctx.userId,
-          type: "session.changed",
-          aggregateType: "session",
-          aggregateId: sessionId,
-        });
-      });
-
-      const { drainOutbox } = await import("@/lib/realtime/outbox-publisher");
-      const { afterResponse } = await import("@/lib/after-response");
-      afterResponse(drainOutbox({ orgId: session.orgId, limit: 10 }));
+      const result = await updateSession(
+        { userId: ctx.userId, orgId: ctx.orgId, role: ctx.role, ipAddress: getClientIp(request.headers) },
+        sessionId,
+        {
+          status: body.status,
+          title: body.title,
+          scheduledStart,
+          scheduledEnd,
+          teacherId: body.teacherId,
+          reason: body.reason ?? body.notes,
+        }
+      );
 
       return NextResponse.json({
         success: true,
         session: {
-          id: sessionId,
-          status: body.status || session.status,
-          scheduledStart: newStart ? effectiveStart.toISOString() : session.scheduledStart,
-          scheduledEnd: newEnd ? effectiveEnd.toISOString() : session.scheduledEnd,
+          id: result.id,
+          status: result.status,
+          scheduledStart: result.scheduledStart.toISOString(),
+          scheduledEnd: result.scheduledEnd.toISOString(),
+          teacherId: result.teacherId,
         },
+        ops: result.ops,
+        notified: result.notified,
       });
     } catch (error) {
       return handleApiError(error);
