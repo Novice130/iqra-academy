@@ -1,7 +1,8 @@
 /**
  * @fileoverview Student Profile Individual Management API
  *
- * RBAC: STUDENT role (account owner manages their child profiles), or ADMIN
+ * RBAC: the family account (STUDENT) for its own child profiles, ORG_ADMIN
+ * within its org, SUPER_ADMIN anywhere. Teachers are refused.
  *
  * PATCH  /api/students/profiles/[id] — Update student profile
  * DELETE /api/students/profiles/[id] — Delete student profile
@@ -12,8 +13,8 @@ import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { studentProfiles } from "@/db/schema";
-import { requireRole } from "@/lib/rbac";
-import { handleApiError, NotFoundError } from "@/lib/errors";
+import { requireRole, type AuthContext } from "@/lib/rbac";
+import { handleApiError, NotFoundError, ForbiddenError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 
 const updateProfileSchema = z.object({
@@ -23,6 +24,25 @@ const updateProfileSchema = z.object({
   currentLevel: z.string().max(100).optional(),
   notes: z.string().max(500).optional().nullable(),
 });
+
+/**
+ * Which profiles the caller may change. requireRole is hierarchical, so the
+ * STUDENT floor below also admits teachers; they get nothing here. A family
+ * account changes its own children, an ORG_ADMIN its own org, a SUPER_ADMIN
+ * any. A profile outside that reads as not found.
+ */
+function profileScope(ctx: AuthContext) {
+  switch (ctx.role) {
+    case "STUDENT":
+      return eq(studentProfiles.userId, ctx.userId);
+    case "ORG_ADMIN":
+      return eq(studentProfiles.orgId, ctx.orgId);
+    case "SUPER_ADMIN":
+      return undefined;
+    default:
+      throw new ForbiddenError("Only the family account or an admin can change a student profile.");
+  }
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -41,10 +61,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
 
       return await withRLS(ctx, async (tx) => {
         const existing = await tx.query.studentProfiles.findFirst({
-          where: and(
-            eq(studentProfiles.id, id),
-            ctx.role === "STUDENT" ? eq(studentProfiles.userId, ctx.userId) : undefined
-          ),
+          where: and(eq(studentProfiles.id, id), profileScope(ctx)),
         });
 
         if (!existing) {
@@ -65,7 +82,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
           .returning();
 
         await logAudit({
-          orgId: ctx.orgId,
+          orgId: existing.orgId,
           actorId: ctx.userId,
           action: "USER_UPDATED",
           target: `profile:${id}`,
@@ -91,10 +108,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
 
       return await withRLS(ctx, async (tx) => {
         const existing = await tx.query.studentProfiles.findFirst({
-          where: and(
-            eq(studentProfiles.id, id),
-            ctx.role === "STUDENT" ? eq(studentProfiles.userId, ctx.userId) : undefined
-          ),
+          where: and(eq(studentProfiles.id, id), profileScope(ctx)),
         });
 
         if (!existing) {
@@ -104,7 +118,7 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         await tx.delete(studentProfiles).where(eq(studentProfiles.id, id));
 
         await logAudit({
-          orgId: ctx.orgId,
+          orgId: existing.orgId,
           actorId: ctx.userId,
           action: "USER_DELETED",
           target: `profile:${id}`,
