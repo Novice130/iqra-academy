@@ -279,7 +279,7 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       },
     });
 
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(422);
     const body = await res.json();
     expect(body.error || body.message).toMatch(/must be in the future/i);
   });
@@ -337,7 +337,7 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       },
     });
 
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(422);
     const body = await res.json();
     expect(body.error || body.message).toMatch(/already has a scheduled class/i);
 
@@ -403,7 +403,7 @@ test.describe("Phase 10: Deep RBAC, Tenant Isolation & Transaction Rollbacks", (
       },
     });
 
-    expect(res.status()).toBe(400);
+    expect(res.status()).toBe(422);
     const body = await res.json();
     expect(body.error || body.message).toMatch(/time off/i);
 

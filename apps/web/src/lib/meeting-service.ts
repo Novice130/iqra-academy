@@ -34,6 +34,7 @@ import { ForbiddenError, NotFoundError } from "@/lib/errors";
 import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
+import { lockTeacherSchedules } from "@/lib/admin-scheduling";
 
 export {
   EARLY_JOIN_MS,
@@ -219,9 +220,9 @@ export async function createInstantMeeting(params: {
   });
   if (!teacher) throw new NotFoundError("Teacher");
 
-  const sessionId = createId();
-  const roomName = generateRoomName(sessionId);
-  const sessionTitle = title || `Instant Meeting with ${teacher.name}`;
+  let sessionId = createId();
+  let roomName = generateRoomName(sessionId);
+  let sessionTitle = title || `Instant Meeting with ${teacher.name}`;
 
   let addedStudents: { studentProfileId: string; userId: string; name: string }[] = [];
   let profiles: any[] = [];
@@ -235,6 +236,59 @@ export async function createInstantMeeting(params: {
   }
 
   await db.transaction(async (tx) => {
+    // Callers decide "no class is running" before they get here, so a double
+    // tap makes two rival rooms. Under the teacher's lock the second request
+    // finds the first one's room and joins it, booking only the students it
+    // does not already have.
+    await lockTeacherSchedules(tx, [teacherId]);
+    const [running] = await tx
+      .select({ id: sessions.id, videoRoomName: sessions.videoRoomName, title: sessions.title })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.teacherId, teacherId),
+          eq(sessions.orgId, orgId),
+          eq(sessions.status, "IN_PROGRESS"),
+          gt(sessions.actualStart, new Date(now.getTime() - LIVE_WINDOW_MS))
+        )
+      )
+      .orderBy(desc(sessions.actualStart))
+      .limit(1);
+    if (running) {
+      sessionId = running.id;
+      roomName = running.videoRoomName || generateRoomName(running.id);
+      sessionTitle = running.title ?? sessionTitle;
+      const booked = await tx
+        .select({ userId: bookings.userId })
+        .from(bookings)
+        .where(and(eq(bookings.sessionId, running.id), ne(bookings.status, "CANCELLED")));
+      const bookedUserIds = new Set(booked.map((b) => b.userId));
+      profiles = profiles.filter((p) => !bookedUserIds.has(p.userId));
+      if (profiles.length > 0) {
+        const inserted = await tx.insert(bookings).values(
+          profiles.map((p) => ({
+            id: createId(),
+            orgId,
+            userId: p.userId,
+            studentProfileId: p.id,
+            sessionId,
+            status: "CONFIRMED" as const,
+          }))
+        ).returning({ id: bookings.id });
+        for (const b of inserted) {
+          await insertSchedulingEvent(tx, {
+            orgId,
+            teacherId,
+            actorId: teacherId,
+            type: "booking.created",
+            aggregateType: "booking",
+            aggregateId: b.id,
+          });
+        }
+      }
+      return;
+    }
+
     await tx.insert(sessions).values({
       id: sessionId,
       orgId,

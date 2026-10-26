@@ -235,7 +235,7 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
         studentProfileId: profileB.id,
         teacherId: orgA.teacher.id,
         track: "QAIDAH",
-        startTime: futureStart,
+        scheduledStart: futureStart,
         durationMinutes: 30,
       },
     });
@@ -248,7 +248,7 @@ test.describe("Phase 1: Tenant Isolation & P0 Authorization", () => {
         studentProfileId: profileA.id,
         teacherId: orgB.teacher.id,
         track: "QAIDAH",
-        startTime: futureStart,
+        scheduledStart: futureStart,
         durationMinutes: 30,
       },
     });

@@ -16,6 +16,7 @@ import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
 import { verifyCalcomWebhook, mapCalcomEventType } from "@/lib/calcom";
+import { findScheduleConflict, lockTeacherSchedules } from "@/lib/admin-scheduling";
 import type { CalcomWebhookPayload } from "@/lib/calcom";
 
 export const dynamic = "force-dynamic";
@@ -96,8 +97,35 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
     return;
   }
 
+  const scheduledStart = new Date(payload.startTime);
+  const scheduledEnd = new Date(payload.endTime);
+
   // Create session + booking in a transaction
   const created = await db.transaction(async (tx) => {
+    // Every other booking path takes this lock before it checks and inserts,
+    // so a class booked here and one booked in the app for the same minute
+    // cannot race each other into the same minute.
+    await lockTeacherSchedules(tx, [teacher.id]);
+    // A retry racing the first delivery waited on the lock; it is not a clash.
+    const raced = await tx.query.bookings.findFirst({
+      where: eq(bookings.calcomBookingId, calcomBookingId),
+      columns: { id: true },
+    });
+    if (raced) return null;
+    const clash = await findScheduleConflict(tx, {
+      orgId,
+      teacherId: teacher.id,
+      start: scheduledStart,
+      end: scheduledEnd,
+    });
+    // A clash means Cal.com's calendar and ours disagree. The family has
+    // already been told by Cal.com that they're booked, so dropping the class
+    // here would strand them; create it and leave the clash for an admin to
+    // resolve from the class page.
+    if (clash) {
+      console.warn(`[CALCOM] Booking ${calcomBookingId} overlaps an existing class: ${clash}`);
+    }
+
     const [session] = await tx.insert(sessions).values({
       orgId,
       teacherId: teacher.id,
@@ -105,8 +133,8 @@ async function handleBookingCreated(event: CalcomWebhookPayload) {
       origin: "WEBHOOK",
       status: "SCHEDULED",
       title: payload.title,
-      scheduledStart: new Date(payload.startTime),
-      scheduledEnd: new Date(payload.endTime),
+      scheduledStart,
+      scheduledEnd,
       calcomEventId: String(payload.id),
     }).returning();
 

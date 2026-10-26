@@ -51,6 +51,7 @@ import { sendTrialRequestEmail } from "@/lib/email";
 import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
+import { findScheduleConflict, lockTeacherSchedules } from "@/lib/admin-scheduling";
 
 const createSchema = z.object({
   teacherId: z.string().min(1),
@@ -94,6 +95,23 @@ export async function POST(request: NextRequest) {
       }
 
       const result = await withRLS(ctx, async (tx) => {
+        // findOfferedSlot ran before the transaction, so two families tapping
+        // the same free slot both pass it. Under the teacher's schedule lock
+        // the second sees the first one's committed class and is refused.
+        // withRLS types its handle as Db; underneath it is the transaction.
+        await lockTeacherSchedules(tx as unknown as Parameters<typeof lockTeacherSchedules>[0], [data.teacherId]);
+        const clash = await findScheduleConflict(tx, {
+          orgId: ctx.orgId,
+          teacherId: data.teacherId,
+          start: slot.startsAt,
+          end: slot.endsAt,
+        });
+        if (clash) {
+          throw new BusinessRuleError(
+            "That time isn't available any more. Pick another slot."
+          );
+        }
+
         // One free trial per account. Checked inside the transaction so two
         // taps on a slow connection cannot both get through.
         const existing = await tx
