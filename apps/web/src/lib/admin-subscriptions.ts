@@ -103,16 +103,19 @@ export function dayStartInZone(key: string, zone: string): Date {
  * Ends manual subscriptions that were set to cancel at period end and whose
  * period has passed.
  *
- * Stripe flips its own rows through the webhook; nothing flips ours, and
- * there is no scheduler on this deployment. Without this a "cancelled at
- * period end" family would stay ACTIVE and keep booking indefinitely. It runs
- * when the plans page loads and before a plan is assigned — so it is only as
- * prompt as the next admin visit. A scheduled job would close that gap.
+ * Stripe flips its own rows through the webhook; nothing else flips ours.
+ * Without this a "cancelled at period end" family would stay ACTIVE and keep
+ * booking indefinitely. It runs once a day from api/cron/daily, and also
+ * when the plans page loads and before a plan is assigned, so an admin never
+ * sees a row the job has not reached yet. Idempotent: a second run finds
+ * nothing to end.
+ *
+ * Returns the rows it ended.
  */
 export async function settleLapsedCancellations(
   executor: typeof db,
   orgId: string | null
-): Promise<number> {
+): Promise<{ id: string; orgId: string; userId: string }[]> {
   const now = new Date();
   const ended = await executor
     .update(subscriptions)
@@ -139,7 +142,7 @@ export async function settleLapsedCancellations(
       }))
     );
   }
-  return ended.length;
+  return ended;
 }
 
 /** Every plan the admin can see, with how many families are on each. */

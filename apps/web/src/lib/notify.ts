@@ -35,7 +35,7 @@ import { db } from "./db";
 import { and, eq, inArray, isNull } from "drizzle-orm";
 import { notifications, users } from "@/db/schema";
 import { sendPushToUsers } from "./fcm";
-import { sendRawEmail } from "./email";
+import { escapeHtml, sendRawEmail } from "./email";
 import { createId } from "@paralleldrive/cuid2";
 
 type NotificationType = (typeof notifications.type.enumValues)[number];
@@ -101,21 +101,9 @@ export async function getAdminRecipients(
 }
 
 /**
- * Title and body are plain text, and often carry names or reasons other
- * people typed — a child's name from the family, a cancel reason from a
- * teacher. Unescaped, any of them could put a live link or markup into an
- * email sent from the school's own domain.
+ * Wrap a plain message in the same shell the other emails use. Title and body
+ * often carry names or reasons other people typed, so both are escaped.
  */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
-/** Wrap a plain message in the same shell the other emails use. */
 function defaultHtml(title: string, body: string, url?: string): string {
   const button = url
     ? `<div style="text-align:center;margin:28px 0;">

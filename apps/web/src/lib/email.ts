@@ -56,6 +56,21 @@ function getResend(): Resend {
 const FROM_EMAIL = process.env.EMAIL_FROM || "Quran LMS <noreply@mail.quran-lms.com>";
 
 /**
+ * Text other people typed — a child's name, a cancel reason, a family name —
+ * goes through this before it is put into an email body. Unescaped, any of
+ * them could put a live link or markup into mail sent from the school's own
+ * domain.
+ */
+export function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/**
  * Sends a payment receipt email.
  *
  * @param to - Payer's email
@@ -226,6 +241,49 @@ export async function sendInvoiceEmail(
         </div>
         ${payButton}
         <p style="font-size:14px;color:#666;">JazakAllahu Khairan. &mdash; ${opts.orgName}</p>
+      </div>
+    `,
+  });
+}
+
+/**
+ * The reminder sent once, by api/cron/daily, when an invoice passes its due
+ * date unpaid. Like sendInvoiceEmail, the amount appears here and nowhere in
+ * the app.
+ */
+export async function sendInvoiceOverdueEmail(
+  to: string,
+  opts: {
+    name: string;
+    orgName: string;
+    /** Still owed: amount due less anything already paid. */
+    amount: string;
+    dueLabel: string;
+    payUrl?: string;
+  }
+): Promise<boolean> {
+  const payButton = opts.payUrl
+    ? `<div style="text-align:center;margin:28px 0;">
+         <a href="${escapeHtml(opts.payUrl)}" style="background:#1a5f3a;color:#fff;padding:13px 26px;
+            text-decoration:none;border-radius:8px;font-size:15px;font-weight:bold;">Pay now</a>
+       </div>`
+    : `<p style="font-size:15px;color:#333;">
+         Reply to this email and we'll share the payment details again.
+       </p>`;
+
+  return sendRawEmail({
+    to,
+    subject: `Payment reminder from ${opts.orgName} — ${opts.amount}`,
+    html: `
+      <div style="font-family:'Segoe UI',Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+        <h2 style="color:#1a5f3a;">A gentle reminder</h2>
+        <p style="font-size:16px;color:#333;">
+          Assalamu Alaikum ${escapeHtml(opts.name)}, our records show an invoice of
+          <strong>${escapeHtml(opts.amount)}</strong> that was due ${escapeHtml(opts.dueLabel)} and is still open.
+        </p>
+        <p style="font-size:15px;color:#555;">If you have already paid, thank you, and please ignore this email.</p>
+        ${payButton}
+        <p style="font-size:14px;color:#666;">JazakAllahu Khairan. &mdash; ${escapeHtml(opts.orgName)}</p>
       </div>
     `,
   });
