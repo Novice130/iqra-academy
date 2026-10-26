@@ -11,9 +11,10 @@
  * assign-student route apply the same ones.
  *
  * A CLASS IS SEVERAL ROWS: a group row for the teacher plus an INDIVIDUAL row
- * per student, sharing one room (lib/class-room.ts). Cancel, reschedule,
- * reassign and the completed / no-show marks apply to every row of the class,
- * or the students' rows stay live after the teacher's is cancelled.
+ * per student, running at the same time. Cancel, reschedule, reassign and
+ * "completed" apply to every row that overlaps the requested one, or the
+ * students' rows stay live after the teacher's is cancelled. A no-show is one
+ * student's absence and stays on its own row.
  *
  * ORDER OF WORK, and why:
  *   1. One transaction that first advisory-locks the teachers' schedules and
@@ -33,7 +34,7 @@
  * @module lib/admin-scheduling
  */
 
-import { and, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bookings, sessions, studentProfiles, teacherTimeOff, users } from "@/db/schema";
 import { AppError, BusinessRuleError, ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
@@ -42,7 +43,6 @@ import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
 import { logAuditBatch, type AuditAction } from "@/lib/audit";
-import { groupIntoOccurrences, SIBLING_WINDOW_MS } from "@/lib/class-room";
 import { notify } from "@/lib/notify";
 import { closeAttendanceRows } from "@/lib/attendance";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
@@ -215,16 +215,18 @@ type SessionRow = typeof sessions.$inferSelect;
 /**
  * Every row of the class this row belongs to, locked FOR UPDATE.
  *
- * A class here is usually several rows — a group row for the teacher plus an
- * INDIVIDUAL row per student — and they share one room (lib/class-room.ts).
- * Cancelling or moving one of them alone leaves the others live and their
- * families untold, so class-level changes go to all of them. Grouping is
- * `groupIntoOccurrences`, the rule the join API resolves rooms with; the read
- * reaches two windows back so a row opening the occurrence early is seen.
+ * A group class is several rows — a group row for the teacher plus an
+ * INDIVIDUAL row per student — running at the same time with the same
+ * teacher. Cancelling or moving one alone leaves the others live and their
+ * families untold, so class-level changes go to all of them.
+ *
+ * Members are rows that *overlap in time* with this one (half-open), not rows
+ * that merely start near it: back-to-back 1:1 lessons (10:00–10:30 and
+ * 10:30–11:00) are two classes with two families, and the room resolver's
+ * 90-minute start window would wrongly fold them into one.
  */
-async function lockOccurrence(tx: Tx, row: SessionRow): Promise<SessionRow[]> {
-  const at = new Date(row.scheduledStart).getTime();
-  const nearby = await tx
+async function lockClassRows(tx: Tx, row: SessionRow): Promise<SessionRow[]> {
+  const rows = await tx
     .select()
     .from(sessions)
     .where(
@@ -233,13 +235,39 @@ async function lockOccurrence(tx: Tx, row: SessionRow): Promise<SessionRow[]> {
         eq(sessions.orgId, row.orgId),
         isNull(sessions.mergedIntoId),
         ne(sessions.status, "CANCELLED"),
-        gte(sessions.scheduledStart, new Date(at - 2 * SIBLING_WINDOW_MS)),
-        lte(sessions.scheduledStart, new Date(at + SIBLING_WINDOW_MS))
+        lt(sessions.scheduledStart, new Date(row.scheduledEnd)),
+        gt(sessions.scheduledEnd, new Date(row.scheduledStart))
       )
     )
     .for("update");
-  const rows = nearby.some((r) => r.id === row.id) ? nearby : [...nearby, row];
-  return groupIntoOccurrences(rows).find((o) => o.sessions.some((s) => s.id === row.id))?.sessions ?? [row];
+  return rows.some((r) => r.id === row.id) ? rows : [...rows, row];
+}
+
+/**
+ * Fold rows into classes by the same rule `lockClassRows` applies an action
+ * with, so a list entry and its Cancel button reach the same rows: the
+ * earliest row of a teacher opens a class, and every later row of that
+ * teacher starting before it ends (so overlapping it) joins. Back-to-back
+ * lessons stay separate. Pure; callers keep live and cancelled rows apart.
+ */
+export function groupClassRows<T extends { id: string; teacherId: string; scheduledStart: Date | string; scheduledEnd: Date | string }>(
+  rows: T[]
+): { canonical: T; sessions: T[] }[] {
+  const ms = (d: Date | string) => new Date(d).getTime();
+  const sorted = [...rows].sort((a, b) => ms(a.scheduledStart) - ms(b.scheduledStart) || a.id.localeCompare(b.id));
+  const groups: { canonical: T; sessions: T[] }[] = [];
+  const current = new Map<string, { canonical: T; sessions: T[] }>();
+  for (const row of sorted) {
+    const open = current.get(row.teacherId);
+    if (open && ms(row.scheduledStart) < ms(open.canonical.scheduledEnd)) {
+      open.sessions.push(row);
+    } else {
+      const group = { canonical: row, sessions: [row] };
+      groups.push(group);
+      current.set(row.teacherId, group);
+    }
+  }
+  return groups;
 }
 
 // ─── Updating a class ───────────────────────────────────────────────────────
@@ -292,7 +320,8 @@ interface RosterRow {
  * Apply a change to a class, with every check, audit and notification.
  *
  * Cancel, reschedule, reassign and the completed / no-show marks apply to
- * every row of the class (see `lockOccurrence`). A rename, and the legacy
+ * every row of the class (see `lockClassRows`) — except NO_SHOW, which is
+ * one student's absence and stays on the requested row. A rename, and the legacy
  * SCHEDULED / IN_PROGRESS status writes teachers' tools may send, touch only
  * the row asked for.
  *
@@ -376,8 +405,9 @@ export async function updateSession(
       }
     }
 
-    const classWide = moving || !!classStatus;
-    const members = classWide ? await lockOccurrence(tx, session) : [session];
+    // A no-show is one student's absence, recorded on their own row.
+    const classWide = moving || classStatus === "CANCELLED" || classStatus === "COMPLETED";
+    const members = classWide ? await lockClassRows(tx, session) : [session];
     const memberIds = members.map((m) => m.id);
 
     if (moving && members.some((m) => m.status !== "SCHEDULED")) {
@@ -436,7 +466,13 @@ export async function updateSession(
       if (m.id === session.id && rowStatus) return rowStatus;
       if (!classStatus || m.status === classStatus) return null;
       if (classStatus === "CANCELLED") return ["SCHEDULED", "IN_PROGRESS"].includes(m.status) ? classStatus : null;
-      return m.status === "CANCELLED" ? null : classStatus;
+      if (classStatus === "NO_SHOW") return m.id === session.id ? classStatus : null;
+      // COMPLETED: rows already in a final state keep it (a student's
+      // no-show stays a no-show), and a row that has not started yet is not
+      // marked done. The row asked for is always set — that is the request.
+      if (m.id === session.id) return classStatus;
+      if (ENDING.includes(m.status as SessionStatus)) return null;
+      return new Date(m.scheduledStart).getTime() <= now ? classStatus : null;
     };
 
     const changed: { row: SessionRow; endedNow: boolean }[] = [];

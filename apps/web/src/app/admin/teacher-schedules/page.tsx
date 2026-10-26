@@ -21,8 +21,7 @@ import { sessions, teacherAvailability, teacherTimeOff, users } from "@/db/schem
 import { orgFilter, requireAdminPage } from "@/lib/admin-page";
 import { resolveViewerZone } from "@/lib/viewer-zone";
 import { expandAvailability, wallClockRoundTrips, zonedDayParts, zonedWallClockToInstant } from "@/lib/slots";
-import { addDaysToDateKey } from "@/lib/admin-scheduling";
-import { groupIntoOccurrences } from "@/lib/class-room";
+import { addDaysToDateKey, groupClassRows } from "@/lib/admin-scheduling";
 import { EmptyState, PageHeader, Panel, btn } from "@/app/admin/_components/ui";
 import TeacherSpreadsheet, { type ScheduleDay, type TeacherScheduleData } from "./TeacherSpreadsheet";
 
@@ -81,14 +80,15 @@ type SessionWithRoster = {
 
 /**
  * One entry per class, not per session row: a group row plus one row per
- * student is one class (lib/class-room.ts), and counting rows showed a class
- * of three as four and quadrupled the CSV's minutes. Cancelled rows are
+ * student running at the same time is one class, and counting rows showed a
+ * class of three as four and quadrupled the CSV's minutes. Grouped with
+ * `groupClassRows`, the rule the class actions use. Cancelled rows are
  * grouped on their own so a cancelled class still shows once, as cancelled.
  */
 function classesOf(rows: SessionWithRoster[]): TeacherScheduleData["sessions"] {
   const live = rows.filter((r) => r.status !== "CANCELLED");
   const cancelled = rows.filter((r) => r.status === "CANCELLED");
-  return [...groupIntoOccurrences(live), ...groupIntoOccurrences(cancelled)]
+  return [...groupClassRows(live), ...groupClassRows(cancelled)]
     .map(({ canonical, sessions: members }) => {
       const all = members.flatMap((m) => m.bookings);
       const booked = all.filter((b) => b.status !== "CANCELLED");

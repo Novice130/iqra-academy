@@ -8,7 +8,7 @@
 
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray, isNull, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lt, ne, or } from "drizzle-orm";
 import { db, withHttpDb } from "@/lib/db";
 import { auditLogs, sessions, users } from "@/db/schema";
 import { orgFilter, requireAdminPage } from "@/lib/admin-page";
@@ -58,7 +58,7 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
     const actualStart = session.actualStart ? new Date(session.actualStart) : null;
     const actualEnd = session.actualEnd ? new Date(session.actualEnd) : null;
 
-    const [teacherRows, historyRows, occurrences] = await Promise.all([
+    const [teacherRows, historyRows, occurrences, siblingRows] = await Promise.all([
       db
         .select({ id: users.id, name: users.name, email: users.email })
         .from(users)
@@ -97,10 +97,27 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
         from: new Date(start.getTime() - 2 * SIBLING_WINDOW_MS),
         to: new Date(start.getTime() + SIBLING_WINDOW_MS),
       }),
+      db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.teacherId, session.teacherId),
+            eq(sessions.orgId, session.orgId),
+            ne(sessions.id, session.id),
+            isNull(sessions.mergedIntoId),
+            ne(sessions.status, "CANCELLED"),
+            lt(sessions.scheduledStart, end),
+            gt(sessions.scheduledEnd, start)
+          )
+        )
+        .orderBy(sessions.scheduledStart),
     ]);
 
     const occurrence = occurrences.find((o) => o.sessionIds.includes(id)) ?? null;
-    const siblingIds = occurrence ? occurrence.sessionIds.filter((s) => s !== id) : [];
+    // The same rule lib/admin-scheduling.ts uses to decide what a class-wide
+    // action reaches: this teacher's live rows overlapping this one in time.
+    const siblingIds = siblingRows.map((r) => r.id);
     const hasStarted = start.getTime() <= Date.now();
 
     const activeBookings = session.bookings.filter((b) => b.status !== "CANCELLED");
@@ -168,8 +185,8 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
           title="Actions"
           description={
             siblingIds.length > 0
-              ? `These apply to the whole class: this row and the ${siblingIds.length} other ${siblingIds.length === 1 ? "row" : "rows"} sharing its room. Families and teachers are notified of cancellations, new times and new teachers.`
-              : "These apply to the whole class. Families and teachers are notified of cancellations, new times and new teachers."
+              ? "Cancel, reschedule, reassign and completed apply to every row of this teacher's that overlaps this class in time; a no-show applies to this row only. Families and teachers are notified of cancellations, new times and new teachers."
+              : "Families and teachers are notified of cancellations, new times and new teachers. A no-show applies to this row only."
           }
         >
           <SessionActions
@@ -227,7 +244,7 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
             )}
             {siblingIds.length > 0 && (
               <p className="mt-4 text-xs text-[var(--text-secondary)]">
-                This class shares a room with {siblingIds.length} other class {siblingIds.length === 1 ? "row" : "rows"}:{" "}
+                This class runs alongside {siblingIds.length} other {siblingIds.length === 1 ? "row" : "rows"} of the same teacher at the same time:{" "}
                 {siblingIds.map((s, i) => (
                   <span key={s}>
                     {i > 0 && ", "}
@@ -236,7 +253,7 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
                     </Link>
                   </span>
                 ))}
-                . Cancel, reschedule, reassign and the completed / no-show marks apply to all of them together.
+                . Cancel, reschedule, reassign and marking the class completed apply to every row at the same time as this one; a no-show applies to this row only.
               </p>
             )}
           </Panel>

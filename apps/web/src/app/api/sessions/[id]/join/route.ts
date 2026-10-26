@@ -353,10 +353,14 @@ export async function GET(
         isConnecting ? recordJoin().catch(() => {}) : Promise.resolve(),
         shouldMarkStarted
           ? db.transaction(async (tx) => {
-              await tx
+              // Only a still-SCHEDULED row starts: a cancel or completion that
+              // landed after this request read the row must not be overwritten.
+              const started = await tx
                 .update(sessions)
                 .set({ status: "IN_PROGRESS", actualStart: session.actualStart ?? new Date() })
-                .where(and(eq(sessions.id, session.id), eq(sessions.orgId, session.orgId)));
+                .where(and(eq(sessions.id, session.id), eq(sessions.orgId, session.orgId), eq(sessions.status, "SCHEDULED")))
+                .returning({ id: sessions.id });
+              if (started.length === 0) return;
 
               await insertSchedulingEvent(tx, {
                 orgId: session.orgId,

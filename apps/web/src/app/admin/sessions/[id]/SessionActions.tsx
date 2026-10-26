@@ -109,13 +109,13 @@ export default function SessionActions({
           </>
         )}
         {canMark && status !== "NO_SHOW" && (
-          <button type="button" className={btn.secondary} disabled={busy} onClick={() => send({ status: "NO_SHOW" }, () => "Marked as no-show.")}>
-            Mark no-show
+          <button type="button" className={btn.secondary} disabled={busy} onClick={() => send({ status: "NO_SHOW" }, () => "This student is marked no-show. Other students in the class are unchanged.")}>
+            Mark this student no-show
           </button>
         )}
         {canMark && status !== "COMPLETED" && (
-          <button type="button" className={btn.secondary} disabled={busy} onClick={() => send({ status: "COMPLETED" }, () => "Marked as completed.")}>
-            Mark completed
+          <button type="button" className={btn.secondary} disabled={busy} onClick={() => send({ status: "COMPLETED" }, () => "Class marked completed.")}>
+            Mark class completed
           </button>
         )}
         {canCancel && (
