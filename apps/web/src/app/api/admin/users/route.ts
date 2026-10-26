@@ -1,45 +1,123 @@
 /**
- * @fileoverview Admin User Management API
+ * @fileoverview Admin user management API.
  *
- * RBAC: ORG_ADMIN role
- * GET   /api/admin/users — List all users in the org
- * POST  /api/admin/users — Create a new user (teacher or student)
- * PATCH /api/admin/users — Update a user's role or details
+ * RBAC: ORG_ADMIN and above.
+ * GET    /api/admin/users[?role=&search=]  — list users
+ * POST   /api/admin/users                  — add a user, or re-role one whose email already exists
+ * PATCH  /api/admin/users                  — change a user's name, phone or role
+ * DELETE /api/admin/users?userId=          — soft-delete a user
+ *
+ * SCOPE: an ORG_ADMIN reads and writes their own org; a SUPER_ADMIN may act
+ * on any org (the admin pages show them every org). A target outside the
+ * caller's scope is a 404, so an id from another org reads the same as one
+ * that doesn't exist.
+ *
+ * Guards every write shares, in `loadTarget` and `assertMayManage`:
+ *   - **The root admin** (lib/root-admin.ts) can't be changed or deleted by
+ *     anyone else, and never demoted. Checked before the org check so the
+ *     answer is a 403 wherever the account lives.
+ *   - **Nobody changes their own role or deletes themselves.** The only
+ *     ORG_ADMIN demoting themselves locks every human out of /admin, and the
+ *     way back is hand-written SQL.
+ *   - **A privilege ceiling.** Both the target's current role and any role
+ *     being granted must sit at or below the caller's own.
+ *   - **Soft-deleted users stay deleted** except through POST, which restores
+ *     a removed account when it is added again (the email is unique per org,
+ *     so restoring is the only way to add them back).
+ *
+ * Audit rows are written after the transaction commits, so a rolled-back
+ * write never leaves an audit entry claiming it happened.
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withRLS, withDb } from "@/lib/db";
-import { eq, and, isNull, ilike, or, desc } from "drizzle-orm";
-import { users } from "@/db/schema";
-import { requireRole, ROLE_HIERARCHY } from "@/lib/rbac";
-import {
-  handleApiError,
-  NotFoundError,
-  ForbiddenError,
-  BusinessRuleError,
-} from "@/lib/errors";
+import { and, desc, eq, gte, ilike, inArray, isNull, or, sql, type SQL } from "drizzle-orm";
+import { sessions, users } from "@/db/schema";
+import { requireRole, ROLE_HIERARCHY, type AuthContext } from "@/lib/rbac";
+import { ROLES, type UserRole } from "@/lib/roles";
+import { handleApiError, NotFoundError, ForbiddenError, BusinessRuleError } from "@/lib/errors";
 import { logAudit, getClientIp } from "@/lib/audit";
 import { notify } from "@/lib/notify";
-import { ROOT_ADMIN_EMAIL as ROOT_SUPER_ADMIN_EMAIL } from "@/lib/root-admin";
+import { isRootAdminEmail } from "@/lib/root-admin";
+import { isValidZone } from "@/lib/zones";
 
+const roleSchema = z.enum(ROLES as [UserRole, ...UserRole[]]);
 
 const createUserSchema = z.object({
-  email: z.string().email(),
-  name: z.string().min(1).max(100).optional(),
+  email: z.string().trim().toLowerCase().email("Enter a valid email address."),
+  name: z.string().trim().min(1, "Name can't be empty.").max(100, "Name is too long.").optional(),
   role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN"]).default("TEACHER"),
-  phone: z.string().optional(),
-  timezone: z.string().optional(),
+  phone: z.string().trim().max(40, "Phone number is too long.").optional(),
+  timezone: z
+    .string()
+    .trim()
+    .refine((tz) => tz === "" || isValidZone(tz), "Unknown time zone.")
+    .optional(),
 });
 
 const updateUserSchema = z.object({
   userId: z.string().min(1),
-  name: z.string().min(1).max(100).optional(),
-  role: z.enum(["STUDENT", "TEACHER", "ORG_ADMIN", "SUPER_ADMIN"]).optional(),
-  phone: z.string().max(40).optional(),
+  name: z.string().trim().min(1, "Name can't be empty.").max(100, "Name is too long.").optional(),
+  role: roleSchema.optional(),
+  phone: z.string().trim().max(40, "Phone number is too long.").optional(),
 });
 
-/** GET /api/admin/users — list all org users */
+const listQuerySchema = z.object({
+  role: roleSchema.optional(),
+  search: z.string().trim().max(100).optional(),
+});
+
+/** The transaction handle withRLS passes in. */
+type Tx = Parameters<Parameters<typeof withRLS>[1]>[0];
+
+const isSuper = (ctx: AuthContext) => ctx.role === "SUPER_ADMIN";
+
+/** `column = orgId` for an ORG_ADMIN, nothing for a SUPER_ADMIN. */
+function scope(ctx: AuthContext): SQL | undefined {
+  return isSuper(ctx) ? undefined : eq(users.orgId, ctx.orgId);
+}
+
+/** A user the caller may see, root-admin check first (see the header). */
+async function loadTarget(tx: Tx, ctx: AuthContext, userId: string, action: string) {
+  const target = await tx.query.users.findFirst({
+    where: and(eq(users.id, userId), isNull(users.deletedAt)),
+    columns: { id: true, orgId: true, role: true, name: true, email: true },
+  });
+  if (!target) throw new NotFoundError("User");
+  if (isRootAdminEmail(target.email) && target.id !== ctx.userId) {
+    throw new ForbiddenError(`The root admin account can't be ${action}.`);
+  }
+  if (!isSuper(ctx) && target.orgId !== ctx.orgId) throw new NotFoundError("User");
+  return target;
+}
+
+function assertMayManage(ctx: AuthContext, targetRole: UserRole, grantRole?: UserRole) {
+  const callerLevel = ROLE_HIERARCHY[ctx.role];
+  if (ROLE_HIERARCHY[targetRole] > callerLevel) {
+    throw new ForbiddenError("You can't change someone whose role is above your own.");
+  }
+  if (grantRole && ROLE_HIERARCHY[grantRole] > callerLevel) {
+    throw new ForbiddenError("You can't grant a role above your own.");
+  }
+}
+
+async function notifyNewTeacher(orgId: string, userId: string) {
+  await notify({
+    orgId,
+    userIds: [userId],
+    type: "ROLE_GRANTED",
+    title: "You're now a teacher at Novice Tutor",
+    body: "Set the weekly hours you're available, so students can book you.",
+    path: "/dashboard/teacher/availability",
+  });
+}
+
+/** Escape LIKE wildcards so a search for "50%" means the text "50%". */
+function likePattern(text: string): string {
+  return `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+}
+
 export async function GET(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -47,26 +125,24 @@ export async function GET(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const { searchParams } = new URL(request.url);
-      const role = searchParams.get("role");
-      const search = searchParams.get("search");
+      const params = new URL(request.url).searchParams;
+      const query = listQuerySchema.parse({
+        role: params.get("role") || undefined,
+        search: params.get("search") || undefined,
+      });
 
       return await withRLS(ctx, async (tx) => {
-        const conditions = [
-          eq(users.orgId, ctx.orgId),
-          isNull(users.deletedAt),
-        ];
-        if (role) conditions.push(eq(users.role, role as typeof users.role.enumValues[number]));
-        if (search) {
-          conditions.push(or(
-            ilike(users.name, `%${search}%`),
-            ilike(users.email, `%${search}%`),
-          )!);
+        const conditions: (SQL | undefined)[] = [scope(ctx), isNull(users.deletedAt)];
+        if (query.role) conditions.push(eq(users.role, query.role));
+        if (query.search) {
+          const p = likePattern(query.search);
+          conditions.push(or(ilike(users.name, p), ilike(users.email, p), ilike(users.phone, p)));
         }
 
         const result = await tx
           .select({
             id: users.id,
+            orgId: users.orgId,
             email: users.email,
             name: users.name,
             role: users.role,
@@ -87,7 +163,6 @@ export async function GET(request: NextRequest) {
   });
 }
 
-/** POST /api/admin/users — create or add a teacher/user in the org */
 export async function POST(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -95,100 +170,81 @@ export async function POST(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const body = await request.json();
-      const data = createUserSchema.parse(body);
-
-      const targetEmail = data.email.toLowerCase().trim();
-      if (targetEmail === ROOT_SUPER_ADMIN_EMAIL) {
-        throw new ForbiddenError("Root super admin account cannot be modified or re-created.");
+      const data = createUserSchema.parse(await request.json());
+      if (isRootAdminEmail(data.email)) {
+        throw new ForbiddenError("The root admin account can't be modified or re-created.");
       }
+      assertMayManage(ctx, "STUDENT", data.role);
 
-      const callerLevel = ROLE_HIERARCHY[ctx.role];
-      if (ROLE_HIERARCHY[data.role] > callerLevel) {
-        throw new ForbiddenError("You can't grant a role above your own.");
-      }
-
-      return await withRLS(ctx, async (tx) => {
-        // Check existing user within org
+      // New users always join the caller's own org; a SUPER_ADMIN adding to
+      // another org does it from inside that org.
+      const result = await withRLS(ctx, async (tx) => {
         const existing = await tx.query.users.findFirst({
-          where: and(eq(users.email, targetEmail), eq(users.orgId, ctx.orgId)),
+          where: and(eq(users.email, data.email), eq(users.orgId, ctx.orgId)),
+          columns: { id: true, role: true, deletedAt: true },
         });
 
         if (existing) {
-          if (existing.email.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
-            throw new ForbiddenError("Root super admin cannot be modified.");
+          if (existing.id === ctx.userId) {
+            throw new ForbiddenError("You can't change your own role. Ask another admin to do it.");
           }
-          if (ROLE_HIERARCHY[existing.role] > callerLevel) {
-            throw new ForbiddenError("You can't modify someone above your own role.");
-          }
-
-          const [updated] = await tx
+          assertMayManage(ctx, existing.role, data.role);
+          const [user] = await tx
             .update(users)
             .set({
-              role: data.role as typeof users.role.enumValues[number],
+              role: data.role,
+              deletedAt: null,
               ...(data.name ? { name: data.name } : {}),
+              ...(data.phone ? { phone: data.phone } : {}),
               ...(data.timezone ? { timezone: data.timezone } : {}),
             })
             .where(eq(users.id, existing.id))
             .returning();
-
-          await logAudit({
-            orgId: ctx.orgId,
-            actorId: ctx.userId,
-            action: "ROLE_CHANGED",
-            target: `user:${existing.id}`,
-            metadata: { email: data.email, role: data.role, promoted: true },
-            ipAddress: getClientIp(request.headers),
-          });
-
-          return NextResponse.json({ user: updated, promoted: true }, { status: 200 });
+          return { user, previousRole: existing.role, restored: existing.deletedAt !== null, created: false };
         }
 
-        const fallbackName = data.name || data.email.split("@")[0];
         const [user] = await tx
           .insert(users)
           .values({
-            email: targetEmail,
-            name: fallbackName,
-            role: data.role as typeof users.role.enumValues[number],
-            phone: data.phone,
-            timezone: data.timezone || "America/New_York",
+            email: data.email,
+            name: data.name || data.email.split("@")[0],
+            role: data.role,
+            phone: data.phone || null,
+            timezone: data.timezone || null,
             orgId: ctx.orgId,
           })
           .returning();
-
-        await logAudit({
-          orgId: ctx.orgId,
-          actorId: ctx.userId,
-          action: "USER_CREATED",
-          target: `user:${user.id}`,
-          metadata: { email: data.email, role: data.role },
-          ipAddress: getClientIp(request.headers),
-        });
-
-        return NextResponse.json({ user, promoted: false }, { status: 201 });
+        return { user, previousRole: null, restored: false, created: true };
       });
+
+      await logAudit({
+        orgId: ctx.orgId,
+        actorId: ctx.userId,
+        action: result.created || result.restored ? "USER_CREATED" : "ROLE_CHANGED",
+        target: `user:${result.user.id}`,
+        metadata: {
+          op: result.created ? "user.create" : result.restored ? "user.restore" : "user.promote",
+          email: data.email,
+          role: data.role,
+          previousRole: result.previousRole,
+        },
+        ipAddress: getClientIp(request.headers),
+      });
+
+      if (!result.created && data.role === "TEACHER" && result.previousRole !== "TEACHER") {
+        await notifyNewTeacher(ctx.orgId, result.user.id);
+      }
+
+      return NextResponse.json(
+        { user: result.user, promoted: !result.created, restored: result.restored },
+        { status: result.created ? 201 : 200 }
+      );
     } catch (error) {
       return handleApiError(error);
     }
   });
 }
 
-/**
- * PATCH /api/admin/users — update a user, including their role.
- *
- * The three guards below are the reason this handler is longer than it looks
- * like it should be:
- *
- *   1. **No self-demotion.** The only ORG_ADMIN setting their own role to
- *      STUDENT locks every human out of /admin, and there is no in-app way
- *      back — the recovery is a hand-written SQL statement against Neon.
- *   2. **A privilege ceiling.** Without it an ORG_ADMIN can demote a
- *      SUPER_ADMIN in their org. Both the target's current role and the role
- *      being granted must sit at or below the caller's own level.
- *   3. **Soft-deleted users stay deleted.** GET filters them; this did not, so
- *      a role change quietly resurrected a deleted user's permissions.
- */
 export async function PATCH(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -196,95 +252,48 @@ export async function PATCH(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const body = await request.json();
-      const data = updateUserSchema.parse(body);
+      const data = updateUserSchema.parse(await request.json());
 
-      const updates: Record<string, unknown> = {};
-      // `!== undefined`, not truthiness: "" is how the UI clears a phone
-      // number, and truthiness silently dropped it.
+      const updates: Partial<typeof users.$inferInsert> = {};
+      // `!== undefined`, not truthiness: "" is how the UI clears a phone number.
       if (data.name !== undefined) updates.name = data.name;
       if (data.role !== undefined) updates.role = data.role;
       if (data.phone !== undefined) updates.phone = data.phone === "" ? null : data.phone;
-
-      if (Object.keys(updates).length === 0) {
-        throw new BusinessRuleError("Nothing to update.");
-      }
-
-      const callerLevel = ROLE_HIERARCHY[ctx.role];
+      if (Object.keys(updates).length === 0) throw new BusinessRuleError("Nothing to update.");
 
       if (data.role && data.userId === ctx.userId && data.role !== ctx.role) {
-        throw new ForbiddenError(
-          "You can't change your own role. Ask another admin to do it."
-        );
+        throw new ForbiddenError("You can't change your own role. Ask another admin to do it.");
       }
 
       const result = await withRLS(ctx, async (tx) => {
-        // Read the target first: the ceiling depends on the role they hold
-        // now, not only on the one being granted.
-        const target = await tx.query.users.findFirst({
-          where: and(
-            eq(users.id, data.userId),
-            eq(users.orgId, ctx.orgId),
-            isNull(users.deletedAt)
-          ),
-          columns: { id: true, role: true, name: true, email: true },
-        });
-        if (!target) throw new NotFoundError("User");
-
-        if (target.email?.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
-          if (data.role && data.role !== "SUPER_ADMIN") {
-            throw new ForbiddenError("Root super admin cannot be demoted.");
-          }
-          if (ctx.userId !== target.id) {
-            throw new ForbiddenError("Root super admin cannot be modified by other users.");
-          }
+        const target = await loadTarget(tx, ctx, data.userId, "modified by other users");
+        if (isRootAdminEmail(target.email) && data.role && data.role !== "SUPER_ADMIN") {
+          throw new ForbiddenError("The root admin account can't be demoted.");
         }
-
-        if (ROLE_HIERARCHY[target.role] > callerLevel) {
-          throw new ForbiddenError("You can't modify someone above your own role.");
-        }
-        if (data.role && ROLE_HIERARCHY[data.role] > callerLevel) {
-          throw new ForbiddenError("You can't grant a role above your own.");
-        }
+        assertMayManage(ctx, target.role, data.role);
 
         const [user] = await tx
           .update(users)
           .set(updates)
-          .where(
-            and(
-              eq(users.id, data.userId),
-              eq(users.orgId, ctx.orgId),
-              isNull(users.deletedAt)
-            )
-          )
+          .where(and(eq(users.id, target.id), eq(users.orgId, target.orgId), isNull(users.deletedAt)))
           .returning();
-
         if (!user) throw new NotFoundError("User");
-
-        await logAudit({
-          orgId: ctx.orgId, actorId: ctx.userId,
-          action: data.role ? "ROLE_CHANGED" : "USER_UPDATED",
-          target: `user:${user.id}`,
-          metadata: { changes: data, previousRole: target.role },
-          ipAddress: getClientIp(request.headers),
-        });
-
-        return { user, becameTeacher: data.role === "TEACHER" && target.role !== "TEACHER" };
+        return { user, target };
       });
 
-      // Deliberately AFTER the transaction commits. notify() makes an HTTP
-      // round trip to Resend and to FCM; awaiting that inside withRLS would
-      // hold a Postgres interactive transaction open for the length of a
-      // network call, on a Worker.
-      if (result.becameTeacher) {
-        await notify({
-          orgId: ctx.orgId,
-          userIds: [result.user.id],
-          type: "ROLE_GRANTED",
-          title: "You're now a teacher at Novice Tutor",
-          body: "Set the weekly hours you're available, so students can book you.",
-          path: "/dashboard/teacher/availability",
-        });
+      await logAudit({
+        orgId: result.target.orgId,
+        actorId: ctx.userId,
+        action: data.role && data.role !== result.target.role ? "ROLE_CHANGED" : "USER_UPDATED",
+        target: `user:${result.user.id}`,
+        metadata: { op: "user.update", changes: data, previousRole: result.target.role },
+        ipAddress: getClientIp(request.headers),
+      });
+
+      // After the commit: notify() makes network calls that must not hold a
+      // Postgres transaction open.
+      if (data.role === "TEACHER" && result.target.role !== "TEACHER") {
+        await notifyNewTeacher(result.target.orgId, result.user.id);
       }
 
       return NextResponse.json({ user: result.user });
@@ -294,7 +303,6 @@ export async function PATCH(request: NextRequest) {
   });
 }
 
-/** DELETE /api/admin/users — soft-delete a user in the org */
 export async function DELETE(request: NextRequest) {
   return withDb(async () => {
     try {
@@ -302,50 +310,50 @@ export async function DELETE(request: NextRequest) {
       if (authResult instanceof NextResponse) return authResult;
       const ctx = authResult;
 
-      const { searchParams } = new URL(request.url);
-      const userId = searchParams.get("userId");
+      const userId = new URL(request.url).searchParams.get("userId");
       if (!userId) throw new BusinessRuleError("userId is required.");
+      if (userId === ctx.userId) throw new ForbiddenError("You can't remove your own account.");
 
-      if (userId === ctx.userId) {
-        throw new ForbiddenError("You cannot delete your own account.");
-      }
+      const target = await withRLS(ctx, async (tx) => {
+        const target = await loadTarget(tx, ctx, userId, "deleted");
+        assertMayManage(ctx, target.role);
 
-      const callerLevel = ROLE_HIERARCHY[ctx.role];
-
-      return await withRLS(ctx, async (tx) => {
-        const target = await tx.query.users.findFirst({
-          where: and(
-            eq(users.id, userId),
-            eq(users.orgId, ctx.orgId),
-            isNull(users.deletedAt)
-          ),
-          columns: { id: true, role: true, email: true },
-        });
-        if (!target) throw new NotFoundError("User");
-
-        if (target.email?.toLowerCase() === ROOT_SUPER_ADMIN_EMAIL) {
-          throw new ForbiddenError("Root super admin cannot be deleted.");
-        }
-        if (ROLE_HIERARCHY[target.role] > callerLevel) {
-          throw new ForbiddenError("You can't delete someone above your own role.");
+        // A removed teacher's upcoming classes would still be on students'
+        // calendars with nobody to teach them. Make the admin move them first.
+        const [{ upcoming }] = await tx
+          .select({ upcoming: sql<number>`count(*)::int`.mapWith(Number) })
+          .from(sessions)
+          .where(
+            and(
+              eq(sessions.teacherId, target.id),
+              eq(sessions.orgId, target.orgId),
+              inArray(sessions.status, ["SCHEDULED", "IN_PROGRESS"]),
+              gte(sessions.scheduledStart, new Date())
+            )
+          );
+        if (upcoming > 0) {
+          throw new BusinessRuleError(
+            `${target.name || target.email} teaches ${upcoming} upcoming class${upcoming === 1 ? "" : "es"}. Reassign or cancel them first.`
+          );
         }
 
         await tx
           .update(users)
           .set({ deletedAt: new Date() })
-          .where(and(eq(users.id, userId), eq(users.orgId, ctx.orgId)));
-
-        await logAudit({
-          orgId: ctx.orgId,
-          actorId: ctx.userId,
-          action: "USER_DELETED",
-          target: `user:${target.id}`,
-          metadata: { email: target.email, role: target.role },
-          ipAddress: getClientIp(request.headers),
-        });
-
-        return NextResponse.json({ success: true });
+          .where(and(eq(users.id, target.id), eq(users.orgId, target.orgId)));
+        return target;
       });
+
+      await logAudit({
+        orgId: target.orgId,
+        actorId: ctx.userId,
+        action: "USER_DELETED",
+        target: `user:${target.id}`,
+        metadata: { op: "user.delete", email: target.email, role: target.role },
+        ipAddress: getClientIp(request.headers),
+      });
+
+      return NextResponse.json({ success: true });
     } catch (error) {
       return handleApiError(error);
     }

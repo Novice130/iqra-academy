@@ -26,10 +26,11 @@ import { db } from "./db";
 import { eq, and, isNull } from "drizzle-orm";
 import { users } from "@/db/schema";
 
-/**
- * User role type — matches the pgEnum in schema.
- */
-export type UserRole = "STUDENT" | "TEACHER" | "ORG_ADMIN" | "SUPER_ADMIN";
+// The role type and ranking live in lib/roles.ts so client components can
+// import them; re-exported here under the same names for server code.
+import { ROLE_HIERARCHY, type UserRole } from "./roles";
+export { ROLE_HIERARCHY };
+export type { UserRole };
 
 /**
  * Represents an authenticated user context passed to route handlers.
@@ -57,21 +58,6 @@ export interface AuthContext {
   /** If impersonating, the original admin's user ID */
   originalUserId?: string;
 }
-
-/**
- * Role hierarchy — higher-privilege roles include all lower-privilege access.
- *
- * 📚 WHY A HIERARCHY?
- * An ORG_ADMIN should be able to do everything a TEACHER can do, plus more.
- * Instead of listing every role for every endpoint, we define a hierarchy:
- *   STUDENT < TEACHER < ORG_ADMIN < SUPER_ADMIN
- */
-export const ROLE_HIERARCHY: Record<UserRole, number> = {
-  STUDENT: 0,
-  TEACHER: 1,
-  ORG_ADMIN: 2,
-  SUPER_ADMIN: 3,
-};
 
 /**
  * Whether a role may open the admin panel: ORG_ADMIN or anything above it.

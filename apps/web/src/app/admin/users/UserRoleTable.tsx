@@ -1,350 +1,187 @@
 "use client";
 
 /**
- * User & Teacher Management Workspace (Twenty CRM Style).
+ * @fileoverview Users & roles: search, role filter, add, re-role and remove.
  *
- * Provides real-time filtering, role elevation, 24h teacher availability editing,
- * and user management matching the Twenty CRM design language.
+ * The list arrives from the server once; changes are applied locally from
+ * the API's answers and then `router.refresh()` reconciles, so the table
+ * doesn't flash empty after every edit.
  */
 
-import { useState, useTransition, useMemo } from "react";
-import Link from "next/link";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { ROLE_LABELS, type UserRole } from "@/lib/roles";
+import { EmptyState, Panel, btn, input, table } from "../_components/ui";
+import AddUserForm from "./AddUserForm";
+import UserRow, { type AdminUserRow } from "./UserRow";
 
-export interface AdminUserRow {
-  id: string;
-  email: string;
-  name: string | null;
-  role: "SUPER_ADMIN" | "ORG_ADMIN" | "TEACHER" | "STUDENT";
-  phone: string | null;
-  timezone: string | null;
-  createdAt: string;
+export type { AdminUserRow };
+
+type RoleFilter = "ALL" | "STUDENT" | "TEACHER" | "ADMIN";
+
+const FILTERS: { key: RoleFilter; label: string }[] = [
+  { key: "ALL", label: "All" },
+  { key: "TEACHER", label: "Teachers" },
+  { key: "STUDENT", label: "Students" },
+  { key: "ADMIN", label: "Admins" },
+];
+
+function matchesFilter(u: AdminUserRow, f: RoleFilter): boolean {
+  if (f === "ALL") return true;
+  if (f === "ADMIN") return u.role === "ORG_ADMIN" || u.role === "SUPER_ADMIN";
+  return u.role === f;
 }
-
-const ROLE_RANK: Record<string, number> = {
-  STUDENT: 1,
-  TEACHER: 2,
-  ORG_ADMIN: 3,
-  SUPER_ADMIN: 4,
-};
-
-const ROLE_LABEL: Record<string, string> = {
-  STUDENT: "Student",
-  TEACHER: "Teacher",
-  ORG_ADMIN: "Administrator",
-  SUPER_ADMIN: "Super Admin",
-};
-
-const ROLE_STYLES: Record<string, { bg: string; text: string; border: string }> = {
-  SUPER_ADMIN: { bg: "bg-purple-500/10", text: "text-purple-600 dark:text-purple-400", border: "border-purple-500/20" },
-  ORG_ADMIN: { bg: "bg-blue-500/10", text: "text-blue-600 dark:text-blue-400", border: "border-blue-500/20" },
-  TEACHER: { bg: "bg-emerald-500/10", text: "text-emerald-600 dark:text-emerald-400", border: "border-emerald-500/20" },
-  STUDENT: { bg: "bg-amber-500/10", text: "text-amber-600 dark:text-amber-400", border: "border-amber-500/20" },
-};
-
-type RoleFilter = "ALL" | "TEACHER" | "STUDENT" | "ORG_ADMIN" | "SUPER_ADMIN";
 
 export default function UserRoleTable({
   initialUsers,
   currentUserId,
   currentRole,
+  openNew,
+  newRole,
 }: {
   initialUsers: AdminUserRow[];
   currentUserId: string;
-  currentRole: string;
+  currentRole: UserRole;
+  /** From `?new=` — open the add form on arrival. */
+  openNew: boolean;
+  newRole: UserRole;
 }) {
   const router = useRouter();
-  const [users, setUsers] = useState<AdminUserRow[]>(initialUsers);
-  const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<RoleFilter>("ALL");
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
-  const [pendingId, setPendingId] = useState<string | null>(null);
   const [, startTransition] = useTransition();
+  const [users, setUsers] = useState(initialUsers);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<RoleFilter>("ALL");
+  const [adding, setAdding] = useState(openNew);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const callerLevel = ROLE_RANK[currentRole] ?? 0;
+  const counts = useMemo(
+    () => Object.fromEntries(FILTERS.map((f) => [f.key, users.filter((u) => matchesFilter(u, f.key)).length])) as Record<RoleFilter, number>,
+    [users]
+  );
 
-  // Counts for Twenty-style filter badges
-  const counts = useMemo(() => {
-    return {
-      ALL: users.length,
-      TEACHER: users.filter((u) => u.role === "TEACHER").length,
-      STUDENT: users.filter((u) => u.role === "STUDENT").length,
-      ORG_ADMIN: users.filter((u) => u.role === "ORG_ADMIN" || u.role === "SUPER_ADMIN").length,
-    };
-  }, [users]);
-
-  // Filtered rows
-  const visibleUsers = useMemo(() => {
+  const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return users.filter((u) => {
-      // Role filter
-      if (activeFilter === "TEACHER" && u.role !== "TEACHER") return false;
-      if (activeFilter === "STUDENT" && u.role !== "STUDENT") return false;
-      if (activeFilter === "ORG_ADMIN" && u.role !== "ORG_ADMIN" && u.role !== "SUPER_ADMIN") return false;
+    return users.filter(
+      (u) =>
+        matchesFilter(u, filter) &&
+        (!q || (u.name ?? "").toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || (u.phone ?? "").toLowerCase().includes(q))
+    );
+  }, [users, search, filter]);
 
-      // Search filter
-      if (!q) return true;
-      return (
-        (u.name && u.name.toLowerCase().includes(q)) ||
-        u.email.toLowerCase().includes(q) ||
-        (u.phone && u.phone.toLowerCase().includes(q))
-      );
-    });
-  }, [users, search, activeFilter]);
-
-  async function updateRole(userId: string, nextRole: AdminUserRow["role"]) {
-    setError(null);
-    setSuccess(null);
-    setPendingId(userId);
-
-    try {
-      const res = await fetch("/api/admin/users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, role: nextRole }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Could not update role.");
-
-      setUsers((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: nextRole } : u))
-      );
-      setSuccess(`Updated role to ${ROLE_LABEL[nextRole]}!`);
-      setTimeout(() => setSuccess(null), 3000);
-      startTransition(() => router.refresh());
-    } catch (err: any) {
-      setError(err.message || "Failed to update role.");
-    } finally {
-      setPendingId(null);
-    }
+  function refresh(message: string) {
+    setNotice(message);
+    startTransition(() => router.refresh());
   }
 
-  function getInitials(name: string | null, email: string) {
-    if (name) {
-      const parts = name.trim().split(" ");
-      if (parts.length >= 2) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
-      return name.slice(0, 2).toUpperCase();
-    }
-    return email.slice(0, 2).toUpperCase();
+  function upsert(user: AdminUserRow, message: string) {
+    setUsers((prev) => (prev.some((u) => u.id === user.id) ? prev.map((u) => (u.id === user.id ? user : u)) : [user, ...prev]));
+    refresh(message);
   }
 
   return (
     <div className="space-y-6">
-      {/* Top Metrics Cards (Twenty CRM Style) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4">
-        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
-          <div className="text-xs font-semibold text-[var(--text-secondary)] uppercase tracking-wider">
-            Total Users
-          </div>
-          <div className="text-2xl font-bold text-[var(--text-primary)] mt-1">{counts.ALL}</div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
-          <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider">
-            Teachers
-          </div>
-          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
-            {counts.TEACHER}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
-          <div className="text-xs font-semibold text-amber-600 dark:text-amber-400 uppercase tracking-wider">
-            Students
-          </div>
-          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-1">
-            {counts.STUDENT}
-          </div>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-[var(--bg-secondary)] border border-[var(--border)] shadow-xs">
-          <div className="text-xs font-semibold text-blue-600 dark:text-blue-400 uppercase tracking-wider">
-            Admins
-          </div>
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400 mt-1">
-            {counts.ORG_ADMIN}
-          </div>
-        </div>
-      </div>
-
-      {/* Action Banners */}
-      {error && (
-        <div className="p-3.5 rounded-xl text-xs font-semibold bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">
-          ✕ {error}
-        </div>
-      )}
-      {success && (
-        <div className="p-3.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 animate-fadeIn">
-          ✓ {success}
-        </div>
-      )}
-
-      {/* Twenty CRM Search & Filter Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 p-1 bg-[var(--bg-secondary)] rounded-xl border border-[var(--border)] self-start">
-          <button
-            type="button"
-            onClick={() => setActiveFilter("ALL")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeFilter === "ALL"
-                ? "bg-[var(--bg-elevated)] text-[var(--text-primary)] shadow-xs"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            All <span className="text-[10px] opacity-70 ml-0.5">({counts.ALL})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter("TEACHER")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeFilter === "TEACHER"
-                ? "bg-[var(--bg-elevated)] text-emerald-600 dark:text-emerald-400 shadow-xs"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            Teachers <span className="text-[10px] opacity-70 ml-0.5">({counts.TEACHER})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter("STUDENT")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeFilter === "STUDENT"
-                ? "bg-[var(--bg-elevated)] text-amber-600 dark:text-amber-400 shadow-xs"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            Students <span className="text-[10px] opacity-70 ml-0.5">({counts.STUDENT})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveFilter("ORG_ADMIN")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeFilter === "ORG_ADMIN"
-                ? "bg-[var(--bg-elevated)] text-blue-600 dark:text-blue-400 shadow-xs"
-                : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
-            }`}
-          >
-            Admins <span className="text-[10px] opacity-70 ml-0.5">({counts.ORG_ADMIN})</span>
-          </button>
-        </div>
-
-        {/* Real-time Search Box */}
-        <div className="relative w-full sm:w-72">
-          <input
-            type="text"
-            placeholder="Search users (name, email, phone)…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-xl bg-[var(--bg-secondary)] border border-[var(--border)] text-xs text-[var(--text-primary)] placeholder-[var(--text-tertiary)] focus:outline-none focus:ring-2 focus:ring-emerald-500 transition"
+      {adding ? (
+        <Panel title="Add user" description="They sign in with this email. If it already has an account here, its role is changed instead.">
+          <AddUserForm
+            presetRole={newRole}
+            currentRole={currentRole}
+            onCancel={() => setAdding(false)}
+            onDone={(u, m) => {
+              setAdding(false);
+              upsert(u, m);
+            }}
           />
-          <span className="absolute left-3 top-2.5 text-xs text-[var(--text-tertiary)]">🔍</span>
+        </Panel>
+      ) : null}
+
+      <Panel
+        title="People"
+        description={`${users.length} active accounts. A removed account loses access and is hidden; its history is kept.`}
+        actions={
+          !adding && (
+            <button type="button" className={btn.primary} onClick={() => setAdding(true)}>
+              Add user
+            </button>
+          )
+        }
+        flush
+      >
+        <div className="flex flex-col gap-3 border-b border-[var(--border)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <div role="group" aria-label="Filter by role" className="flex flex-wrap gap-1">
+            {FILTERS.map((f) => (
+              <button
+                key={f.key}
+                type="button"
+                aria-pressed={filter === f.key}
+                onClick={() => setFilter(f.key)}
+                className={`${btn.ghost} ${filter === f.key ? "bg-[var(--bg-secondary)] text-[var(--text-primary)] ring-1 ring-[var(--border)]" : ""}`}
+              >
+                {f.label} <span className="tabular-nums opacity-70">({counts[f.key]})</span>
+              </button>
+            ))}
+          </div>
+          <div className="w-full sm:w-72">
+            <label htmlFor="user-search" className="sr-only">Search users</label>
+            <input
+              id="user-search"
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, email or phone"
+              className={input}
+            />
+          </div>
         </div>
-      </div>
 
-      {/* Twenty CRM User Table */}
-      <div className="rounded-2xl border border-[var(--border)] overflow-hidden bg-[var(--bg-primary)]">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[700px]">
-            <thead>
-              <tr className="border-b border-[var(--border)] bg-[var(--bg-secondary)]/50 text-[11px] font-bold uppercase tracking-wider text-[var(--text-tertiary)]">
-                <th className="px-5 py-3.5">User</th>
-                <th className="px-4 py-3.5">Contact / Timezone</th>
-                <th className="px-4 py-3.5">Role & Access</th>
-                <th className="px-5 py-3.5 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--border)] text-xs">
-              {visibleUsers.map((u) => {
-                const isSelf = u.id === currentUserId;
-                const targetLevel = ROLE_RANK[u.role] ?? 0;
-                const outranksMe = targetLevel >= callerLevel && !isSelf;
-                const locked = isSelf || outranksMe || pendingId === u.id;
-                const roleBadge = ROLE_STYLES[u.role] || ROLE_STYLES.STUDENT;
+        {notice && (
+          <div role="status" className="flex items-start justify-between gap-3 border-b border-[var(--border)] bg-[var(--color-success)]/10 px-4 py-2.5 text-sm text-[var(--text-primary)] sm:px-5">
+            <span>{notice}</span>
+            <button type="button" className={btn.ghost} onClick={() => setNotice(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
 
-                return (
-                  <tr key={u.id} className="hover:bg-white/[0.02] transition">
-                    {/* User Info */}
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-emerald-500/20 to-teal-500/30 text-emerald-600 dark:text-emerald-400 font-bold flex items-center justify-center text-xs border border-emerald-500/30 shrink-0">
-                          {getInitials(u.name, u.email)}
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-semibold text-sm text-[var(--text-primary)] truncate">
-                            {u.name || "Unnamed User"}
-                            {isSelf && (
-                              <span className="ml-2 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-white/10 text-[var(--text-secondary)]">
-                                You
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] font-mono text-[var(--text-secondary)] truncate">
-                            {u.email}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Contact & Timezone */}
-                    <td className="px-4 py-3.5">
-                      <div className="text-[var(--text-primary)] font-medium">
-                        {u.phone || "No phone added"}
-                      </div>
-                      <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
-                        🌍 {u.timezone || "UTC"}
-                      </div>
-                    </td>
-
-                    {/* Role Dropdown */}
-                    <td className="px-4 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={u.role}
-                          onChange={(e) => updateRole(u.id, e.target.value as AdminUserRow["role"])}
-                          disabled={locked}
-                          className={`px-2.5 py-1 rounded-lg text-xs font-semibold border ${roleBadge.bg} ${roleBadge.text} ${roleBadge.border} focus:outline-none cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed`}
-                        >
-                          {Object.keys(ROLE_LABEL)
-                            .filter((r) => ROLE_RANK[r] <= callerLevel || r === u.role)
-                            .map((r) => (
-                              <option key={r} value={r} className="bg-[var(--bg-elevated)] text-[var(--text-primary)]">
-                                {ROLE_LABEL[r]}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-5 py-3.5 text-right">
-                      {u.role === "TEACHER" ? (
-                        <Link
-                          href={`/dashboard/teacher/availability?teacherId=${u.id}`}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition"
-                        >
-                          Edit 24h Hours →
-                        </Link>
-                      ) : (
-                        <span className="text-[11px] text-[var(--text-tertiary)]">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {visibleUsers.length === 0 && (
+        {visible.length === 0 ? (
+          <EmptyState
+            title={users.length === 0 ? "No users yet" : "No users match"}
+            body={
+              users.length === 0
+                ? "Add the first teacher or student."
+                : `Nothing matches${search ? ` "${search}"` : ""}${filter !== "ALL" ? ` in ${FILTERS.find((f) => f.key === filter)?.label.toLowerCase()}` : ""}.`
+            }
+          />
+        ) : (
+          <div className={table.wrap}>
+            <table className={`${table.table} min-w-[720px]`}>
+              <thead>
                 <tr>
-                  <td colSpan={4} className="px-5 py-12 text-center text-sm text-[var(--text-secondary)]">
-                    No users found matching &quot;{search}&quot;.
-                  </td>
+                  <th scope="col" className={table.th}>User</th>
+                  <th scope="col" className={table.th}>Contact</th>
+                  <th scope="col" className={table.th}>Role</th>
+                  <th scope="col" className={table.th}>Joined</th>
+                  <th scope="col" className={`${table.th} text-right`}>Actions</th>
                 </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+              </thead>
+              <tbody>
+                {visible.map((u) => (
+                  <UserRow
+                    key={u.id}
+                    user={u}
+                    currentUserId={currentUserId}
+                    currentRole={currentRole}
+                    onChanged={upsert}
+                    onRemoved={(removed) => {
+                      setUsers((prev) => prev.filter((x) => x.id !== removed.id));
+                      refresh(`Removed ${removed.name || removed.email} (${ROLE_LABELS[removed.role]}).`);
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
     </div>
   );
 }

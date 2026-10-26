@@ -1,35 +1,28 @@
 /**
- * @fileoverview /admin/users — People, roles, and teacher promotion.
+ * @fileoverview /admin/users — every account, its role, and adding or
+ * removing one.
  *
- * Server component for the auth gate and first paint.
- * Uses Tailwind CSS layout integrated with AdminLayout.
+ * `?new=teacher` (or student, admin) opens the add form preset to that role;
+ * the Teachers page links here that way. Writes go through /api/admin/users,
+ * which holds the root-admin, self and privilege-ceiling guards.
  */
 
-import { redirect } from "next/navigation";
-import Link from "next/link";
-import { headers } from "next/headers";
-import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/rbac";
-import { db, withDb } from "@/lib/db";
+import { and, desc, isNull } from "drizzle-orm";
+import { db, withHttpDb } from "@/lib/db";
 import { users } from "@/db/schema";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { orgFilter, requireAdminPage } from "@/lib/admin-page";
+import type { UserRole } from "@/lib/roles";
+import { PageHeader, StatCard, StatGrid } from "../_components/ui";
 import UserRoleTable, { type AdminUserRow } from "./UserRoleTable";
 
 export const dynamic = "force-dynamic";
 
-export default async function AdminUsersPage() {
-  return withDb(async () => {
-    const headersList = await headers();
-    const session = await auth.api.getSession({ headers: headersList });
-    if (!session) redirect("/login?redirect=/admin/users");
+const PRESETS: Record<string, UserRole> = { teacher: "TEACHER", student: "STUDENT", admin: "ORG_ADMIN" };
 
-    const dbUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-      columns: { role: true, orgId: true },
-    });
-
-    const role = dbUser?.role || "STUDENT";
-    if (!canAccessAdmin(role)) redirect("/dashboard?error=unauthorized");
+export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<{ new?: string }> }) {
+  return withHttpDb(async () => {
+    const admin = await requireAdminPage("/admin/users");
+    const { new: preset } = await searchParams;
 
     const rows = await db
       .select({
@@ -42,51 +35,35 @@ export default async function AdminUsersPage() {
         createdAt: users.createdAt,
       })
       .from(users)
-      .where(and(eq(users.orgId, dbUser!.orgId), isNull(users.deletedAt)))
+      .where(and(orgFilter(admin, users.orgId), isNull(users.deletedAt)))
       .orderBy(desc(users.createdAt));
 
-    const initial: AdminUserRow[] = rows.map((r) => ({
-      id: r.id,
-      email: r.email,
-      name: r.name,
-      role: r.role,
-      phone: r.phone,
-      timezone: r.timezone,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    const initial: AdminUserRow[] = rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() }));
+    const count = (pred: (r: AdminUserRow) => boolean) => initial.filter(pred).length;
+    const presetRole = preset ? PRESETS[preset] : undefined;
 
     return (
-      <div className="space-y-6 animate-fadeIn">
-        {/* Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] mb-1">
-              <Link href="/admin" className="hover:text-[var(--accent)] transition">
-                Admin
-              </Link>
-              <span>/</span>
-              <span>People & Roles</span>
-            </div>
-            <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-              People & Permissions
-            </h1>
-            <p className="text-sm text-[var(--text-secondary)] mt-1">
-              Promote signed-up students to teachers, assign administrator privileges, or correct roles.
-            </p>
-          </div>
+      <div className="space-y-6">
+        <PageHeader
+          title="Users & roles"
+          description="Add people, promote students to teachers, grant admin access, or remove an account."
+          crumbs={[{ label: "Admin", href: "/admin" }, { label: "Users & roles" }]}
+        />
 
-          <Link
-            href="/admin"
-            className="px-4 py-2 rounded-xl text-sm font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition self-start sm:self-auto"
-          >
-            ← Back to Overview
-          </Link>
-        </div>
+        <StatGrid>
+          <StatCard label="Accounts" value={initial.length} />
+          <StatCard label="Teachers" value={count((r) => r.role === "TEACHER")} href="/admin/teachers" />
+          <StatCard label="Students" value={count((r) => r.role === "STUDENT")} />
+          <StatCard label="Admins" value={count((r) => r.role === "ORG_ADMIN" || r.role === "SUPER_ADMIN")} />
+        </StatGrid>
 
-        {/* Interactive User Table */}
-        <div className="p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] shadow-sm">
-          <UserRoleTable initialUsers={initial} currentUserId={session.user.id} currentRole={role} />
-        </div>
+        <UserRoleTable
+          initialUsers={initial}
+          currentUserId={admin.userId}
+          currentRole={admin.role}
+          openNew={Boolean(presetRole)}
+          newRole={presetRole ?? "TEACHER"}
+        />
       </div>
     );
   });
