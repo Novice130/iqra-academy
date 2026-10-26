@@ -1,285 +1,106 @@
 /**
- * @fileoverview Dedicated Admin Live Classes Monitor Page
+ * @fileoverview /admin/live-classes — every room open on LiveKit right now.
  *
- * Route: /admin/live-classes
- * Displays all active LiveKit classroom rooms with live participant counts and observer tools.
+ * Built on lib/admin-live.ts, the same loader as the overview's "Live now"
+ * panel. A room whose teacher is not connected is shown and sorted first
+ * rather than hidden, because it is the one an admin most needs to act on.
+ * When LiveKit can't be reached the page says so instead of claiming nothing
+ * is live.
  */
 
 import Link from "next/link";
-import { headers } from "next/headers";
-import { redirect } from "next/navigation";
-import { auth } from "@/lib/auth";
-import { canAccessAdmin } from "@/lib/rbac";
-import { db, withDb } from "@/lib/db";
-import { sessions, users, sessionAttendance } from "@/db/schema";
-import { inArray, and, eq, isNull } from "drizzle-orm";
-import { getRoomServiceClient } from "@/lib/livekit";
-import ClassActionButton from "@/components/ClassActionButton";
-import CopyLinkButton from "@/components/CopyLinkButton";
-import SessionRowActions from "../../dashboard/teacher/SessionRowActions";
-import LocalTime from "@/components/LocalTime";
+import { withHttpDb } from "@/lib/db";
+import { requireAdminPage } from "@/lib/admin-page";
+import { getLiveRooms } from "@/lib/admin-live";
+import { EmptyState, PageHeader, Panel, btn } from "../_components/ui";
+import LiveClassCard from "../_components/LiveClassCard";
+import LiveAutoRefresh from "../_components/LiveAutoRefresh";
+import LiveEndRoomButton from "../_components/LiveEndRoomButton";
 
-interface LiveClassDetail {
-  sessionId: string;
-  roomName: string;
-  title: string;
-  track: string;
-  teacherName: string;
-  teacherEmail: string;
-  studentNames: string;
-  numParticipants: number;
-  actualStart: Date | null;
-  elapsedMinutes?: number;
-  roomHealth?: "HEALTHY" | "DEGRADED";
-}
+export const dynamic = "force-dynamic";
 
 export default async function AdminLiveClassesPage() {
-  return withDb(async () => {
-    const headersList = await headers();
-    const session = await auth.api.getSession({ headers: headersList });
-    if (!session) redirect("/login?redirect=/admin/live-classes");
-
-    const dbUser = await db.query.users.findFirst({
-      where: eq(users.id, session.user.id),
-      columns: { id: true, role: true, orgId: true },
-    });
-
-    const role = dbUser?.role || "STUDENT";
-    if (!canAccessAdmin(role) || !dbUser?.orgId) {
-      redirect("/dashboard?error=unauthorized");
-    }
-
-    const isSuperAdmin = role === "SUPER_ADMIN";
-    const orgId = dbUser.orgId;
-
-    const liveClasses = await getDetailedLiveClasses(orgId, isSuperAdmin);
+  return withHttpDb(async () => {
+    const admin = await requireAdminPage("/admin/live-classes");
+    const { rooms, unmatched, unavailable } = await getLiveRooms(admin);
+    const missingTeacher = rooms.filter((r) => r.teacherConnected === false).length;
 
     return (
-      <div className="space-y-6 animate-fadeIn">
-        {/* Header with Breadcrumbs */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-6 border-b border-[var(--border)]">
-          <div>
-            <div className="flex items-center gap-2 text-xs font-semibold text-[var(--text-secondary)] mb-1">
-              <Link href="/admin" className="hover:text-[var(--accent)] transition">
-                Admin
+      <div className="space-y-6">
+        <PageHeader
+          title="Live now"
+          crumbs={[{ label: "Admin", href: "/admin" }, { label: "Live now" }]}
+          description={
+            unavailable
+              ? "The video service could not be reached."
+              : `${rooms.length} ${rooms.length === 1 ? "class" : "classes"} in progress${
+                  missingTeacher ? `, ${missingTeacher} without the teacher connected` : ""
+                }.`
+          }
+          actions={
+            <>
+              <LiveAutoRefresh />
+              <Link href="/admin/scheduled-classes" className={btn.secondary}>
+                Classes
               </Link>
-              <span>/</span>
-              <span>Live Classes</span>
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className={`w-3 h-3 rounded-full ${liveClasses.length > 0 ? "bg-red-500 animate-pulse" : "bg-zinc-400"}`} />
-              <h1 className="text-2xl font-bold tracking-tight text-[var(--text-primary)]">
-                Live Classroom Monitor ({liveClasses.length})
-              </h1>
-            </div>
-            <p className="text-sm text-[var(--text-secondary)] mt-1">
-              Real-time telemetry and supervision for in-progress classes across the school.
-            </p>
-          </div>
+            </>
+          }
+        />
 
-          <div className="flex items-center gap-3">
-            <Link
-              href="/admin/scheduled-classes"
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition"
-            >
-              📅 Scheduled Classes
-            </Link>
-            <Link
-              href="/admin"
-              className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-secondary)] transition"
-            >
-              ← Back to Overview
-            </Link>
-          </div>
-        </div>
-
-        {/* Live Classes Grid */}
-        {liveClasses.length === 0 ? (
-          <div className="p-12 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] text-center space-y-4">
-            <div className="w-12 h-12 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 flex items-center justify-center mx-auto text-xl">
-              📹
+        {unavailable ? (
+          <Panel>
+            <div role="alert">
+              <EmptyState
+                title="Couldn't reach the video service"
+                body="Live rooms can't be listed right now, so this page can't tell whether any class is running. It retries every 30 seconds. System health has the details."
+                action={
+                  <Link href="/admin/system" className={btn.secondary}>
+                    System health
+                  </Link>
+                }
+              />
             </div>
-            <div>
-              <h3 className="text-base font-semibold text-[var(--text-primary)]">No Active Classes Right Now</h3>
-              <p className="text-xs text-[var(--text-secondary)] mt-1 max-w-md mx-auto">
-                There are no classes currently running with participants connected. When a teacher joins an occurrence, telemetry will appear here in real time.
-              </p>
-            </div>
-            <div className="pt-2 flex items-center justify-center gap-3">
-              <Link
-                href="/admin/scheduled-classes"
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--accent)] text-white shadow-xs hover:opacity-95 transition"
-              >
-                Inspect Scheduled Classes
-              </Link>
-              <Link
-                href="/admin/teacher-schedules"
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-[var(--bg-secondary)] text-[var(--text-primary)] border border-[var(--border)] hover:bg-[var(--bg-elevated)] transition"
-              >
-                Teacher Schedules
-              </Link>
-            </div>
-          </div>
+          </Panel>
+        ) : rooms.length === 0 ? (
+          <Panel>
+            <EmptyState
+              title="No classes live right now"
+              body="A class appears here as soon as someone connects to its room."
+              action={
+                <Link href="/admin/scheduled-classes" className={btn.secondary}>
+                  See scheduled classes
+                </Link>
+              }
+            />
+          </Panel>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {liveClasses.map((item) => (
-              <div
-                key={item.sessionId}
-                className="p-6 rounded-2xl bg-[var(--bg-elevated)] border border-[var(--border)] flex flex-col justify-between space-y-5 shadow-xs"
-              >
-                <div className="space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="font-bold text-base text-[var(--text-primary)] leading-snug">
-                        {item.title}
-                      </h3>
-                      <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-                        Room: <code className="text-[11px] font-mono">{item.roomName}</code>
-                      </p>
-                    </div>
-                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 shrink-0">
-                      {item.track}
-                    </span>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-[var(--bg-secondary)] space-y-1.5 text-xs">
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-secondary)]">Teacher:</span>
-                      <span className="font-semibold text-[var(--text-primary)]">{item.teacherName}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-secondary)]">Students:</span>
-                      <span className="font-semibold text-[var(--text-primary)] truncate max-w-[180px] text-right">
-                        {item.studentNames}
-                      </span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--text-secondary)]">Started:</span>
-                      <span className="font-medium text-[var(--text-primary)]">
-                        {item.actualStart ? <LocalTime iso={item.actualStart.toISOString()} mode="time" /> : "Recently"} ({item.elapsedMinutes ?? 1}m elapsed)
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
-                      {item.numParticipants} participants connected
-                    </span>
-                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                      Health: Healthy
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-between pt-4 border-t border-[var(--border)] gap-2">
-                  <ClassActionButton
-                    session={{
-                      id: item.sessionId,
-                      status: "IN_PROGRESS",
-                      actualStart: item.actualStart,
-                      title: item.title,
-                    }}
-                    viewer={{ role: "ORG_ADMIN", isAdmin: true }}
-                    variant="compact"
-                  />
-                  <div className="flex items-center gap-1.5">
-                    <CopyLinkButton path={`/dashboard/session/${item.sessionId}`} />
-                    <SessionRowActions sessionId={item.sessionId} showEnd={true} />
-                  </div>
-                </div>
-              </div>
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {rooms.map((room) => (
+              <LiveClassCard key={room.roomName} room={room} viewer={admin} detailed />
             ))}
           </div>
+        )}
+
+        {unmatched.length > 0 && (
+          <Panel
+            title="Rooms without a class"
+            description="Open on the video service with people connected, but no session matches the room name. They are still billed."
+            flush
+          >
+            <ul className="divide-y divide-[var(--border)]">
+              {unmatched.map((r) => (
+                <li key={r.roomName} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                  <div className="min-w-0 text-sm">
+                    <code className="font-mono text-xs break-all text-[var(--text-primary)]">{r.roomName}</code>
+                    <div className="text-xs text-[var(--text-secondary)]">{r.participantCount} connected</div>
+                  </div>
+                  <LiveEndRoomButton roomName={r.roomName} title={r.roomName} />
+                </li>
+              ))}
+            </ul>
+          </Panel>
         )}
       </div>
     );
   });
-}
-
-async function getDetailedLiveClasses(orgId: string, isSuperAdmin: boolean): Promise<LiveClassDetail[]> {
-  try {
-    const rooms = await getRoomServiceClient().listRooms().catch(() => []);
-    if (!rooms || rooms.length === 0) return [];
-
-    const activeRooms = rooms.filter((r) => r.numParticipants > 0);
-    if (activeRooms.length === 0) return [];
-
-    const sessionIds = activeRooms.map((r) => r.name.replace(/^qlms-/, ""));
-    const whereClause = isSuperAdmin
-      ? inArray(sessions.id, sessionIds)
-      : and(inArray(sessions.id, sessionIds), eq(sessions.orgId, orgId));
-
-    const matchedSessions = await db.query.sessions.findMany({
-      where: whereClause,
-      with: {
-        teacher: { columns: { id: true, name: true, email: true } },
-        bookings: {
-          with: {
-            studentProfile: { columns: { name: true } },
-          },
-        },
-      },
-    });
-
-    if (matchedSessions.length === 0) return [];
-
-    const activeAttendance = await db
-      .select({ sessionId: sessionAttendance.sessionId, userId: sessionAttendance.userId })
-      .from(sessionAttendance)
-      .where(
-        and(
-          isSuperAdmin ? undefined : eq(sessionAttendance.orgId, orgId),
-          inArray(sessionAttendance.sessionId, matchedSessions.map((s) => s.id)),
-          isNull(sessionAttendance.leftAt)
-        )
-      );
-
-    const activeTeachersBySession = new Set(
-      activeAttendance.map((a) => `${a.sessionId}:${a.userId}`)
-    );
-
-    const byId = new Map(matchedSessions.map((s) => [s.id, s]));
-    const byVideoRoomName = new Map(
-      matchedSessions.filter((s) => s.videoRoomName).map((s) => [s.videoRoomName!, s])
-    );
-
-    const details: LiveClassDetail[] = [];
-
-    for (const r of activeRooms) {
-      const session = byId.get(r.name.replace(/^qlms-/, "")) || byVideoRoomName.get(r.name);
-      if (!session) continue;
-
-      const hasTeacherPresent = isSuperAdmin || activeTeachersBySession.has(`${session.id}:${session.teacherId}`);
-      if (!hasTeacherPresent) continue;
-
-      const studentNames = session.bookings
-        .map((b) => b.studentProfile?.name)
-        .filter(Boolean)
-        .join(", ") || "No students yet";
-
-      const actualStart = session.actualStart ? new Date(session.actualStart) : null;
-      const elapsedMinutes = actualStart
-        ? Math.max(1, Math.round((Date.now() - actualStart.getTime()) / (60 * 1000)))
-        : 1;
-
-      details.push({
-        sessionId: session.id,
-        roomName: r.name,
-        title: session.title || "Quran Class",
-        track: session.track || "QAIDAH",
-        teacherName: session.teacher?.name || session.teacher?.email || "Teacher",
-        teacherEmail: session.teacher?.email || "",
-        studentNames,
-        numParticipants: r.numParticipants,
-        actualStart,
-        elapsedMinutes,
-        roomHealth: "HEALTHY",
-      });
-    }
-
-    return details;
-  } catch {
-    return [];
-  }
 }
