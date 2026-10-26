@@ -67,8 +67,9 @@ test.describe("Phase 8: Visual System & Every Active Page", () => {
     // Instant Meeting button naming
     const buttonPath = path.join(webRoot, "src/app/dashboard/teacher/StartInstantMeetingButton.tsx");
     const buttonContent = fs.readFileSync(buttonPath, "utf-8");
-    expect(buttonContent).toContain("⚡ Instant Meeting");
-    expect(buttonContent).not.toContain("⚡ Start Class");
+    expect(buttonContent).toContain('"Instant Meeting"');
+    expect(buttonContent).not.toContain("Start Class");
+    expect(buttonContent).not.toContain("⚡");
   });
 
   test("Class action and meeting service scheduling windows are unified at T+180", () => {
