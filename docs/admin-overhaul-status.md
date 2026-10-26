@@ -4,9 +4,29 @@ Last updated 2026-10-26. Branch `feat/admin-panel-overhaul` (cut from `02672a3`
 on `feat/vps-migration`), worktree `.claude/worktrees/admin-overhaul`. Design:
 `docs/superpowers/specs/2026-10-26-admin-panel-overhaul-design.md`.
 
-Verified: `tsc --noEmit`, eslint (0 errors), `next build` (19 admin pages).
-**Not verified:** never run against a database or opened in a browser. Not
-merged, not pushed, not deployed.
+**Merged** (fast-forward) into `feat/vps-migration` on 2026-10-26. Not pushed,
+not deployed.
+
+Verified:
+- `tsc --noEmit`, eslint (0 errors), `next build`.
+- Against a throwaway local Postgres 16 (UTC, `drizzle-kit push` + `db:seed`),
+  production build on localhost:
+  - Every `/admin` page, as ORG_ADMIN and as SUPER_ADMIN, loaded in headless
+    Chromium: 200, no console or page errors, no 5xx. (Only noise: the
+    realtime WebSocket, as no sidecar was running.) Teacher and family
+    dashboards too.
+  - Scripted checks, 58/58: admin booking notifies family and teacher;
+    SUPER_ADMIN can and ORG_ADMIN cannot delete another org's time off;
+    `/api/cron/daily` rejects no auth, a wrong secret and an admin session,
+    flips a past-due manual invoice to OVERDUE, leaves a not-yet-due one and
+    a Stripe one alone, ends a cancel-at-period-end subscription, reports a
+    lapsed one without ending it, and does nothing on a second run.
+  - `npm run test:api`: 99 passed, 14 failed. The same suite on the base
+    commit `02672a3`, same database: 96 passed, 17 failed. Every failure on
+    the branch also fails on base (see "Known failing API tests").
+- Pages were loaded, not clicked through action by action. LiveKit, Resend,
+  Stripe and the sidecar were not configured, so those paths were only seen
+  failing gracefully ("would have sent" in the log for email).
 
 ## Done
 
@@ -68,37 +88,123 @@ Duplicate live-classes loader, `InstantMeetingAdminButton`, `AssignStudentModal`
 `api/admin/impersonate` (did nothing), `lib/admin.ts` (unused AdminJS), triple
 nav lists, per-page auth copies, duplicate `money()`, emoji labels.
 
+## Added after the first pass (2026-10-26)
+
+- **Daily billing job** — `POST /api/cron/daily` (`lib/daily-jobs.ts`), bearer
+  `CRON_SECRET`, fail-closed. Marks OPEN hand-raised invoices past due as
+  OVERDUE and emails the family one reminder (amount still owed); Stripe
+  invoices are left to Stripe. Ends manual subscriptions set to cancel at
+  period end. Manual subscriptions whose period ran out are reported, not
+  ended. One summary email per org's admins on days with news. Idempotent.
+  The `/admin/plans` on-load settle stays as a backstop.
+- **Admin booking notifies** — `api/admin/assign-student` sends one message to
+  the family and one to the teacher (in-app, push, email), each in their own
+  zone, naming the first class and the weekly count.
+- **Leftovers** — inline confirm in `SessionRowActions` (and it shows API
+  errors now); emoji gone from the Instant Meeting label; SUPER_ADMIN can
+  delete any org's time off; `/dashboard/progress` lists in-progress records.
+- **Removed** — `lib/crm.ts` and the `/admin/system` CRM panel (read a table
+  nothing wrote), `api/admin/observers`, `sendWelcomeEmail`,
+  `sendSessionReminder`, `sendWeeklyDigest`. Tables kept (no migrations).
+
+## Server setup for the daily job (not done — infra repo is yours)
+
+Fits the existing pattern (`hetzner/backup/infra-backup.{service,timer}`): a
+host systemd timer, calling the route from inside the web container so the
+request never leaves the box and the secret never appears on a command line.
+
+1. Add to `/opt/sites/novicetutor/web.env` (and the name to
+   `hetzner/sites/novicetutor/web.env.example`):
+   `CRON_SECRET=` a value from `openssl rand -hex 32`. Compose's `env_file`
+   already passes web.env to `web`; the realtime sidecar does not get it.
+2. `/etc/systemd/system/novicetutor-daily.service`:
+
+   ```ini
+   # Daily billing sweep for novicetutor.com: overdue invoices, subscription
+   # period end. journalctl -u novicetutor-daily.service -n 20
+   [Unit]
+   Description=novicetutor.com daily billing job
+   After=docker.service
+   Requires=docker.service
+
+   [Service]
+   Type=oneshot
+   ExecStart=/usr/bin/docker exec novicetutor-web-1 node -e "fetch('http://127.0.0.1:3000/api/cron/daily',{method:'POST',headers:{authorization:'Bearer '+process.env.CRON_SECRET}}).then(async r=>{console.log(r.status,await r.text());process.exit(r.ok?0:1)}).catch(e=>{console.error(e);process.exit(1)})"
+   TimeoutStartSec=5min
+   ```
+
+3. `/etc/systemd/system/novicetutor-daily.timer`:
+
+   ```ini
+   # 13:00 UTC: morning in the US, evening in India. Persistent: a run missed
+   # while the server was off happens at boot.
+   [Unit]
+   Description=novicetutor.com daily billing job
+
+   [Timer]
+   OnCalendar=*-*-* 13:00:00 UTC
+   RandomizedDelaySec=10min
+   Persistent=true
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+4. `systemctl daemon-reload && systemctl enable --now novicetutor-daily.timer`,
+   then one manual run: `systemctl start novicetutor-daily.service &&
+   journalctl -u novicetutor-daily.service -n 20` (expect `200 {"success":true,...}`).
+5. Optional, defence in depth: in the `novicetutor` Caddy block, answer 404
+   for `/api/cron/*` from outside (`@internal path /api/cron/*` +
+   `respond @internal 404` before the main `handle`).
+
+Until the site moves to Hetzner nothing calls the route; Cloudflare Workers
+production keeps today's behaviour (on-load settle, overdue computed for
+display). One Neon wake a day is negligible.
+
 ## To do
 
-### Before merging (user)
-1. Move `private_keys/AuthKey_T479RMTYDJ.p8` out of the repo folder (docs say
-   `~/.appstoreconnect/private_keys/`). Delete `cookies.txt` if it's a login cookie.
-2. Commit or stash main-checkout work, then `git merge feat/admin-panel-overhaul`.
-   Expect a conflict on `apps/web/src/app/admin/InstantMeetingAdminButton.tsx`
-   — keep the deletion.
-3. Run against a test DB and click through every `/admin` page; run
-   `npm run test:api` with the app running.
+### Left for the user
+1. Delete `cookies.txt` in the main checkout: a curl cookie jar holding a
+   novicetutor.com session cookie (expired 2026-08-29). Git-ignored, never
+   committed. The deletion was blocked by the permission guard.
+2. The repo copy of `AuthKey_T479RMTYDJ.p8` was moved to
+   `~/.appstoreconnect/moved-from-repo/`. It is byte-identical to
+   `~/.appstoreconnect/private_keys/AuthKey_T479RMTYDJ.p8`, so the moved copy
+   can be deleted. Key files there are now mode 600.
+3. Your main-checkout work from before the merge is snapshotted at
+   `refs/backup/main-wip-2026-10-26` (all 16 files). It was re-applied after the
+   merge except `InstantMeetingAdminButton.tsx`, which the branch deletes (its
+   popup fix is in `git show refs/backup/main-wip-2026-10-26 --
+   apps/web/src/app/admin/InstantMeetingAdminButton.tsx` if wanted). Delete the
+   ref once happy: `git update-ref -d refs/backup/main-wip-2026-10-26`.
+4. Server setup above.
 
 ### Decisions needed (user)
 - Should a NO_SHOW still use up a lesson from the plan quota? (Currently yes:
   bookings stay CONFIRMED.)
 - Cal.com booking that clashes with an existing class: currently created anyway
   with a log warning. OK?
+- A manual subscription whose period ran out (not set to cancel) is reported
+  to admins daily-ish but stays ACTIVE. Should it pause or go PAST_DUE instead?
 
 ### Remaining build work
-1. **Scheduled job** (needs infra on the Hetzner server, e.g. cron calling an
-   authenticated route): mark OPEN invoices past due as OVERDUE (+ reminder
-   email via `lib/email.ts sendRawEmail`); end manual subscriptions at period
-   end (today done on `/admin/plans` load in `lib/admin-subscriptions.ts`).
-2. **Real impersonation** ("log in as user") — needs its own design: Better
+1. **Real impersonation** ("log in as user") — needs its own design: Better
    Auth admin plugin or signed session swap, visible banner, end action, audit.
-3. **Family notification when an admin books a class** (`api/admin/assign-student`
-   doesn't notify).
-4. Small leftovers: `StartInstantMeetingButton.tsx` has a "⚡" emoji (user WIP
-   file); `SessionRowActions.tsx` uses `window.confirm`; time-off DELETE scopes
-   by caller's org, so SUPER_ADMIN can't delete another org's time off;
-   `/dashboard/progress` lists only completed records.
-5. Dead-code candidates not yet removed: `lib/email.ts` `sendWeeklyDigest` /
-   `sendSessionReminder` and `lib/crm.ts` sync functions are never called —
-   wire up or delete. `api/admin/observers` is a student feature under the
-   admin path with no caller.
+2. Observer list on the admin student page still reads `observer_emails`, but
+   nothing lets a family add one any more and no digest is sent. Remove the
+   panel or build the feature.
+
+### Known failing API tests (pre-existing, same on base `02672a3`)
+- Meeting controls (lock, volume, spotlight, room-wide volume): 500 without
+  LiveKit configured.
+- `lifecycle.spec.ts` due-window tests and `data-model.spec.ts` instant-meeting
+  origin: depend on leftover classes in the database; the latter passes alone.
+- On reruns against the same database, `admin-architecture.spec.ts:224`
+  (admin reschedule) gets 422: earlier runs leave classes for the same
+  fixture teacher at the target time and the reschedule conflict check
+  refuses, correctly. Passes on a fresh database. The suite needs per-run
+  cleanup or unique times.
+- `tenant-isolation.spec.ts` / `rbac-deep.spec.ts` cross-org matrix: routes
+  answer 404/400/422 where the tests expect 403, and one error message
+  wording differs. Assertions or routes need reconciling; not touched here.
+- `rbac-deep.spec.ts` breakout token: 403 where 200 expected.
