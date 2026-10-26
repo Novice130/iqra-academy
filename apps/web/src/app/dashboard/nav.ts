@@ -62,6 +62,7 @@ export const NAV: Record<NavRole, RoleNav> = {
           { href: "/admin/students", label: "Students" },
           { href: "/admin/teachers", label: "Teachers" },
           { href: "/admin/trials", label: "Trial requests" },
+          { href: "/admin/curriculum", label: "Curriculum" },
           { href: "/admin/users", label: "Users & roles" },
         ],
       },

@@ -82,6 +82,51 @@ export interface QuotaStatus {
 }
 
 /**
+ * Write the week's entitlement cache row.
+ *
+ * The unique index is (subscription, week, student profile), and a family
+ * plan stores a NULL profile. Postgres treats NULLs as distinct, so
+ * ON CONFLICT never fired for family plans and every quota check inserted
+ * another row. For a NULL profile, update the existing row first and insert
+ * only when there is none. The row is a cache — usage is always recounted
+ * from bookings — so a rare duplicate from two concurrent first writes is
+ * harmless.
+ */
+async function upsertEntitlement(
+  conn: typeof db,
+  row: {
+    subscriptionId: string;
+    studentProfileId?: string | null;
+    weekStartDate: Date;
+    totalClasses: number;
+    usedClasses: number;
+  }
+): Promise<void> {
+  if (row.studentProfileId) {
+    await conn
+      .insert(entitlements)
+      .values(row)
+      .onConflictDoUpdate({
+        target: [entitlements.subscriptionId, entitlements.weekStartDate, entitlements.studentProfileId],
+        set: { usedClasses: row.usedClasses },
+      });
+    return;
+  }
+  const updated = await conn
+    .update(entitlements)
+    .set({ usedClasses: row.usedClasses, totalClasses: row.totalClasses })
+    .where(
+      and(
+        eq(entitlements.subscriptionId, row.subscriptionId),
+        eq(entitlements.weekStartDate, row.weekStartDate),
+        isNull(entitlements.studentProfileId)
+      )
+    )
+    .returning({ id: entitlements.id });
+  if (updated.length === 0) await conn.insert(entitlements).values(row);
+}
+
+/**
  * Gets the current week's quota status for a subscription.
  *
  * 📚 HOW THIS WORKS:
@@ -163,23 +208,13 @@ export async function getQuotaStatus(
   const remaining = Math.max(0, totalAllowed - usedThisWeek);
 
   // Step 4: Upsert the Entitlement record (cache)
-  await db
-    .insert(entitlements)
-    .values({
-      subscriptionId,
-      studentProfileId: perChild ? studentProfileId : null,
-      weekStartDate: weekStart,
-      totalClasses: totalAllowed,
-      usedClasses: usedThisWeek,
-    })
-    .onConflictDoUpdate({
-      target: [
-        entitlements.subscriptionId,
-        entitlements.weekStartDate,
-        entitlements.studentProfileId,
-      ],
-      set: { usedClasses: usedThisWeek },
-    });
+  await upsertEntitlement(db, {
+    subscriptionId,
+    studentProfileId: perChild ? studentProfileId : null,
+    weekStartDate: weekStart,
+    totalClasses: totalAllowed,
+    usedClasses: usedThisWeek,
+  });
 
   return {
     totalAllowed,
@@ -356,23 +391,13 @@ export async function consumeQuota(
     }
 
     // Update the entitlement cache
-    await tx
-      .insert(entitlements)
-      .values({
-        subscriptionId,
-        studentProfileId: perChild ? studentProfileId : null,
-        weekStartDate: weekStart,
-        totalClasses: subscription.plan.classesPerWeek,
-        usedClasses: usedThisWeek + 1,
-      })
-      .onConflictDoUpdate({
-        target: [
-          entitlements.subscriptionId,
-          entitlements.weekStartDate,
-          entitlements.studentProfileId,
-        ],
-        set: { usedClasses: usedThisWeek + 1 },
-      });
+    await upsertEntitlement(tx as unknown as typeof db, {
+      subscriptionId,
+      studentProfileId: perChild ? studentProfileId : null,
+      weekStartDate: weekStart,
+      totalClasses: subscription.plan.classesPerWeek,
+      usedClasses: usedThisWeek + 1,
+    });
 
     return true;
   });
