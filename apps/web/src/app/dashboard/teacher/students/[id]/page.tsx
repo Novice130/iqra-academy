@@ -1,11 +1,14 @@
 /**
  * Teacher & Admin Student Detail Workspace — View comprehensive student history & progress records
+ *
+ * The student's own teacher (or an admin of the org) records lesson progress
+ * here; see lib/progress.ts for who may write and api/teachers/progress for the
+ * writes. Other teachers in the org can still read the page.
  */
 
 import { headers } from "next/headers";
 import { notFound, redirect } from "next/navigation";
 import Link from "next/link";
-import { format } from "date-fns";
 import { eq, and, desc, count } from "drizzle-orm";
 import { auth } from "@/lib/auth";
 import { db, withDb } from "@/lib/db";
@@ -14,11 +17,20 @@ import {
   users,
   progressRecords,
   bookings,
-  sessions,
   lessonContent,
 } from "@/db/schema";
 import CallStudentButton from "../CallStudentButton";
 import LocalTime from "@/components/LocalTime";
+import {
+  canDeleteEntry,
+  isOrgAdminRole,
+  listLessonsForTrack,
+  listLinkableSessions,
+  listProgressEntries,
+  teacherTeachesProfile,
+} from "@/lib/progress";
+import ProgressForm from "./ProgressForm";
+import ProgressEntries from "./ProgressEntries";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -72,15 +84,17 @@ export default async function StudentDetailPage({ params }: PageProps) {
       notFound();
     }
 
-    // 2. Fetch progress records with lessons
-    const records = await db.query.progressRecords.findMany({
-      where: eq(progressRecords.studentProfileId, id),
-      with: {
-        lesson: true,
-      },
-      orderBy: [desc(progressRecords.createdAt)],
-      limit: 30,
-    });
+    // 2. Progress entries, and whether this caller may add to them
+    const records = await listProgressEntries(id);
+    const recorder = { userId: session.user.id, orgId: callerOrgId, role: caller!.role };
+    const canRecord =
+      isOrgAdminRole(recorder.role) || (await teacherTeachesProfile(recorder.userId, id));
+    const [lessons, linkableSessions] = canRecord
+      ? await Promise.all([listLessonsForTrack(student.orgId, student.track), listLinkableSessions(recorder, id)])
+      : [[], []];
+    const deletableIds = records
+      .filter((r) => canDeleteEntry(recorder, r))
+      .map((r) => r.id);
 
     // 3. Fetch past and upcoming session bookings
     const studentBookings = await db.query.bookings.findMany({
@@ -107,7 +121,13 @@ export default async function StudentDetailPage({ params }: PageProps) {
     const totalTrackLessons = await db
       .select({ count: count() })
       .from(lessonContent)
-      .where(eq(lessonContent.track, student.track));
+      .where(
+        and(
+          eq(lessonContent.orgId, student.orgId),
+          eq(lessonContent.track, student.track),
+          eq(lessonContent.isActive, true)
+        )
+      );
 
     const totalLessons = totalTrackLessons[0]?.count || 1;
     const completed = completedCount[0]?.count || 0;
@@ -211,47 +231,15 @@ export default async function StudentDetailPage({ params }: PageProps) {
               </span>
             </div>
 
-            {records.length > 0 ? (
-              <div className="space-y-3">
-                {records.map((record) => (
-                  <div key={record.id} className="card p-4">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <div className="font-semibold text-xs" style={{ color: "var(--text-primary)" }}>
-                        {record.lesson?.title || "Class Practice"}
-                      </div>
-                      <span
-                        className="text-[10px] font-bold px-2 py-0.5 rounded-md"
-                        style={{
-                          background: record.isCompleted ? "rgba(16,185,129,0.12)" : "rgba(245,158,11,0.12)",
-                          color: record.isCompleted ? "#059669" : "#d97706",
-                        }}
-                      >
-                        {record.isCompleted ? "✓ Completed" : "In Progress"}
-                      </span>
-                    </div>
-
-                    {record.teacherNotes && (
-                      <p className="text-xs italic mb-2 leading-relaxed" style={{ color: "var(--text-secondary)" }}>
-                        📝 &ldquo;{record.teacherNotes}&rdquo;
-                      </p>
-                    )}
-
-                    <div className="flex items-center justify-between text-[10px]" style={{ color: "var(--text-tertiary)" }}>
-                      <span>
-                        {record.score !== null && record.score !== undefined ? `Score: ${record.score}%` : "No score recorded"}
-                      </span>
-                      <span>
-                        <LocalTime iso={new Date(record.createdAt).toISOString()} mode="date-time" />
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="card p-8 text-center text-xs" style={{ color: "var(--text-tertiary)" }}>
-                No progress records yet. Tutors record notes during and after live classes.
-              </div>
+            {canRecord && (
+              <ProgressForm
+                studentProfileId={student.id}
+                lessons={lessons}
+                sessions={linkableSessions.map((x) => ({ id: x.id, scheduledStart: x.scheduledStart.toISOString() }))}
+              />
             )}
+
+            <ProgressEntries entries={records} deletableIds={canRecord ? deletableIds : []} />
           </div>
 
           {/* Session History */}
