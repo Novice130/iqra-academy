@@ -94,7 +94,7 @@ export default async function AdminLiveClassesPage() {
                     <code className="font-mono text-xs break-all text-[var(--text-primary)]">{r.roomName}</code>
                     <div className="text-xs text-[var(--text-secondary)]">{r.participantCount} connected</div>
                   </div>
-                  <LiveEndRoomButton roomName={r.roomName} title={r.roomName} />
+                  <LiveEndRoomButton roomNames={[r.roomName]} title={r.roomName} />
                 </li>
               ))}
             </ul>

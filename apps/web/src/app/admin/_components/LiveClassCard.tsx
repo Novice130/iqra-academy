@@ -81,6 +81,9 @@ export default function LiveClassCard({
             <LocalTime iso={room.scheduledEnd} mode="time" />
             <span className="text-[var(--text-secondary)]"> scheduled</span>
           </Row>
+          {room.breakoutRoomNames.length > 0 && (
+            <Row term="Breakouts">{room.breakoutRoomNames.length} open</Row>
+          )}
           {detailed && (
             <Row term="Room">
               <code className="font-mono text-[11px] break-all">{room.roomName}</code>
@@ -104,7 +107,12 @@ export default function LiveClassCard({
           variant="compact"
         />
         <CopyLinkButton path={`/dashboard/session/${room.sessionId}`} />
-        {detailed && <LiveEndRoomButton roomName={room.roomName} title={room.title} />}
+        {detailed && (
+          <LiveEndRoomButton
+            roomNames={[...room.breakoutRoomNames.filter((n) => n !== room.roomName), room.roomName]}
+            title={room.title}
+          />
+        )}
       </div>
     </article>
   );

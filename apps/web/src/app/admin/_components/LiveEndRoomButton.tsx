@@ -7,13 +7,28 @@
  * room is enough to end the class: LiveKit then sends `room_finished`, and the
  * webhook closes attendance and marks an IN_PROGRESS session COMPLETED. The
  * confirm text says so, because "room" alone undersells what happens.
+ *
+ * A class in breakouts has several rooms. They are closed breakouts first,
+ * main room last, so nobody is left alone in a breakout after the class ends.
+ * A room that is already gone (404) counts as closed.
  */
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { btn } from "./ui";
 
-export default function LiveEndRoomButton({ roomName, title }: { roomName: string; title: string }) {
+export default function LiveEndRoomButton({
+  roomName,
+  roomNames: many,
+  title,
+}: {
+  /** One room. /admin/system passes this. */
+  roomName?: string;
+  /** Several rooms of one class: breakouts first, main room last. */
+  roomNames?: string[];
+  title: string;
+}) {
+  const roomNames = many ?? (roomName ? [roomName] : []);
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [pending, setPending] = useState(false);
@@ -23,16 +38,20 @@ export default function LiveEndRoomButton({ roomName, title }: { roomName: strin
     setPending(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/livekit-rooms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "end", roomName }),
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        const msg = typeof data.message === "string" ? data.message : typeof data.error === "string" ? data.error : null;
-        setError(msg ?? "Couldn't end the room. Try again.");
-        return;
+      for (const roomName of roomNames) {
+        const res = await fetch("/api/admin/livekit-rooms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "end", roomName }),
+        });
+        if (!res.ok && res.status !== 404) {
+          const data = await res.json().catch(() => ({}));
+          const msg = typeof data.message === "string" ? data.message : typeof data.error === "string" ? data.error : null;
+          setError(msg ?? "Couldn't end the room. Try again.");
+          // Earlier rooms in the list may already be closed; show that.
+          router.refresh();
+          return;
+        }
       }
       setConfirming(false);
       router.refresh();
@@ -54,7 +73,9 @@ export default function LiveEndRoomButton({ roomName, title }: { roomName: strin
   return (
     <div className="w-full rounded-xl border border-[var(--color-danger)]/30 bg-[var(--color-danger)]/5 p-3 space-y-2" role="group" aria-label="Confirm ending the room">
       <p className="text-xs text-[var(--text-primary)]">
-        End this room? Everyone is disconnected and the class is marked complete.
+        {roomNames.length > 1
+          ? `End this class and its ${roomNames.length - 1} breakout ${roomNames.length === 2 ? "room" : "rooms"}? Everyone is disconnected and the class is marked complete.`
+          : "End this room? Everyone is disconnected and the class is marked complete."}
       </p>
       {error && (
         <p role="alert" className="text-xs font-medium text-[var(--color-danger)]">

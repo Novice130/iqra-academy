@@ -13,6 +13,10 @@
  *   - whether the assigned teacher is among them;
  *   - minutes since the class started, and minutes past its scheduled end.
  *
+ * A class in breakouts is still one class: its breakout rooms are folded into
+ * the parent session's card (participants summed, teacher found in any of
+ * them), never listed as rooms without a class.
+ *
  * LiveKit is the source of truth for "open": a room can be open while its
  * session row already says COMPLETED, and that room is still being billed. So
  * the session's DB status is returned as-is rather than assumed IN_PROGRESS.
@@ -27,21 +31,20 @@
  * @module lib/admin-live
  */
 
-import { and, gte, inArray, isNull, lte, ne, or, eq } from "drizzle-orm";
+import { and, gte, inArray, isNull, lte, ne, eq } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bookings, sessionAttendance, sessions, studentProfiles, users } from "@/db/schema";
-import {
-  baseIdentity,
-  getRoomServiceClient,
-  isScreenShareIdentity,
-  sessionIdFromRoomName,
-} from "@/lib/livekit";
+import { baseIdentity, getRoomServiceClient, isScreenShareIdentity } from "@/lib/livekit";
+import { resolveRoomSessions, roomVisibleTo } from "@/lib/admin-ops";
 import { SIBLING_WINDOW_MS } from "@/lib/meeting-constants";
 import { orgFilter, type AdminContext } from "@/lib/admin-page";
 
 export interface LiveRoom {
   sessionId: string;
+  /** The class's main room, or its first breakout when the main room is empty. */
   roomName: string;
+  /** Breakout rooms of this class that have people in them. */
+  breakoutRoomNames: string[];
   title: string;
   track: string | null;
   /** The session row's status. Usually IN_PROGRESS; anything else is itself a signal. */
@@ -50,7 +53,7 @@ export interface LiveRoom {
   teacherName: string;
   teacherEmail: string;
   students: string[];
-  /** People connected, screen-share publishers excluded. */
+  /** People connected across the main room and its breakouts, screen-share publishers excluded. */
   participantCount: number;
   participantNames: string[];
   /** Null when neither LiveKit nor attendance could tell us. */
@@ -60,7 +63,7 @@ export interface LiveRoom {
   scheduledStart: string;
   scheduledEnd: string;
   elapsedMinutes: number | null;
-  /** Minutes past the scheduled end (extensions included). 0 when not over. */
+  /** Minutes past the scheduled end (which already includes extensions). 0 when not over. */
   overrunMinutes: number;
 }
 
@@ -79,6 +82,8 @@ export interface LiveSnapshot {
 
 const MINUTE = 60_000;
 
+type OpenRoom = Awaited<ReturnType<ReturnType<typeof getRoomServiceClient>["listRooms"]>>[number];
+
 function minutesSince(from: Date | null, now: number): number | null {
   if (!from) return null;
   return Math.max(0, Math.floor((now - from.getTime()) / MINUTE));
@@ -87,7 +92,7 @@ function minutesSince(from: Date | null, now: number): number | null {
 /** Every room open on LiveKit that belongs to the admin's scope, with its real signals. */
 export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
   let svc: ReturnType<typeof getRoomServiceClient>;
-  let allRooms: Awaited<ReturnType<ReturnType<typeof getRoomServiceClient>["listRooms"]>>;
+  let allRooms: OpenRoom[];
   try {
     svc = getRoomServiceClient();
     allRooms = await svc.listRooms();
@@ -99,51 +104,50 @@ export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
   const open = allRooms.filter((r) => r.numParticipants > 0);
   if (open.length === 0) return { rooms: [], unmatched: [], unavailable: false };
 
-  const roomNames = open.map((r) => r.name);
-  const idsFromNames = roomNames.map(sessionIdFromRoomName).filter((id): id is string => !!id);
+  // One lookup for main and breakout rooms alike (lib/admin-ops.ts, the same
+  // resolver the livekit-rooms route scopes by). A breakout belongs to its
+  // parent class: without this a class vanished from "Live now" the moment
+  // its students went into breakouts.
+  const matches = await resolveRoomSessions(open.map((r) => r.name));
+  const visible = open.filter((r) => roomVisibleTo(ctx, matches.get(r.name)));
+
+  // roomVisibleTo only lets a SUPER_ADMIN see a room with no session.
+  const unmatched: UnmatchedRoom[] = visible
+    .filter((r) => !matches.has(r.name))
+    .map((r) => ({ roomName: r.name, participantCount: r.numParticipants }));
+
+  const groups = new Map<string, { main: OpenRoom | null; breakouts: OpenRoom[] }>();
+  for (const room of visible) {
+    const match = matches.get(room.name);
+    if (!match) continue;
+    const g = groups.get(match.sessionId) ?? { main: null, breakouts: [] };
+    if (match.breakout) g.breakouts.push(room);
+    else g.main = room;
+    groups.set(match.sessionId, g);
+  }
+  if (groups.size === 0) return { rooms: [], unmatched, unavailable: false };
 
   const matched = await db
     .select({
       id: sessions.id,
-      orgId: sessions.orgId,
       teacherId: sessions.teacherId,
       status: sessions.status,
       title: sessions.title,
       track: sessions.track,
-      videoRoomName: sessions.videoRoomName,
       scheduledStart: sessions.scheduledStart,
       scheduledEnd: sessions.scheduledEnd,
       actualStart: sessions.actualStart,
-      extensionMin: sessions.extensionMin,
       teacherName: users.name,
       teacherEmail: users.email,
     })
     .from(sessions)
     .innerJoin(users, eq(sessions.teacherId, users.id))
-    .where(
-      and(
-        orgFilter(ctx, sessions.orgId),
-        or(
-          idsFromNames.length ? inArray(sessions.id, idsFromNames) : undefined,
-          inArray(sessions.videoRoomName, roomNames)
-        )
-      )
-    );
+    .where(and(orgFilter(ctx, sessions.orgId), inArray(sessions.id, [...groups.keys()])));
 
-  const byId = new Map(matched.map((s) => [s.id, s]));
-  const byRoom = new Map(matched.filter((s) => s.videoRoomName).map((s) => [s.videoRoomName!, s]));
-  const pairs = open.flatMap((room) => {
-    const id = sessionIdFromRoomName(room.name);
-    const session = (id && byId.get(id)) || byRoom.get(room.name);
-    return session ? [{ room, session }] : [];
+  const pairs = matched.map((session) => {
+    const g = groups.get(session.id)!;
+    return { session, rooms: [...(g.main ? [g.main] : []), ...g.breakouts], main: g.main };
   });
-
-  const unmatched: UnmatchedRoom[] = ctx.isSuperAdmin
-    ? open
-        .filter((r) => !pairs.some((p) => p.room.name === r.name))
-        .map((r) => ({ roomName: r.name, participantCount: r.numParticipants }))
-    : [];
-
   if (pairs.length === 0) return { rooms: [], unmatched, unavailable: false };
 
   const sessionIds = pairs.map((p) => p.session.id);
@@ -153,9 +157,9 @@ export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
   const windowTo = new Date(Math.max(...starts) + SIBLING_WINDOW_MS);
 
   const [participantLists, openTeacherRows, rosterRows] = await Promise.all([
-    // One call per room. A failure for one room degrades that card to the
-    // attendance fallback instead of blanking the page.
-    Promise.all(pairs.map((p) => svc.listParticipants(p.room.name).catch(() => null))),
+    // One call per room, breakouts included. A failure for one room degrades
+    // that card to the attendance fallback instead of blanking the page.
+    Promise.all(pairs.map((p) => Promise.all(p.rooms.map((r) => svc.listParticipants(r.name).catch(() => null))))),
     db
       .select({ sessionId: sessionAttendance.sessionId, userId: sessionAttendance.userId })
       .from(sessionAttendance)
@@ -192,14 +196,18 @@ export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
   const teacherOpen = new Set(openTeacherRows.map((r) => `${r.sessionId}:${r.userId}`));
   const now = Date.now();
 
-  const rooms = pairs.map(({ room, session }, i): LiveRoom => {
-    const people = (participantLists[i] ?? []).filter((p) => !isScreenShareIdentity(p.identity));
-    const fromLiveKit = participantLists[i] !== null;
+  const rooms = pairs.map(({ session, rooms: classRooms, main }, i): LiveRoom => {
+    const lists = participantLists[i];
+    const people = lists.flatMap((l) => l ?? []).filter((p) => !isScreenShareIdentity(p.identity));
+    const allListed = lists.every((l) => l !== null);
     const teacherEmail = session.teacherEmail.toLowerCase();
 
-    const teacherConnected = fromLiveKit
-      ? people.some((p) => baseIdentity(p.identity).toLowerCase() === teacherEmail)
-      : teacherOpen.has(`${session.id}:${session.teacherId}`);
+    const seenTeacher = people.some((p) => baseIdentity(p.identity).toLowerCase() === teacherEmail);
+    const teacherConnected =
+      seenTeacher || allListed ? seenTeacher : teacherOpen.has(`${session.id}:${session.teacherId}`);
+
+    // Rooms whose participant list failed still count, by LiveKit's own total.
+    const unlistedCount = classRooms.reduce((n, r, j) => n + (lists[j] === null ? r.numParticipants : 0), 0);
 
     const start = session.scheduledStart.getTime();
     const students = [
@@ -210,13 +218,16 @@ export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
       ),
     ].sort((a, b) => a.localeCompare(b));
 
-    const roomOpened = room.creationTime ? new Date(Number(room.creationTime) * 1000) : null;
+    const opener = main ?? classRooms[0];
+    const roomOpened = opener.creationTime ? new Date(Number(opener.creationTime) * 1000) : null;
     const startedAt = session.actualStart ?? roomOpened;
-    const endMs = session.scheduledEnd.getTime() + (session.extensionMin ?? 0) * MINUTE;
+    // scheduledEnd already includes extensions: the extend route moves it.
+    const endMs = session.scheduledEnd.getTime();
 
     return {
       sessionId: session.id,
-      roomName: room.name,
+      roomName: opener.name,
+      breakoutRoomNames: classRooms.filter((r) => r !== main).map((r) => r.name),
       title: session.title || "Class",
       track: session.track,
       status: session.status,
@@ -224,7 +235,7 @@ export async function getLiveRooms(ctx: AdminContext): Promise<LiveSnapshot> {
       teacherName: session.teacherName || session.teacherEmail,
       teacherEmail: session.teacherEmail,
       students,
-      participantCount: fromLiveKit ? people.length : room.numParticipants,
+      participantCount: people.length + unlistedCount,
       participantNames: people.map((p) => p.name || baseIdentity(p.identity)),
       teacherConnected,
       startedAt: startedAt ? startedAt.toISOString() : null,

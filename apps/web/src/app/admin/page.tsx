@@ -66,7 +66,7 @@ export default async function AdminOverviewPage() {
 
         <StatGrid>
           <StatCard label="Classes today" value={m.classesToday} hint="Not counting cancelled" href="/admin/scheduled-classes" />
-          <StatCard label="Classes this week" value={m.classesThisWeek} hint="Monday to Sunday" href="/admin/scheduled-classes" />
+          <StatCard label="Classes this week" value={m.classesThisWeek} hint="Sunday to Saturday" href="/admin/scheduled-classes" />
           <StatCard
             label="Live now"
             value={live.unavailable ? "--" : live.rooms.length}

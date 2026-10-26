@@ -36,7 +36,7 @@ const DAY = 24 * 60 * MINUTE;
 export interface ZonedCalendar {
   dayStart: Date;
   dayEnd: Date;
-  /** Monday 00:00 of this week. */
+  /** Sunday 00:00 of this week — the same week the teacher pages and teacher-schedules use. */
   weekStart: Date;
   weekEnd: Date;
   monthStart: Date;
@@ -50,15 +50,15 @@ function midnight(y: number, m: number, d: number, offsetDays: number, zone: str
   return zonedWallClockToInstant(t.getUTCFullYear(), t.getUTCMonth() + 1, t.getUTCDate(), 0, 0, zone);
 }
 
-/** Today, this week (Monday first) and this month, as instants, in `zone`. */
+/** Today, this week (Sunday first) and this month, as instants, in `zone`. */
 export function zonedCalendar(now: Date, zone: string): ZonedCalendar {
   const { y, m, d, weekday } = zonedDayParts(now, zone);
-  const fromMonday = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"].indexOf(weekday);
+  const fromSunday = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"].indexOf(weekday);
   return {
     dayStart: midnight(y, m, d, 0, zone),
     dayEnd: midnight(y, m, d, 1, zone),
-    weekStart: midnight(y, m, d, -fromMonday, zone),
-    weekEnd: midnight(y, m, d, 7 - fromMonday, zone),
+    weekStart: midnight(y, m, d, -fromSunday, zone),
+    weekEnd: midnight(y, m, d, 7 - fromSunday, zone),
     monthStart: zonedWallClockToInstant(y, m, 1, 0, 0, zone),
   };
 }
@@ -216,7 +216,7 @@ export interface OverviewClass {
   /** ISO */
   scheduledStart: string;
   scheduledEnd: string;
-  /** ISO. Scheduled end plus any extension the teacher added. */
+  /** ISO. The latest scheduled end in the class; already includes extensions, since the extend route moves scheduledEnd. */
   endsAt: string;
   teacherName: string;
   students: string[];
@@ -241,7 +241,6 @@ async function loadClasses(
       origin: sessions.origin,
       scheduledStart: sessions.scheduledStart,
       scheduledEnd: sessions.scheduledEnd,
-      extensionMin: sessions.extensionMin,
       teacherName: users.name,
       teacherEmail: users.email,
     })
@@ -272,7 +271,7 @@ async function loadClasses(
       scheduledStart: canonical.scheduledStart.toISOString(),
       scheduledEnd: canonical.scheduledEnd.toISOString(),
       endsAt: new Date(
-        Math.max(...group.map((s) => s.scheduledEnd.getTime() + (s.extensionMin ?? 0) * MINUTE))
+        Math.max(...group.map((s) => s.scheduledEnd.getTime()))
       ).toISOString(),
       teacherName: canonical.teacherName || canonical.teacherEmail,
       students: students.sort((a, b) => a.localeCompare(b)),
@@ -297,7 +296,7 @@ export async function getTodayRemaining(ctx: AdminContext, timeZone: string): Pr
 export interface AttentionSessions {
   /** Still SCHEDULED more than 10 minutes after start, and not yet due to end. */
   notStarted: OverviewClass[];
-  /** IN_PROGRESS more than 15 minutes past the scheduled end (extensions included). */
+  /** IN_PROGRESS more than 15 minutes past the scheduled end. */
   overrunning: OverviewClass[];
   /** SCHEDULED to start within the next two hours. */
   startingSoon: OverviewClass[];
