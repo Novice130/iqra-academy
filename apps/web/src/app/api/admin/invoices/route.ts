@@ -1,10 +1,15 @@
 /**
  * @fileoverview Invoices raised by hand.
  *
- * RBAC: ORG_ADMIN and above.
- * GET   /api/admin/invoices — the org's invoices, newest first
+ * RBAC: ORG_ADMIN and above. An ORG_ADMIN acts on their own org; a
+ * SUPER_ADMIN may act on any org's family or invoice, and the row keeps the
+ * family's org rather than the admin's.
  * POST  /api/admin/invoices — raise one, and email it
  * PATCH /api/admin/invoices — record a payment, or void one
+ *
+ * The list lives on the /admin/invoices page, which reads the table itself;
+ * the GET that used to sit here had no caller and was removed. Refunds are
+ * api/admin/refunds.
  *
  * ── Why this is not Stripe ──────────────────────────────────────────────────
  * Families here pay by bank transfer or Zelle after agreeing a fee over
@@ -32,7 +37,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { withDb, withRLS } from "@/lib/db";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import {
   invoices,
   organizations,
@@ -51,11 +57,17 @@ import {
 import { logAudit, getClientIp } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 import { sendInvoiceEmail } from "@/lib/email";
+import { money } from "@/lib/money";
+import { zonedDayParts, zonedWallClockToInstant } from "@/lib/slots";
+import { isValidZone } from "@/lib/zones";
 
 /** A month of classes, near enough, when no period is given. */
 const DEFAULT_PERIOD_DAYS = 30;
 /** Long enough for a bank transfer to clear, short enough to chase. */
 const DEFAULT_DUE_DAYS = 7;
+
+/** A calendar day as typed in a date input. */
+const dayString = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use YYYY-MM-DD");
 
 const createSchema = z.object({
   userId: z.string().min(1),
@@ -68,6 +80,15 @@ const createSchema = z.object({
   periodStart: z.string().datetime().optional(),
   periodEnd: z.string().datetime().optional(),
   dueDate: z.string().datetime().optional(),
+  /**
+   * The same three as calendar days in `timeZone` — what the admin form
+   * sends. They win over the instants above when both are given.
+   */
+  periodStartDay: dayString.optional(),
+  periodEndDay: dayString.optional(),
+  dueDay: dayString.optional(),
+  /** The viewer's IANA zone, for reading the days above and for the email. */
+  timeZone: z.string().max(64).optional(),
   notes: z.string().max(1000).optional(),
   /** A Stripe payment link, or anything else the family can pay through. */
   payUrl: z.string().url().max(2000).optional(),
@@ -83,87 +104,37 @@ const updateSchema = z.object({
   notes: z.string().max(1000).optional(),
 });
 
-/** "$120.00" */
-function money(cents: number, currency: string): string {
-  try {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency.toUpperCase(),
-    }).format(cents / 100);
-  } catch {
-    return `${(cents / 100).toFixed(2)} ${currency.toUpperCase()}`;
-  }
+/** `column = orgId` for an ORG_ADMIN; nothing for a SUPER_ADMIN. */
+function orgScope(ctx: { role: string; orgId: string }, column: PgColumn): SQL | undefined {
+  return ctx.role === "SUPER_ADMIN" ? undefined : eq(column, ctx.orgId);
 }
 
-/** "1 – 30 September" for a range, "September 2026" when it is a whole month. */
-function periodLabel(start: Date | null, end: Date | null): string {
+/**
+ * The instant a calendar day starts (or a wall-clock time on it) in `zone`.
+ * The form sends days, not instants: "due 7 October" has to mean the admin's
+ * 7 October, and only the zone they were looking at can say when that is.
+ */
+function dayInZone(day: string, zone: string, hh = 0, mm = 0): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  return zonedWallClockToInstant(y, m, d, hh, mm, zone);
+}
+
+/** "September 2026" for a whole month, "1 Sep – 15 Oct" otherwise, in `zone`. */
+function periodLabel(start: Date | null, end: Date | null, zone: string): string {
   if (!start || !end) return "your classes";
-  const month = new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: "UTC" });
-  const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
-  if (start.getUTCMonth() === end.getUTCMonth() && start.getUTCFullYear() === end.getUTCFullYear()) {
-    return month.format(start);
+  const a = zonedDayParts(start, zone);
+  const b = zonedDayParts(end, zone);
+  if (a.y === b.y && a.m === b.m) {
+    return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric", timeZone: zone }).format(start);
   }
+  const day = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: zone });
   return `${day.format(start)} – ${day.format(end)}`;
 }
 
-function dateLabel(d: Date): string {
+function dateLabel(d: Date, zone: string): string {
   return new Intl.DateTimeFormat("en-US", {
-    month: "long", day: "numeric", year: "numeric", timeZone: "UTC",
+    month: "long", day: "numeric", year: "numeric", timeZone: zone,
   }).format(d);
-}
-
-/** GET /api/admin/invoices — list, newest first. */
-export async function GET(request: NextRequest) {
-  return withDb(async () => {
-    try {
-      const authResult = await requireRole(request, ["ORG_ADMIN"]);
-      if (authResult instanceof NextResponse) return authResult;
-      const ctx = authResult;
-
-      const { searchParams } = new URL(request.url);
-      const status = searchParams.get("status");
-      const userId = searchParams.get("userId");
-      const limit = Math.min(Number(searchParams.get("limit") ?? 100) || 100, 500);
-
-      return await withRLS(ctx, async (tx) => {
-        const conditions = [eq(invoices.orgId, ctx.orgId)];
-        if (status) {
-          conditions.push(eq(invoices.status, status as typeof invoices.status.enumValues[number]));
-        }
-        if (userId) conditions.push(eq(invoices.userId, userId));
-
-        const rows = await tx
-          .select({
-            id: invoices.id,
-            userId: invoices.userId,
-            userName: users.name,
-            userEmail: users.email,
-            status: invoices.status,
-            amountDueCents: invoices.amountDueCents,
-            amountPaidCents: invoices.amountPaidCents,
-            currency: invoices.currency,
-            notes: invoices.notes,
-            hostedInvoiceUrl: invoices.hostedInvoiceUrl,
-            stripeInvoiceId: invoices.stripeInvoiceId,
-            issuedById: invoices.issuedById,
-            dueDate: invoices.dueDate,
-            paidAt: invoices.paidAt,
-            periodStart: invoices.periodStart,
-            periodEnd: invoices.periodEnd,
-            createdAt: invoices.createdAt,
-          })
-          .from(invoices)
-          .innerJoin(users, eq(users.id, invoices.userId))
-          .where(and(...conditions))
-          .orderBy(desc(invoices.createdAt))
-          .limit(limit);
-
-        return NextResponse.json({ invoices: rows });
-      });
-    } catch (error) {
-      return handleApiError(error);
-    }
-  });
 }
 
 /** POST /api/admin/invoices — raise one against a family. */
@@ -176,14 +147,23 @@ export async function POST(request: NextRequest) {
 
       const data = createSchema.parse(await request.json());
 
+      const zone = data.timeZone && isValidZone(data.timeZone) ? data.timeZone : "UTC";
       const now = new Date();
-      const periodStart = data.periodStart ? new Date(data.periodStart) : now;
-      const periodEnd = data.periodEnd
-        ? new Date(data.periodEnd)
-        : new Date(periodStart.getTime() + DEFAULT_PERIOD_DAYS * 86_400_000);
-      const dueDate = data.dueDate
-        ? new Date(data.dueDate)
-        : new Date(now.getTime() + DEFAULT_DUE_DAYS * 86_400_000);
+      const periodStart = data.periodStartDay
+        ? dayInZone(data.periodStartDay, zone)
+        : data.periodStart ? new Date(data.periodStart) : now;
+      const periodEnd = data.periodEndDay
+        ? dayInZone(data.periodEndDay, zone)
+        : data.periodEnd
+          ? new Date(data.periodEnd)
+          : new Date(periodStart.getTime() + DEFAULT_PERIOD_DAYS * 86_400_000);
+      // The last minute of the due day, so "due 7 October" is not overdue
+      // for the whole of 7 October.
+      const dueDate = data.dueDay
+        ? dayInZone(data.dueDay, zone, 23, 59)
+        : data.dueDate
+          ? new Date(data.dueDate)
+          : new Date(now.getTime() + DEFAULT_DUE_DAYS * 86_400_000);
 
       if (periodEnd <= periodStart) {
         throw new BusinessRuleError("The billing period ends before it starts.");
@@ -193,12 +173,15 @@ export async function POST(request: NextRequest) {
         const family = await tx.query.users.findFirst({
           where: and(
             eq(users.id, data.userId),
-            eq(users.orgId, ctx.orgId),
+            orgScope(ctx, users.orgId),
             isNull(users.deletedAt)
           ),
-          columns: { id: true, name: true, email: true },
+          columns: { id: true, orgId: true, name: true, email: true },
         });
         if (!family) throw new NotFoundError("User");
+        // The family's org, which is the admin's own unless a SUPER_ADMIN
+        // is billing another school's family.
+        const orgId = family.orgId;
 
         // The family's plan supplies the amount when none was typed, and the
         // plan name and student count for the email either way.
@@ -215,7 +198,7 @@ export async function POST(request: NextRequest) {
           .where(
             and(
               eq(subscriptions.userId, family.id),
-              eq(subscriptions.orgId, ctx.orgId),
+              eq(subscriptions.orgId, orgId),
               inArray(subscriptions.status, ["ACTIVE", "PAST_DUE", "UNPAID"])
             )
           )
@@ -239,7 +222,7 @@ export async function POST(request: NextRequest) {
           .where(
             and(
               eq(invoices.userId, family.id),
-              eq(invoices.orgId, ctx.orgId),
+              eq(invoices.orgId, orgId),
               inArray(invoices.status, ["DRAFT", "OPEN", "OVERDUE"]),
               eq(invoices.periodStart, periodStart)
             )
@@ -257,14 +240,14 @@ export async function POST(request: NextRequest) {
           .where(eq(studentProfiles.userId, family.id));
 
         const org = await tx.query.organizations.findFirst({
-          where: eq(organizations.id, ctx.orgId),
+          where: eq(organizations.id, orgId),
           columns: { name: true },
         });
 
         const [invoice] = await tx
           .insert(invoices)
           .values({
-            orgId: ctx.orgId,
+            orgId,
             userId: family.id,
             subscriptionId: plan?.subscriptionId ?? null,
             // OPEN, not DRAFT: it is being sent. DRAFT is for a figure an
@@ -292,7 +275,7 @@ export async function POST(request: NextRequest) {
       });
 
       await logAudit({
-        orgId: ctx.orgId,
+        orgId: result.invoice.orgId,
         actorId: ctx.userId,
         action: "INVOICE_ISSUED",
         target: `invoice:${result.invoice.id}`,
@@ -316,13 +299,13 @@ export async function POST(request: NextRequest) {
           planName: result.planName,
           amount: money(result.invoice.amountDueCents, result.invoice.currency),
           studentCount: result.studentCount,
-          periodLabel: periodLabel(result.invoice.periodStart, result.invoice.periodEnd),
-          dueLabel: dateLabel(dueDate),
+          periodLabel: periodLabel(result.invoice.periodStart, result.invoice.periodEnd, zone),
+          dueLabel: dateLabel(dueDate, zone),
           payUrl: result.invoice.hostedInvoiceUrl ?? undefined,
         });
 
         await notify({
-          orgId: ctx.orgId,
+          orgId: result.invoice.orgId,
           userIds: [result.family.id],
           type: "INVOICE_ISSUED",
           title: "Your invoice is ready",
@@ -361,9 +344,9 @@ export async function PATCH(request: NextRequest) {
 
       const result = await withRLS(ctx, async (tx) => {
         const existing = await tx.query.invoices.findFirst({
-          where: and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, ctx.orgId)),
+          where: and(eq(invoices.id, data.invoiceId), orgScope(ctx, invoices.orgId)),
           columns: {
-            id: true, status: true, amountDueCents: true,
+            id: true, orgId: true, status: true, amountDueCents: true,
             amountPaidCents: true, userId: true, currency: true,
           },
         });
@@ -398,7 +381,7 @@ export async function PATCH(request: NextRequest) {
         const [invoice] = await tx
           .update(invoices)
           .set(updates)
-          .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, ctx.orgId)))
+          .where(and(eq(invoices.id, data.invoiceId), eq(invoices.orgId, existing.orgId)))
           .returning();
 
         return { invoice, previousStatus: existing.status };
@@ -416,7 +399,7 @@ export async function PATCH(request: NextRequest) {
 
       if (auditAction) {
         await logAudit({
-          orgId: ctx.orgId,
+          orgId: result.invoice.orgId,
           actorId: ctx.userId,
           action: auditAction,
           target: `invoice:${result.invoice.id}`,

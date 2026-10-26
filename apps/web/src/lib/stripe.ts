@@ -50,6 +50,34 @@ function getStripe(): Stripe {
   return _stripe;
 }
 
+/**
+ * True when a real-looking secret key is set. Placeholders don't count.
+ *
+ * getStripe() fails on the first call when the key is missing, which on an
+ * admin form is a 500 after everything has been filled in. Checking up front
+ * lets a page say "Stripe isn't set up" before anyone types.
+ */
+export function isStripeConfigured(): boolean {
+  const key = process.env.STRIPE_SECRET_KEY?.trim();
+  return !!key && /^(sk|rk)_(live|test)_[A-Za-z0-9]{8,}/.test(key);
+}
+
+/**
+ * Stop a coupon from being redeemed again. Stripe has no "inactive" flag on
+ * a coupon; deleting it is the switch, and it leaves discounts already
+ * applied to subscriptions in place. A coupon Stripe no longer has counts as
+ * done — the end state is the one asked for.
+ */
+export async function deleteStripeCoupon(id: string): Promise<void> {
+  if (!isStripeConfigured()) throw new Error("Stripe is not configured on this server.");
+  try {
+    await getStripe().coupons.del(id);
+  } catch (err) {
+    if (err instanceof Stripe.errors.StripeError && err.code === "resource_missing") return;
+    throw err;
+  }
+}
+
 // ============================================================================
 // PRICING CONSTANTS
 // ============================================================================
