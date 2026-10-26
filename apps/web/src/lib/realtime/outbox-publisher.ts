@@ -34,11 +34,14 @@ const PUBLISH_TIMEOUT_MS = 3_000;
  * run without it, and defaulting to loopback there would turn every
  * mutation into a refused connection and a spent retry attempt.
  */
-function sidecarUrl(): string | null {
+export function sidecarUrl(): string | null {
   const configured = process.env.REALTIME_INTERNAL_URL;
   if (configured) return configured.replace(/\/+$/, "");
   return process.env.NODE_ENV === "production" ? "http://127.0.0.1:8787" : null;
 }
+
+/** drainOutbox gives up on a row after this many failed deliveries: its dead letter. */
+export const OUTBOX_MAX_ATTEMPTS = 5;
 
 /**
  * Publishes an event to the org's AvailabilityHub in the realtime sidecar.
@@ -127,7 +130,7 @@ export async function drainOutbox(opts: { orgId?: string; limit?: number } = {})
     const limit = opts.limit ?? 50;
     const whereConditions = [
       isNull(schedulingEvents.publishedAt),
-      lt(schedulingEvents.attempts, 5),
+      lt(schedulingEvents.attempts, OUTBOX_MAX_ATTEMPTS),
     ];
     if (opts.orgId) {
       whereConditions.push(eq(schedulingEvents.orgId, opts.orgId));
@@ -163,7 +166,7 @@ export async function drainOutbox(opts: { orgId?: string; limit?: number } = {})
           .where(eq(schedulingEvents.id, row.id));
         if (nextAttempts >= 5) {
           deadLettered.push(row.id);
-          console.error(`[Realtime Outbox Dead-Letter] Event ${row.id} for org ${row.orgId} exceeded 5 attempts.`);
+          console.error(`[Realtime Outbox Dead-Letter] Event ${row.id} for org ${row.orgId} exceeded ${OUTBOX_MAX_ATTEMPTS} attempts.`);
         }
       }
     }
