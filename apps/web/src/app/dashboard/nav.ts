@@ -69,6 +69,7 @@ export const NAV: Record<NavRole, RoleNav> = {
         label: "Billing",
         items: [
           { href: "/admin/invoices", label: "Invoices" },
+          { href: "/admin/plans", label: "Plans" },
           { href: "/admin/coupons", label: "Coupons" },
           { href: "/admin/exports", label: "Exports" },
         ],

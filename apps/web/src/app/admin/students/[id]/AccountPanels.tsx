@@ -48,11 +48,22 @@ export function FamilyPanel({ data }: { data: Student360 }) {
 export function BillingPanel({ data }: { data: Student360 }) {
   const b = data.billing;
   const invoicesHref = `/admin/invoices?userId=${encodeURIComponent(data.family.id)}`;
+  // /admin/plans preselects this family in "Assign a plan" and filters its
+  // subscription list to them, where change/pause/cancel live.
+  const planHref = `/admin/plans?userId=${encodeURIComponent(data.family.id)}`;
+  const hasLivePlan = !!data.subscription && data.subscription.status !== "CANCELLED";
   return (
     <Panel
       title="Billing"
       description="Invoices and plan for the family account."
-      actions={<Link href={invoicesHref} className={btn.ghost}>All invoices</Link>}
+      actions={
+        <>
+          <Link href={`${planHref}${hasLivePlan ? "#subscriptions" : "#assign"}`} className={btn.ghost}>
+            {hasLivePlan ? "Manage plan" : "Assign plan"}
+          </Link>
+          <Link href={invoicesHref} className={btn.ghost}>All invoices</Link>
+        </>
+      }
     >
       <DefinitionList
         items={[
