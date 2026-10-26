@@ -35,7 +35,7 @@ import { getClientIp, logAuditBatch } from "@/lib/audit";
 import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
-import { addDaysToDateKey, findScheduleConflict, wallClockToInstant } from "@/lib/admin-scheduling";
+import { addDaysToDateKey, findScheduleConflict, lockTeacherSchedules, wallClockToInstant } from "@/lib/admin-scheduling";
 import { z } from "zod";
 
 const assignStudentSchema = z
@@ -111,6 +111,9 @@ export async function POST(request: NextRequest) {
       const skipped: { date: string; scheduledStart: string | null; reason: string }[] = [];
 
       await db.transaction(async (tx) => {
+        // Held to commit: a second request for this teacher waits here, then
+        // sees these weeks in its own conflict checks instead of double-booking.
+        await lockTeacherSchedules(tx, [teacher.id]);
         for (const occ of occurrences) {
           if (!occ.start) {
             skipped.push({ date: occ.date, scheduledStart: null, reason: occ.invalid ?? "Invalid time." });

@@ -66,12 +66,10 @@ export default function AssignStudentDesk({
   const viewerZone = useViewerTimeZone();
   const zone = prefill.timeZone || viewerZone;
 
-  // A prefilled teacher decides the org when no student was given.
+  // No student is chosen for the admin: picking the first name in the list
+  // is how a class ends up booked for the wrong child.
   const prefillTeacher = teachers.find((t) => t.id === prefill.teacherId);
-  const firstStudent =
-    students.find((s) => s.id === prefill.studentId) ??
-    (prefillTeacher ? students.find((s) => s.orgId === prefillTeacher.orgId) : undefined) ??
-    students[0];
+  const firstStudent = students.find((s) => s.id === prefill.studentId);
 
   const [studentId, setStudentId] = useState(firstStudent?.id ?? "");
   const student = students.find((s) => s.id === studentId);
@@ -156,7 +154,9 @@ export default function AssignStudentDesk({
                   if (next) setTrack(next.track);
                 }}
                 className={input}
+                required
               >
+                <option value="">Choose a student</option>
                 {students.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.userEmail}){s.orgName ? ` · ${s.orgName}` : ""}

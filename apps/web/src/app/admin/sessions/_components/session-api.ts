@@ -14,7 +14,7 @@ export type SessionPatch =
   | { teacherId: string };
 
 export type PatchResult =
-  | { ok: true; notified: number }
+  | { ok: true; notified: number; ops: string[] }
   | { ok: false; error: string };
 
 /** Never throws: a network failure comes back as `{ ok: false }`. */
@@ -30,7 +30,11 @@ export async function patchSession(sessionId: string, body: SessionPatch): Promi
       const detail = Array.isArray(data.details) ? data.details.map((d: { message: string }) => d.message).join(" ") : "";
       return { ok: false, error: detail || data.error || data.message || `Request failed (${res.status}).` };
     }
-    return { ok: true, notified: typeof data.notified === "number" ? data.notified : 0 };
+    return {
+      ok: true,
+      notified: typeof data.notified === "number" ? data.notified : 0,
+      ops: Array.isArray(data.ops) ? data.ops : [],
+    };
   } catch {
     return { ok: false, error: "Network error. Check your connection and try again." };
   }

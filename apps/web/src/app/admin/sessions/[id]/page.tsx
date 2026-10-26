@@ -164,7 +164,14 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
           </p>
         )}
 
-        <Panel title="Actions" description="Families and teachers are notified of cancellations, new times and new teachers.">
+        <Panel
+          title="Actions"
+          description={
+            siblingIds.length > 0
+              ? `These apply to the whole class: this row and the ${siblingIds.length} other ${siblingIds.length === 1 ? "row" : "rows"} sharing its room. Families and teachers are notified of cancellations, new times and new teachers.`
+              : "These apply to the whole class. Families and teachers are notified of cancellations, new times and new teachers."
+          }
+        >
           <SessionActions
             sessionId={session.id}
             status={session.status}
@@ -229,7 +236,7 @@ export default async function AdminSessionPage({ params }: { params: Promise<{ i
                     </Link>
                   </span>
                 ))}
-                . Changes here apply to this row only.
+                . Cancel, reschedule, reassign and the completed / no-show marks apply to all of them together.
               </p>
             )}
           </Panel>

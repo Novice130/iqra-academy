@@ -174,6 +174,8 @@ export async function PATCH(
           teacherId: result.teacherId,
         },
         ops: result.ops,
+        // Every row of the class the change reached (a group class is several).
+        sessionIds: result.sessionIds,
         notified: result.notified,
       });
     } catch (error) {

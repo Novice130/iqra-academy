@@ -1,103 +1,71 @@
 "use client";
 
 /**
- * @fileoverview The scheduled-classes list: filters, viewer-zone day groups,
- * paging, and a cancel step per row.
+ * @fileoverview One page of scheduled classes, grouped into the viewer's
+ * days, with a cancel step per class.
  *
- * Everything other than cancelling — reschedule, change teacher, mark the
- * outcome — happens on the class's own page, /admin/sessions/[id], which
- * every row links to. Cancelling here asks for a reason and goes through the
- * same PATCH as that page, which notifies the families and the teacher.
+ * Each entry is a whole class (every session row sharing its room) and links
+ * to the canonical row's /admin/sessions/[id] page, where it can be
+ * rescheduled, reassigned or marked. Cancelling here goes through the same
+ * PATCH, which cancels every row of the class and notifies the families and
+ * the teacher.
+ *
+ * Every date is formatted in `zone`, which the server resolved and used to
+ * render this page — not the browser's own zone, which is unknown during the
+ * server render and would make the two disagree about which day a class is in.
  */
 
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useState } from "react";
 import Link from "next/link";
-import LocalTime, { dayKeyInZone, formatInZone, useViewerTimeZone } from "@/components/LocalTime";
+import { dayKeyInZone, formatInZone } from "@/components/LocalTime";
 import ClassActionButton from "@/components/ClassActionButton";
 import { Badge, EmptyState, Panel, StatusBadge, btn, humanize, table } from "@/app/admin/_components/ui";
 import CancelSessionForm from "../sessions/_components/CancelSessionForm";
-import ScheduledClassFilters, { DEFAULT_FILTERS, type ClassFilters } from "./ScheduledClassFilters";
+import type { ClassFilterValues, ClassRow } from "./load";
 
-export interface ScheduledClassRow {
-  id: string;
-  title: string;
-  track: string;
-  origin: string;
-  teacherId: string;
-  teacherName: string;
-  teacherEmail: string;
-  studentNames: string;
-  scheduledStart: string;
-  scheduledEnd: string;
-  status: string;
+function pageHref(filters: ClassFilterValues, page: number): string {
+  const q = new URLSearchParams();
+  if (filters.teacher !== "ALL") q.set("teacher", filters.teacher);
+  if (filters.track !== "ALL") q.set("track", filters.track);
+  if (filters.status !== "ACTIVE") q.set("status", filters.status);
+  if (filters.window !== "30") q.set("window", filters.window);
+  if (filters.q) q.set("q", filters.q);
+  if (page > 1) q.set("page", String(page));
+  const s = q.toString();
+  return `/admin/scheduled-classes${s ? `?${s}` : ""}`;
 }
-
-export interface TeacherFilterOption {
-  id: string;
-  name: string;
-}
-
-const PAGE_SIZE = 25;
-const DAY_MS = 24 * 60 * 60 * 1000;
 
 export default function ScheduledClassesTable({
-  initialClasses,
-  teachers,
+  classes: loaded,
+  zone,
+  filters,
+  page,
+  totalPages,
 }: {
-  initialClasses: ScheduledClassRow[];
-  teachers: TeacherFilterOption[];
+  classes: ClassRow[];
+  zone: string;
+  filters: ClassFilterValues;
+  page: number;
+  totalPages: number;
 }) {
-  const zone = useViewerTimeZone();
-  const [classes, setClasses] = useState(initialClasses);
-  const [filters, setFilters] = useState<ClassFilters>(DEFAULT_FILTERS);
-  const [page, setPage] = useState(1);
+  // Cancelled here since the page loaded; the next navigation brings the
+  // server's own answer.
+  const [cancelledIds, setCancelledIds] = useState<string[]>([]);
+  const classes = loaded.map((c) => (cancelledIds.includes(c.id) ? { ...c, status: "CANCELLED" } : c));
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [now] = useState(() => Date.now());
 
-  const filtered = useMemo(() => {
-    const q = filters.search.trim().toLowerCase();
-    const maxTime = filters.window === "ALL" ? Infinity : now + Number(filters.window) * DAY_MS;
-    return classes.filter((c) => {
-      if (filters.teacher !== "ALL" && c.teacherId !== filters.teacher) return false;
-      if (filters.track !== "ALL" && c.track !== filters.track) return false;
-      if (filters.status === "ACTIVE" ? c.status === "CANCELLED" : filters.status !== "ALL" && c.status !== filters.status) return false;
-      if (new Date(c.scheduledStart).getTime() > maxTime) return false;
-      if (!q) return true;
-      return [c.title, c.teacherName, c.studentNames, c.track].some((v) => v.toLowerCase().includes(q));
-    });
-  }, [classes, filters, now]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const currentPage = Math.min(page, totalPages);
-  const pageRows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-  // Days are the viewer's days: a 23:00 UTC class is Tuesday in Chicago and
-  // Wednesday in Karachi, and both admins should see their own answer.
-  const days = useMemo(() => {
-    const map = new Map<string, ScheduledClassRow[]>();
-    for (const row of pageRows) {
-      const key = dayKeyInZone(row.scheduledStart, zone || undefined);
-      map.set(key, [...(map.get(key) ?? []), row]);
-    }
-    return [...map.entries()];
-  }, [pageRows, zone]);
-
-  const onFilters = (next: ClassFilters) => {
-    setFilters(next);
-    setPage(1);
-  };
+  const days: [string, ClassRow[]][] = [];
+  for (const row of classes) {
+    const key = dayKeyInZone(row.scheduledStart, zone);
+    const last = days[days.length - 1];
+    if (last && last[0] === key) last[1].push(row);
+    else days.push([key, [row]]);
+  }
+  const time = (iso: string) => formatInZone(iso, "time", false, zone);
 
   return (
     <div className="space-y-4">
-      <Panel>
-        <ScheduledClassFilters value={filters} teachers={teachers} onChange={onFilters} />
-        <p className="mt-3 text-xs text-[var(--text-secondary)]" aria-live="polite">
-          {filtered.length} matching {filtered.length === 1 ? "class" : "classes"}
-          {zone && <> · times in {zone}</>}
-        </p>
-      </Panel>
-
       {notice && (
         <p role="status" className="text-sm font-medium text-[var(--color-success)]">
           {notice}
@@ -105,14 +73,14 @@ export default function ScheduledClassesTable({
       )}
 
       <Panel flush>
-        {filtered.length === 0 ? (
+        {classes.length === 0 ? (
           <EmptyState
             title="No classes match"
             body="Try a wider window, another status, or clear the search."
             action={
-              <button type="button" className={btn.secondary} onClick={() => onFilters(DEFAULT_FILTERS)}>
+              <Link href="/admin/scheduled-classes" className={btn.secondary}>
                 Reset filters
-              </button>
+              </Link>
             }
           />
         ) : (
@@ -132,7 +100,7 @@ export default function ScheduledClassesTable({
                 <tbody key={day}>
                   <tr>
                     <th scope="colgroup" colSpan={6} className="px-4 py-2 text-left text-xs font-semibold text-[var(--text-secondary)] bg-[var(--bg-secondary)] border-t border-[var(--border)]">
-                      {formatInZone(rows[0].scheduledStart, "full-date", false, zone || undefined)} · {rows.length} {rows.length === 1 ? "class" : "classes"}
+                      {formatInZone(rows[0].scheduledStart, "full-date", false, zone)} · {rows.length} {rows.length === 1 ? "class" : "classes"}
                     </th>
                   </tr>
                   {rows.map((c) => {
@@ -141,7 +109,7 @@ export default function ScheduledClassesTable({
                       <Fragment key={c.id}>
                         <tr className={table.tr}>
                           <td className={`${table.td} whitespace-nowrap font-medium`}>
-                            <LocalTime iso={c.scheduledStart} mode="time" /> – <LocalTime iso={c.scheduledEnd} mode="time" />
+                            {time(c.scheduledStart)} – {time(c.scheduledEnd)}
                           </td>
                           <td className={table.td}>
                             <Link href={`/admin/sessions/${c.id}`} className="font-medium text-[var(--accent)] hover:underline">
@@ -150,6 +118,7 @@ export default function ScheduledClassesTable({
                             <div className="mt-1 flex flex-wrap gap-1">
                               <Badge>{humanize(c.track)}</Badge>
                               {c.origin !== "SCHEDULED" && <Badge>{humanize(c.origin)}</Badge>}
+                              {c.rowCount > 1 && <Badge tone="info">Group class</Badge>}
                             </div>
                           </td>
                           <td className={table.td}>
@@ -193,7 +162,7 @@ export default function ScheduledClassesTable({
                                 sessionId={c.id}
                                 onDismiss={() => setCancelling(null)}
                                 onCancelled={(n) => {
-                                  setClasses((prev) => prev.map((x) => (x.id === c.id ? { ...x, status: "CANCELLED" } : x)));
+                                  setCancelledIds((prev) => [...prev, c.id]);
                                   setCancelling(null);
                                   setNotice(`"${c.title}" cancelled.${n > 0 ? ` ${n} ${n === 1 ? "person was" : "people were"} notified.` : ""}`);
                                 }}
@@ -213,15 +182,23 @@ export default function ScheduledClassesTable({
         {totalPages > 1 && (
           <nav aria-label="Pages" className="flex items-center justify-between gap-2 border-t border-[var(--border)] px-4 py-3 text-xs">
             <span className="text-[var(--text-secondary)]">
-              Page {currentPage} of {totalPages}
+              Page {page} of {totalPages}
             </span>
             <div className="flex gap-2">
-              <button type="button" className={btn.secondary} onClick={() => setPage(currentPage - 1)} disabled={currentPage <= 1}>
-                Previous
-              </button>
-              <button type="button" className={btn.secondary} onClick={() => setPage(currentPage + 1)} disabled={currentPage >= totalPages}>
-                Next
-              </button>
+              {page > 1 ? (
+                <Link href={pageHref(filters, page - 1)} className={btn.secondary}>
+                  Previous
+                </Link>
+              ) : (
+                <span className={`${btn.secondary} opacity-50`} aria-disabled="true">Previous</span>
+              )}
+              {page < totalPages ? (
+                <Link href={pageHref(filters, page + 1)} className={btn.secondary}>
+                  Next
+                </Link>
+              ) : (
+                <span className={`${btn.secondary} opacity-50`} aria-disabled="true">Next</span>
+              )}
             </div>
           </nav>
         )}

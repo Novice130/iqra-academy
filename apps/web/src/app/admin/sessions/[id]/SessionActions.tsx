@@ -68,6 +68,9 @@ export default function SessionActions({
     setNotice(null);
     setMode(next);
     if (next === "reschedule") setLocalStart(toLocalInputValue(scheduledStart, zone || undefined));
+    // Re-derived each time: after a reassign the page refreshes with a new
+    // current teacher, and the old choice would now be a no-op.
+    if (next === "reassign") setNewTeacher(otherTeachers[0]?.id ?? "");
   };
 
   const done = (message: string) => {
@@ -81,8 +84,9 @@ export default function SessionActions({
     setError(null);
     const result = await patchSession(sessionId, body);
     setBusy(false);
-    if (result.ok) done(success(result.notified));
-    else setError(result.error);
+    if (!result.ok) setError(result.error);
+    else if (result.ops.length === 0) setError("Nothing changed: the class already looks like that. Reload the page if it seems out of date.");
+    else done(success(result.notified));
   };
 
   const told = (n: number) => (n === 1 ? " 1 person was notified." : n > 1 ? ` ${n} people were notified.` : "");
@@ -164,6 +168,7 @@ export default function SessionActions({
           onSubmit={(e) => {
             e.preventDefault();
             if (!newTeacher) return setError("Pick a teacher.");
+            if (newTeacher === teacherId) return setError("That teacher already teaches this class. Pick another.");
             send({ teacherId: newTeacher }, (n) => `Teacher changed.${told(n)}`);
           }}
         >

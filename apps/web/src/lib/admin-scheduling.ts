@@ -10,11 +10,18 @@
  * it" now lives here, so the PATCH route (teachers and admins) and the
  * assign-student route apply the same ones.
  *
+ * A CLASS IS SEVERAL ROWS: a group row for the teacher plus an INDIVIDUAL row
+ * per student, sharing one room (lib/class-room.ts). Cancel, reschedule,
+ * reassign and the completed / no-show marks apply to every row of the class,
+ * or the students' rows stay live after the teacher's is cancelled.
+ *
  * ORDER OF WORK, and why:
- *   1. Validate everything first — a refused change writes nothing.
- *   2. One transaction: the session row, its bookings and the realtime outbox
- *      events commit together, so a live dashboard never sees half a change.
- *   3. After commit: audit, LiveKit room clean-up, then notifications deferred
+ *   1. One transaction that first advisory-locks the teachers' schedules and
+ *      re-reads the rows FOR UPDATE, then validates, checks conflicts and
+ *      writes — so two people acting at once cannot both pass the checks.
+ *      The session rows, their bookings and the realtime outbox events commit
+ *      together, so a live dashboard never sees half a change.
+ *   2. After commit: audit, LiveKit room clean-up, then notifications deferred
  *      past the response. Email and push are network calls; holding a
  *      transaction open across them is how a pool runs dry.
  *
@@ -26,19 +33,20 @@
  * @module lib/admin-scheduling
  */
 
-import { and, eq, gt, inArray, lt, ne } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNull, lt, lte, ne, notInArray, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { bookings, sessions, studentProfiles, teacherTimeOff, users } from "@/db/schema";
-import { AppError, BusinessRuleError, ForbiddenError, NotFoundError } from "@/lib/errors";
+import { AppError, BusinessRuleError, ConflictError, ForbiddenError, NotFoundError } from "@/lib/errors";
 import { assertTeacherInOrg } from "@/lib/session-access";
 import { insertSchedulingEvent } from "@/lib/realtime/outbox";
 import { drainOutbox } from "@/lib/realtime/outbox-publisher";
 import { afterResponse } from "@/lib/after-response";
-import { logAudit, type AuditAction } from "@/lib/audit";
+import { logAuditBatch, type AuditAction } from "@/lib/audit";
+import { groupIntoOccurrences, SIBLING_WINDOW_MS } from "@/lib/class-room";
 import { notify } from "@/lib/notify";
 import { closeAttendanceRows } from "@/lib/attendance";
 import { generateRoomName, getRoomServiceClient } from "@/lib/livekit";
-import { wallClockRoundTrips, zonedWallClockToInstant } from "@/lib/slots";
+import { wallClockRoundTrips, zonedDayParts, zonedWallClockToInstant } from "@/lib/slots";
 import { isValidZone } from "@/lib/zones";
 import type { UserRole } from "@/lib/rbac";
 
@@ -53,6 +61,22 @@ const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_RE = /^(\d{2}):(\d{2})$/;
 
 /**
+ * Parse "YYYY-MM-DD" into a real calendar date, or throw. `Date.UTC` rolls
+ * 2026-02-30 over to March 2 and month 13 into next year without complaint,
+ * so the parts are read back and compared.
+ */
+function parseDateKey(date: string): [number, number, number] {
+  const d = DATE_RE.exec(date);
+  if (!d) throw new AppError("Date must be YYYY-MM-DD.", 400, "BAD_REQUEST");
+  const [y, m, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
+  const probe = new Date(Date.UTC(y, m - 1, day));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== day) {
+    throw new AppError(`${date} is not a real date.`, 400, "BAD_REQUEST");
+  }
+  return [y, m, day];
+}
+
+/**
  * The instant a wall-clock reading names in a zone, e.g. ("2026-11-02",
  * "17:30", "America/Chicago").
  *
@@ -60,29 +84,29 @@ const TIME_RE = /^(\d{2}):(\d{2})$/;
  * instant, because the browser's own `new Date("…T17:30")` uses the device
  * zone — which is not the viewer zone whenever the account sets one. A time
  * that does not exist (the spring-forward hour) is refused rather than
- * silently moved an hour.
+ * silently moved an hour, and the result is read back in the zone — date as
+ * well as time — so nothing that rolled over gets through.
  */
 export function wallClockToInstant(date: string, time: string, zone: string): Date {
-  const d = DATE_RE.exec(date);
+  const [y, m, d] = parseDateKey(date);
   const t = TIME_RE.exec(time);
-  if (!d || !t) throw new AppError("Date must be YYYY-MM-DD and time HH:mm.", 400, "BAD_REQUEST");
+  if (!t) throw new AppError("Time must be HH:mm.", 400, "BAD_REQUEST");
   if (!isValidZone(zone)) throw new AppError(`Unknown time zone "${zone}".`, 400, "BAD_REQUEST");
   const [hh, mm] = [Number(t[1]), Number(t[2])];
   if (hh > 23 || mm > 59) throw new AppError("Time must be between 00:00 and 23:59.", 400, "BAD_REQUEST");
-  const instant = zonedWallClockToInstant(Number(d[1]), Number(d[2]), Number(d[3]), hh, mm, zone);
+  const instant = zonedWallClockToInstant(y, m, d, hh, mm, zone);
   if (Number.isNaN(instant.getTime())) throw new AppError("That date is not valid.", 400, "BAD_REQUEST");
-  if (!wallClockRoundTrips(instant, zone, hh, mm)) {
+  const back = zonedDayParts(instant, zone);
+  if (back.y !== y || back.m !== m || back.d !== d || !wallClockRoundTrips(instant, zone, hh, mm)) {
     throw new BusinessRuleError(`${time} does not exist on ${date} in ${zone} (the clocks change that night).`);
   }
   return instant;
 }
 
-/** "2026-11-02" plus n days, as a calendar date (no zone involved). */
+/** "2026-11-02" plus n days, as a calendar date (no zone involved). Throws on a date that does not exist. */
 export function addDaysToDateKey(date: string, days: number): string {
-  const d = DATE_RE.exec(date);
-  if (!d) return date;
-  const utc = new Date(Date.UTC(Number(d[1]), Number(d[2]) - 1, Number(d[3]) + days));
-  return utc.toISOString().slice(0, 10);
+  const [y, m, d] = parseDateKey(date);
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
 }
 
 /** A short "Mon, Nov 2, 5:30 PM CST" in the recipient's own zone. */
@@ -98,7 +122,20 @@ function formatFor(instant: Date, zone: string | null | undefined): string {
   }
 }
 
-// ─── Conflicts ──────────────────────────────────────────────────────────────
+// ─── Locks and conflicts ────────────────────────────────────────────────────
+
+/**
+ * Serialise every schedule change for these teachers until the transaction
+ * ends. Two admins booking the same free slot would otherwise both pass the
+ * conflict check and both insert. Sorted so two transactions locking the
+ * same pair (a swap) always take them in the same order and cannot deadlock.
+ */
+export async function lockTeacherSchedules(tx: Tx, teacherIds: (string | null | undefined)[]): Promise<void> {
+  const ids = [...new Set(teacherIds.filter((x): x is string => !!x))].sort();
+  for (const id of ids) {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${id}))`);
+  }
+}
 
 /**
  * Why a teacher (and optionally some students) cannot take a class at
@@ -112,12 +149,12 @@ export async function findScheduleConflict(
     teacherId: string;
     start: Date;
     end: Date;
-    /** The session being moved — it cannot conflict with itself. */
-    excludeSessionId?: string;
+    /** The rows being moved — every row of the class — cannot clash with themselves. */
+    excludeSessionIds?: string[];
     studentProfileIds?: string[];
   }
 ): Promise<string | null> {
-  const notSelf = opts.excludeSessionId ? [ne(sessions.id, opts.excludeSessionId)] : [];
+  const notSelf = opts.excludeSessionIds?.length ? [notInArray(sessions.id, opts.excludeSessionIds)] : [];
 
   const [clash] = await exec
     .select({ id: sessions.id })
@@ -173,7 +210,39 @@ export async function findScheduleConflict(
   return null;
 }
 
-// ─── Updating a session ─────────────────────────────────────────────────────
+type SessionRow = typeof sessions.$inferSelect;
+
+/**
+ * Every row of the class this row belongs to, locked FOR UPDATE.
+ *
+ * A class here is usually several rows — a group row for the teacher plus an
+ * INDIVIDUAL row per student — and they share one room (lib/class-room.ts).
+ * Cancelling or moving one of them alone leaves the others live and their
+ * families untold, so class-level changes go to all of them. Grouping is
+ * `groupIntoOccurrences`, the rule the join API resolves rooms with; the read
+ * reaches two windows back so a row opening the occurrence early is seen.
+ */
+async function lockOccurrence(tx: Tx, row: SessionRow): Promise<SessionRow[]> {
+  const at = new Date(row.scheduledStart).getTime();
+  const nearby = await tx
+    .select()
+    .from(sessions)
+    .where(
+      and(
+        eq(sessions.teacherId, row.teacherId),
+        eq(sessions.orgId, row.orgId),
+        isNull(sessions.mergedIntoId),
+        ne(sessions.status, "CANCELLED"),
+        gte(sessions.scheduledStart, new Date(at - 2 * SIBLING_WINDOW_MS)),
+        lte(sessions.scheduledStart, new Date(at + SIBLING_WINDOW_MS))
+      )
+    )
+    .for("update");
+  const rows = nearby.some((r) => r.id === row.id) ? nearby : [...nearby, row];
+  return groupIntoOccurrences(rows).find((o) => o.sessions.some((s) => s.id === row.id))?.sessions ?? [row];
+}
+
+// ─── Updating a class ───────────────────────────────────────────────────────
 
 export interface SchedulingActor {
   userId: string;
@@ -202,149 +271,208 @@ export interface SessionUpdateResult {
   teacherId: string;
   /** The audit ops applied, e.g. ["session.reschedule"]. Empty for a no-op. */
   ops: string[];
+  /** Every session row the change was applied to (the whole class). */
+  sessionIds: string[];
   /** How many people a notification was queued for. */
   notified: number;
 }
 
+const ENDING: SessionStatus[] = ["CANCELLED", "COMPLETED", "NO_SHOW"];
+
+interface RosterRow {
+  bookingId: string;
+  sessionId: string;
+  userId: string;
+  studentProfileId: string | null;
+  profileName: string | null;
+  timezone: string | null;
+}
+
 /**
- * Apply a change to one session, with every check, audit and notification.
+ * Apply a change to a class, with every check, audit and notification.
+ *
+ * Cancel, reschedule, reassign and the completed / no-show marks apply to
+ * every row of the class (see `lockOccurrence`). A rename, and the legacy
+ * SCHEDULED / IN_PROGRESS status writes teachers' tools may send, touch only
+ * the row asked for.
  *
  * Permission: the session's own teacher, an ORG_ADMIN of its org, or a
- * SUPER_ADMIN. Reassigning to another teacher is admin-only, and the new
- * teacher must belong to the session's org — for a SUPER_ADMIN too, since a
- * class cannot be taught across tenants.
+ * SUPER_ADMIN. Reassigning is admin-only, and the new teacher must belong to
+ * the session's org — for a SUPER_ADMIN too, since a class cannot be taught
+ * across tenants.
+ *
+ * Concurrency: the teachers' schedules are advisory-locked and the rows read
+ * FOR UPDATE inside the transaction, and every check runs there, so two
+ * people changing the same class or booking the same slot cannot both win.
  */
 export async function updateSession(
   actor: SchedulingActor,
   sessionId: string,
   input: SessionUpdateInput
 ): Promise<SessionUpdateResult> {
-  const session = await db.query.sessions.findFirst({ where: eq(sessions.id, sessionId) });
-  if (!session) throw new NotFoundError("Session");
+  const first = await db.query.sessions.findFirst({
+    where: eq(sessions.id, sessionId),
+    columns: { teacherId: true, orgId: true },
+  });
+  if (!first) throw new NotFoundError("Session");
 
-  const isAdmin =
-    actor.role === "SUPER_ADMIN" || (actor.role === "ORG_ADMIN" && actor.orgId === session.orgId);
-  const isOwner = session.teacherId === actor.userId;
-  if (!isAdmin && !isOwner) {
+  const isAdmin = actor.role === "SUPER_ADMIN" || (actor.role === "ORG_ADMIN" && actor.orgId === first.orgId);
+  if (!isAdmin && first.teacherId !== actor.userId) {
     throw new ForbiddenError("Only the teacher or an admin can update this session.");
   }
+  const wantsTeacher = input.teacherId && input.teacherId !== first.teacherId ? input.teacherId : null;
+  if (wantsTeacher && !isAdmin) throw new ForbiddenError("Only an admin can give a class to another teacher.");
+  const newTeacher = wantsTeacher ? await assertTeacherInOrg(wantsTeacher, first.orgId, false) : null;
 
-  const now = Date.now();
-  const oldStart = new Date(session.scheduledStart);
-  const oldEnd = new Date(session.scheduledEnd);
-  const start = input.scheduledStart ?? oldStart;
-  // A new start on its own keeps the class's length rather than stretching it
-  // to the old end.
-  const end =
-    input.scheduledEnd ??
-    (input.scheduledStart ? new Date(start.getTime() + (oldEnd.getTime() - oldStart.getTime())) : oldEnd);
-  if (end.getTime() <= start.getTime()) {
-    throw new AppError("scheduledEnd must be after scheduledStart.", 400, "BAD_REQUEST");
-  }
+  const plan = await db.transaction(async (tx) => {
+    await lockTeacherSchedules(tx, [first.teacherId, newTeacher?.id]);
 
-  const timeChanged = start.getTime() !== oldStart.getTime() || end.getTime() !== oldEnd.getTime();
-  const newTeacherId =
-    input.teacherId && input.teacherId !== session.teacherId ? input.teacherId : null;
-  const nextStatus = input.status && input.status !== session.status ? input.status : null;
-  const title = input.title?.trim();
-  const titleChanged = !!title && title !== session.title;
-  const moving = timeChanged || !!newTeacherId;
-
-  if (input.status === "CANCELLED" && session.status === "CANCELLED") {
-    throw new BusinessRuleError("This class is already cancelled.");
-  }
-  if (session.mergedIntoId && (moving || nextStatus)) {
-    throw new BusinessRuleError("This class was combined into another one. Change that class instead.");
-  }
-  if (newTeacherId && !isAdmin) throw new ForbiddenError("Only an admin can give a class to another teacher.");
-
-  if (moving) {
-    if (session.status !== "SCHEDULED" || (nextStatus && nextStatus !== "SCHEDULED")) {
-      throw new BusinessRuleError("Only a scheduled class can be moved or reassigned.");
+    const [session] = await tx.select().from(sessions).where(eq(sessions.id, sessionId)).for("update");
+    if (!session) throw new NotFoundError("Session");
+    if (session.teacherId !== first.teacherId) {
+      throw new ConflictError("This class was changed by someone else just now. Reload and try again.");
     }
-    if (timeChanged && start.getTime() <= now) {
-      throw new BusinessRuleError("The new start time must be in the future.");
+
+    const now = Date.now();
+    const oldStart = new Date(session.scheduledStart);
+    const oldEnd = new Date(session.scheduledEnd);
+    const start = input.scheduledStart ?? oldStart;
+    // A new start on its own keeps the class's length.
+    const end =
+      input.scheduledEnd ??
+      (input.scheduledStart ? new Date(start.getTime() + (oldEnd.getTime() - oldStart.getTime())) : oldEnd);
+    if (end.getTime() <= start.getTime()) {
+      throw new AppError("scheduledEnd must be after scheduledStart.", 400, "BAD_REQUEST");
     }
-    if (!timeChanged && end.getTime() <= now) {
-      throw new BusinessRuleError("This class has already ended.");
+
+    const timeChanged = start.getTime() !== oldStart.getTime() || end.getTime() !== oldEnd.getTime();
+    const nextStatus = input.status && input.status !== session.status ? input.status : null;
+    const classStatus = nextStatus && ENDING.includes(nextStatus) ? nextStatus : null;
+    const rowStatus = nextStatus && !classStatus ? nextStatus : null;
+    const title = input.title?.trim();
+    const titleChanged = !!title && title !== session.title;
+    const moving = timeChanged || !!newTeacher;
+
+    if (input.status === "CANCELLED" && session.status === "CANCELLED") {
+      throw new BusinessRuleError("This class is already cancelled.");
     }
-  }
-
-  if (nextStatus === "CANCELLED" && !["SCHEDULED", "IN_PROGRESS"].includes(session.status)) {
-    throw new BusinessRuleError(`A ${session.status.toLowerCase().replace("_", " ")} class cannot be cancelled.`);
-  }
-  if (nextStatus === "COMPLETED" || nextStatus === "NO_SHOW") {
-    if (session.status === "CANCELLED") throw new BusinessRuleError("A cancelled class cannot be marked.");
-    if (oldStart.getTime() > now) {
-      throw new BusinessRuleError("Only a class that has already started can be marked completed or no-show.");
+    if (session.mergedIntoId && (moving || nextStatus)) {
+      throw new BusinessRuleError("This class was combined into another one. Change that class instead.");
     }
-  }
+    if (moving) {
+      if (session.status !== "SCHEDULED" || (nextStatus && nextStatus !== "SCHEDULED")) {
+        throw new BusinessRuleError("Only a scheduled class can be moved or reassigned.");
+      }
+      if (timeChanged && start.getTime() <= now) throw new BusinessRuleError("The new start time must be in the future.");
+      if (!timeChanged && end.getTime() <= now) throw new BusinessRuleError("This class has already ended.");
+    }
+    if (classStatus === "CANCELLED" && !["SCHEDULED", "IN_PROGRESS"].includes(session.status)) {
+      throw new BusinessRuleError(`A ${session.status.toLowerCase().replace("_", " ")} class cannot be cancelled.`);
+    }
+    if (classStatus === "COMPLETED" || classStatus === "NO_SHOW") {
+      if (session.status === "CANCELLED") throw new BusinessRuleError("A cancelled class cannot be marked.");
+      if (oldStart.getTime() > now) {
+        throw new BusinessRuleError("Only a class that has already started can be marked completed or no-show.");
+      }
+    }
 
-  const newTeacher = newTeacherId ? await assertTeacherInOrg(newTeacherId, session.orgId, false) : null;
+    const classWide = moving || !!classStatus;
+    const members = classWide ? await lockOccurrence(tx, session) : [session];
+    const memberIds = members.map((m) => m.id);
 
-  // Who is booked, before anything changes — a cancel is about to flip these.
-  const roster = await db
-    .select({
-      bookingId: bookings.id,
-      userId: bookings.userId,
-      studentProfileId: bookings.studentProfileId,
-      profileName: studentProfiles.name,
-      timezone: users.timezone,
-    })
-    .from(bookings)
-    .innerJoin(users, eq(bookings.userId, users.id))
-    .leftJoin(studentProfiles, eq(bookings.studentProfileId, studentProfiles.id))
-    .where(and(eq(bookings.sessionId, sessionId), ne(bookings.status, "CANCELLED")));
+    if (moving && members.some((m) => m.status !== "SCHEDULED")) {
+      throw new BusinessRuleError("Part of this class has already started or ended, so it cannot be moved.");
+    }
 
-  if (moving) {
-    const conflict = await findScheduleConflict(db, {
-      orgId: session.orgId,
-      teacherId: newTeacherId ?? session.teacherId,
-      start,
-      end,
-      excludeSessionId: sessionId,
-      studentProfileIds: roster.map((r) => r.studentProfileId).filter((x): x is string => !!x),
-    });
-    if (conflict) throw new BusinessRuleError(conflict);
-  }
-
-  const ops: string[] = [];
-  if (nextStatus === "CANCELLED") ops.push("session.cancel");
-  if (nextStatus === "NO_SHOW") ops.push("session.no_show");
-  if (nextStatus === "COMPLETED") ops.push("session.complete");
-  if (nextStatus === "SCHEDULED" || nextStatus === "IN_PROGRESS") ops.push("session.status");
-  if (timeChanged) ops.push("session.reschedule");
-  if (newTeacherId) ops.push("session.reassign");
-  if (titleChanged) ops.push("session.rename");
-
-  const finalStatus = (nextStatus ?? session.status) as SessionStatus;
-  const finalTeacherId = newTeacherId ?? session.teacherId;
-  if (ops.length === 0) {
-    return { id: sessionId, status: finalStatus, scheduledStart: start, scheduledEnd: end, teacherId: finalTeacherId, ops, notified: 0 };
-  }
-
-  const endedNow =
-    session.status === "IN_PROGRESS" && (nextStatus === "CANCELLED" || nextStatus === "COMPLETED" || nextStatus === "NO_SHOW");
-  let cancelledBookingIds: string[] = [];
-
-  await db.transaction(async (tx) => {
-    await tx
-      .update(sessions)
-      .set({
-        updatedAt: new Date(),
-        ...(nextStatus && { status: nextStatus }),
-        ...(titleChanged && { title }),
-        ...(timeChanged && { scheduledStart: start, scheduledEnd: end }),
-        ...(newTeacherId && { teacherId: newTeacherId }),
-        ...(endedNow && !session.actualEnd && { actualEnd: new Date() }),
+    const roster: RosterRow[] = await tx
+      .select({
+        bookingId: bookings.id,
+        sessionId: bookings.sessionId,
+        userId: bookings.userId,
+        studentProfileId: bookings.studentProfileId,
+        profileName: studentProfiles.name,
+        timezone: users.timezone,
       })
-      .where(and(eq(sessions.id, sessionId), eq(sessions.orgId, session.orgId)));
+      .from(bookings)
+      .innerJoin(users, eq(bookings.userId, users.id))
+      .leftJoin(studentProfiles, eq(bookings.studentProfileId, studentProfiles.id))
+      .where(and(inArray(bookings.sessionId, memberIds), ne(bookings.status, "CANCELLED")));
 
-    if (nextStatus === "CANCELLED") {
+    // Every row moves by the same amount, so a class keeps its shape.
+    const startShift = start.getTime() - oldStart.getTime();
+    const endShift = end.getTime() - oldEnd.getTime();
+    const moved = (m: SessionRow) => ({
+      start: new Date(new Date(m.scheduledStart).getTime() + startShift),
+      end: new Date(new Date(m.scheduledEnd).getTime() + endShift),
+    });
+    const finalTeacherId = newTeacher?.id ?? session.teacherId;
+
+    if (moving) {
+      for (const m of members) {
+        const w = moved(m);
+        if (w.end <= w.start) throw new BusinessRuleError("That length is too short for part of this class.");
+        const conflict = await findScheduleConflict(tx, {
+          orgId: session.orgId,
+          teacherId: finalTeacherId,
+          start: w.start,
+          end: w.end,
+          excludeSessionIds: memberIds,
+          studentProfileIds: roster.filter((r) => r.sessionId === m.id).map((r) => r.studentProfileId).filter((x): x is string => !!x),
+        });
+        if (conflict) throw new BusinessRuleError(conflict);
+      }
+    }
+
+    const ops: string[] = [];
+    if (classStatus === "CANCELLED") ops.push("session.cancel");
+    if (classStatus === "NO_SHOW") ops.push("session.no_show");
+    if (classStatus === "COMPLETED") ops.push("session.complete");
+    if (rowStatus) ops.push("session.status");
+    if (timeChanged) ops.push("session.reschedule");
+    if (newTeacher) ops.push("session.reassign");
+    if (titleChanged) ops.push("session.rename");
+
+    const statusFor = (m: SessionRow): SessionStatus | null => {
+      if (m.id === session.id && rowStatus) return rowStatus;
+      if (!classStatus || m.status === classStatus) return null;
+      if (classStatus === "CANCELLED") return ["SCHEDULED", "IN_PROGRESS"].includes(m.status) ? classStatus : null;
+      return m.status === "CANCELLED" ? null : classStatus;
+    };
+
+    const changed: { row: SessionRow; endedNow: boolean }[] = [];
+    if (ops.length > 0) {
+      for (const m of members) {
+        const status = statusFor(m);
+        const rename = titleChanged && m.id === session.id;
+        if (!status && !moving && !rename) continue;
+        const endedNow = m.status === "IN_PROGRESS" && !!status && ENDING.includes(status);
+        const w = moved(m);
+        const updated = await tx
+          .update(sessions)
+          .set({
+            updatedAt: new Date(),
+            ...(status && { status }),
+            ...(rename && { title }),
+            ...(timeChanged && { scheduledStart: w.start, scheduledEnd: w.end }),
+            ...(newTeacher && { teacherId: newTeacher.id }),
+            ...(endedNow && !m.actualEnd && { actualEnd: new Date() }),
+          })
+          // Guarded on what was read, so a row that changed underneath fails
+          // loudly instead of being overwritten.
+          .where(and(eq(sessions.id, m.id), eq(sessions.orgId, m.orgId), eq(sessions.status, m.status), eq(sessions.teacherId, m.teacherId)))
+          .returning({ id: sessions.id });
+        if (updated.length === 0) throw new ConflictError("This class was changed by someone else just now. Reload and try again.");
+        changed.push({ row: m, endedNow });
+      }
+    }
+
+    let cancelledBookingIds: string[] = [];
+    const cancelledRows = changed.filter((c) => statusFor(c.row) === "CANCELLED").map((c) => c.row.id);
+    if (cancelledRows.length > 0) {
       const rows = await tx
         .update(bookings)
         .set({ status: "CANCELLED", cancelledAt: new Date(), updatedAt: new Date() })
-        .where(and(eq(bookings.sessionId, sessionId), ne(bookings.status, "CANCELLED")))
+        .where(and(inArray(bookings.sessionId, cancelledRows), ne(bookings.status, "CANCELLED")))
         .returning({ id: bookings.id });
       cancelledBookingIds = rows.map((r) => r.id);
       for (const id of cancelledBookingIds) {
@@ -361,54 +489,89 @@ export async function updateSession(
 
     // Both teachers' live views need the change: the class left one
     // schedule and arrived on the other.
-    for (const teacherId of new Set([session.teacherId, finalTeacherId])) {
-      await insertSchedulingEvent(tx, {
-        orgId: session.orgId,
-        teacherId,
-        actorId: actor.userId,
-        type: "session.changed",
-        aggregateType: "session",
-        aggregateId: sessionId,
-      });
+    for (const c of changed) {
+      for (const teacherId of new Set([session.teacherId, finalTeacherId])) {
+        await insertSchedulingEvent(tx, {
+          orgId: session.orgId,
+          teacherId,
+          actorId: actor.userId,
+          type: "session.changed",
+          aggregateType: "session",
+          aggregateId: c.row.id,
+        });
+      }
     }
+
+    return {
+      session,
+      ops,
+      changed,
+      roster,
+      cancelledBookingIds,
+      oldStart,
+      oldEnd,
+      start,
+      end,
+      title,
+      timeChanged,
+      finalTeacherId,
+      finalStatus: (nextStatus ?? session.status) as SessionStatus,
+    };
   });
+
+  const { session, ops, changed } = plan;
+  const result = {
+    id: sessionId,
+    status: plan.finalStatus,
+    scheduledStart: plan.start,
+    scheduledEnd: plan.end,
+    teacherId: plan.finalTeacherId,
+    ops,
+    sessionIds: changed.map((c) => c.row.id),
+  };
+  if (ops.length === 0) return { ...result, notified: 0 };
 
   afterResponse(drainOutbox({ orgId: session.orgId, limit: 20 }));
 
   // A class that stops while people are in it must not keep a room running
-  // (and billing) with nothing left to close it.
-  if (endedNow) {
-    await closeAttendanceRows({ sessionId }).catch(() => {});
-    try {
-      await getRoomServiceClient().deleteRoom(session.videoRoomName || generateRoomName(sessionId));
-    } catch {
-      // Already gone, or LiveKit not configured here. The status change stands.
+  // (and billing) with nothing left to close it. The room is named after one
+  // row of the class, so every row's name is tried.
+  for (const c of changed.filter((x) => x.endedNow)) {
+    await closeAttendanceRows({ sessionId: c.row.id }).catch(() => {});
+  }
+  if (changed.some((x) => x.endedNow)) {
+    for (const name of new Set(changed.map((c) => c.row.videoRoomName || generateRoomName(c.row.id)))) {
+      try {
+        await getRoomServiceClient().deleteRoom(name);
+      } catch {
+        // Already gone, or LiveKit not configured here. The status change stands.
+      }
     }
   }
 
-  await auditOps(actor, session.orgId, sessionId, ops, {
+  await auditOps(actor, session.orgId, changed.map((c) => c.row.id), sessionId, ops, {
     reason: input.reason?.trim() || null,
     previousStatus: session.status,
-    cancelledBookingIds,
-    from: { scheduledStart: oldStart.toISOString(), scheduledEnd: oldEnd.toISOString(), teacherId: session.teacherId, title: session.title },
-    to: { scheduledStart: start.toISOString(), scheduledEnd: end.toISOString(), teacherId: finalTeacherId, title: title ?? session.title },
+    cancelledBookingIds: plan.cancelledBookingIds,
+    from: { scheduledStart: plan.oldStart.toISOString(), scheduledEnd: plan.oldEnd.toISOString(), teacherId: session.teacherId, title: session.title },
+    to: { scheduledStart: plan.start.toISOString(), scheduledEnd: plan.end.toISOString(), teacherId: plan.finalTeacherId, title: plan.title ?? session.title },
   });
 
-  const notified = queueNotifications({
+  const notified = await queueNotifications({
     actor,
     orgId: session.orgId,
     sessionId,
-    cancelled: nextStatus === "CANCELLED",
+    cancelled: ops.includes("session.cancel"),
     reason: input.reason?.trim() || null,
-    timeChanged,
-    oldStart,
-    newStart: start,
+    timeChanged: plan.timeChanged,
+    oldStart: plan.oldStart,
+    newStart: plan.start,
     oldTeacherId: session.teacherId,
     newTeacher,
-    roster,
+    roster: plan.roster,
   });
 
-  return { id: sessionId, status: finalStatus, scheduledStart: start, scheduledEnd: end, teacherId: finalTeacherId, ops, notified: await notified };
+  return { ...result, notified };
 }
 
 const AUDIT_ACTION: Record<string, AuditAction> = {
@@ -421,10 +584,12 @@ const AUDIT_ACTION: Record<string, AuditAction> = {
   "session.rename": "SETTINGS_CHANGED",
 };
 
+/** One entry per op per changed row, so each row's history page shows it. */
 async function auditOps(
   actor: SchedulingActor,
   orgId: string,
-  sessionId: string,
+  rowIds: string[],
+  requestedId: string,
   ops: string[],
   detail: {
     reason: string | null;
@@ -434,21 +599,25 @@ async function auditOps(
     to: Record<string, unknown>;
   }
 ): Promise<void> {
-  for (const op of ops) {
-    const metadata: Record<string, unknown> = { op, previousStatus: detail.previousStatus };
+  const targets = rowIds.length > 0 ? rowIds : [requestedId];
+  const entries = ops.flatMap((op) => {
+    const metadata: Record<string, unknown> = { op, previousStatus: detail.previousStatus, requestedSessionId: requestedId, classSessionIds: targets };
     if (op === "session.cancel") Object.assign(metadata, { reason: detail.reason, cancelledBookingIds: detail.cancelledBookingIds });
     if (op === "session.reschedule") Object.assign(metadata, { from: { start: detail.from.scheduledStart, end: detail.from.scheduledEnd }, to: { start: detail.to.scheduledStart, end: detail.to.scheduledEnd } });
     if (op === "session.reassign") Object.assign(metadata, { fromTeacherId: detail.from.teacherId, toTeacherId: detail.to.teacherId });
     if (op === "session.rename") Object.assign(metadata, { fromTitle: detail.from.title, toTitle: detail.to.title });
-    await logAudit({
+    // A rename or legacy status write touched only the requested row.
+    const rows = op === "session.rename" || op === "session.status" ? [requestedId] : targets;
+    return rows.map((id) => ({
       orgId,
       actorId: actor.userId,
       action: AUDIT_ACTION[op],
-      target: `session:${sessionId}`,
+      target: `session:${id}`,
       metadata,
       ipAddress: actor.ipAddress,
-    });
-  }
+    }));
+  });
+  await logAuditBatch(entries);
 }
 
 // ─── Notifications ──────────────────────────────────────────────────────────

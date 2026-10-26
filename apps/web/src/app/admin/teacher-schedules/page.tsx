@@ -22,6 +22,7 @@ import { orgFilter, requireAdminPage } from "@/lib/admin-page";
 import { resolveViewerZone } from "@/lib/viewer-zone";
 import { expandAvailability, wallClockRoundTrips, zonedDayParts, zonedWallClockToInstant } from "@/lib/slots";
 import { addDaysToDateKey } from "@/lib/admin-scheduling";
+import { groupIntoOccurrences } from "@/lib/class-room";
 import { EmptyState, PageHeader, Panel, btn } from "@/app/admin/_components/ui";
 import TeacherSpreadsheet, { type ScheduleDay, type TeacherScheduleData } from "./TeacherSpreadsheet";
 
@@ -65,6 +66,44 @@ function buildWeek(zone: string, weekOffset: number): ScheduleDay[] {
       slots,
     };
   });
+}
+
+type SessionWithRoster = {
+  id: string;
+  teacherId: string;
+  title: string | null;
+  track: string | null;
+  status: string;
+  scheduledStart: Date;
+  scheduledEnd: Date;
+  bookings: { status: string; studentProfile: { name: string } | null }[];
+};
+
+/**
+ * One entry per class, not per session row: a group row plus one row per
+ * student is one class (lib/class-room.ts), and counting rows showed a class
+ * of three as four and quadrupled the CSV's minutes. Cancelled rows are
+ * grouped on their own so a cancelled class still shows once, as cancelled.
+ */
+function classesOf(rows: SessionWithRoster[]): TeacherScheduleData["sessions"] {
+  const live = rows.filter((r) => r.status !== "CANCELLED");
+  const cancelled = rows.filter((r) => r.status === "CANCELLED");
+  return [...groupIntoOccurrences(live), ...groupIntoOccurrences(cancelled)]
+    .map(({ canonical, sessions: members }) => {
+      const all = members.flatMap((m) => m.bookings);
+      const booked = all.filter((b) => b.status !== "CANCELLED");
+      const names = [...new Set((booked.length ? booked : all).map((b) => b.studentProfile?.name).filter(Boolean))];
+      return {
+        id: canonical.id,
+        title: canonical.title || "Lesson",
+        track: canonical.track || "QAIDAH",
+        status: canonical.status,
+        studentNames: names.join(", ") || "No student",
+        startIso: new Date(canonical.scheduledStart).toISOString(),
+        endIso: new Date(Math.max(...members.map((m) => new Date(m.scheduledEnd).getTime()))).toISOString(),
+      };
+    })
+    .sort((x, y) => x.startIso.localeCompare(y.startIso));
 }
 
 export default async function AdminTeacherSchedulesPage({ searchParams }: Props) {
@@ -138,22 +177,7 @@ export default async function AdminTeacherSchedulesPage({ searchParams }: Props)
       timeOff: timeOffRows
         .filter((o) => o.teacherId === t.id)
         .map((o) => ({ startIso: new Date(o.startsAt).toISOString(), endIso: new Date(o.endsAt).toISOString(), reason: o.reason })),
-      sessions: sessionRows
-        .filter((s) => s.teacherId === t.id)
-        .map((s) => ({
-          id: s.id,
-          title: s.title || "Lesson",
-          track: s.track || "QAIDAH",
-          status: s.status,
-          studentNames:
-            s.bookings
-              .filter((b) => b.status !== "CANCELLED" || s.status === "CANCELLED")
-              .map((b) => b.studentProfile?.name)
-              .filter(Boolean)
-              .join(", ") || "No student",
-          startIso: new Date(s.scheduledStart).toISOString(),
-          endIso: new Date(s.scheduledEnd).toISOString(),
-        })),
+      sessions: classesOf(sessionRows.filter((s) => s.teacherId === t.id)),
     }));
 
     return (
