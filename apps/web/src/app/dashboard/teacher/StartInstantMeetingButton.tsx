@@ -52,7 +52,7 @@ export default function StartInstantMeetingButton() {
       className="card p-4 w-full text-left hover:opacity-80 transition-opacity disabled:opacity-60"
     >
       <div className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-        {isLoading ? "Starting…" : "⚡ Instant Meeting"}
+        {isLoading ? "Starting…" : "Instant Meeting"}
       </div>
       <div className="text-xs mt-0.5" style={{ color: error ? "#c5221f" : "var(--text-tertiary)" }}>
         {error || "Starts an instant meeting or resumes due scheduled class"}

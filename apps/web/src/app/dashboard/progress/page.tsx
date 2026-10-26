@@ -27,13 +27,14 @@ export default async function ProgressPage() {
         profiles = await db.query.studentProfiles.findMany({
           where: eq(studentProfiles.userId, user.id),
           with: {
+            // Every record, not only completed ones: a teacher records a lesson
+            // as in progress (with notes) long before it is passed.
             progressRecords: {
-              where: eq(progressRecords.isCompleted, true),
               with: {
                 lesson: true,
                 session: true, // For notes and date
               },
-              orderBy: [desc(progressRecords.completedAt)],
+              orderBy: [desc(progressRecords.updatedAt)],
             },
           },
         });
@@ -82,7 +83,7 @@ export default async function ProgressPage() {
             {profiles && profiles.length > 0 ? (
               profiles.map((profile) => {
                 const totalInTrack = Number(totalLessonsMap[profile.track] ?? 1) || 1;
-                const completedCount = profile.progressRecords?.length ?? 0;
+                const completedCount = profile.progressRecords?.filter((r: any) => r.isCompleted).length ?? 0;
                 const progress = Math.min(100, Math.round((completedCount / totalInTrack) * 100));
                 const latestRecord = profile.progressRecords?.[0];
                 const trackName = profile.track
@@ -123,7 +124,9 @@ export default async function ProgressPage() {
                     <div className="p-5" style={{ borderBottom: "1px solid var(--border)" }}>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium" style={{ color: "var(--text-secondary)" }}>
-                          {latestRecord ? `Last: ${latestRecord.lesson?.title || "Lesson"}` : "Just started..."}
+                          {latestRecord
+                            ? `${latestRecord.isCompleted ? "Last" : "Working on"}: ${latestRecord.lesson?.title || "Lesson"}`
+                            : "Just started..."}
                         </span>
                         <span className="text-sm font-bold" style={{ color: "var(--accent)" }}>
                           {progress}%
@@ -154,16 +157,30 @@ export default async function ProgressPage() {
                         {profile.progressRecords && profile.progressRecords.length > 0 ? (
                           profile.progressRecords.slice(0, 5).map((record: any) => (
                             <div key={record.id} className="flex items-start gap-3">
-                              <div className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5" style={{ background: "var(--accent)", color: "#fff", fontSize: 10 }}>
-                                ✓
+                              <div
+                                className="w-5 h-5 rounded-full flex items-center justify-center shrink-0 mt-0.5"
+                                style={
+                                  record.isCompleted
+                                    ? { background: "var(--accent)", color: "#fff", fontSize: 10 }
+                                    : { background: "var(--bg-secondary)", color: "var(--text-tertiary)", border: "1px solid var(--border)", fontSize: 10 }
+                                }
+                                aria-label={record.isCompleted ? "Completed" : "In progress"}
+                              >
+                                {record.isCompleted ? "✓" : "…"}
                               </div>
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center justify-between">
                                   <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                                    {record.lesson?.title || "Completed Lesson"}
+                                    {record.lesson?.title || "Lesson"}
                                   </span>
                                   <span className="text-xs" style={{ color: "var(--text-tertiary)" }}>
-                                    {record.completedAt ? <LocalTime iso={new Date(record.completedAt).toISOString()} mode="date" /> : "Completed"}
+                                    {record.isCompleted ? (
+                                      record.completedAt ? <LocalTime iso={new Date(record.completedAt).toISOString()} mode="date" /> : "Completed"
+                                    ) : (
+                                      <>
+                                        In progress · <LocalTime iso={new Date(record.updatedAt).toISOString()} mode="date" />
+                                      </>
+                                    )}
                                   </span>
                                 </div>
                                 {record.teacherNotes && (

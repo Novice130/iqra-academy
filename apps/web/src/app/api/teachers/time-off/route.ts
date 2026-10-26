@@ -124,11 +124,15 @@ export async function DELETE(request: NextRequest) {
       const id = new URL(request.url).searchParams.get("id");
       if (!id) throw new BusinessRuleError("An id is required.");
 
+      const isSuper = ctx.role === "SUPER_ADMIN";
+
       const res = await withRLS(ctx, async (tx) => {
         // Org in the WHERE itself, not checked in JS after the fact: a
-        // foreign id must match zero rows, not one row plus an error.
+        // foreign id must match zero rows, not one row plus an error. A
+        // SUPER_ADMIN acts in any org, as GET and POST already allow, so the
+        // row's own org is used from here on.
         const existing = await tx.query.teacherTimeOff.findFirst({
-          where: and(eq(teacherTimeOff.id, id), eq(teacherTimeOff.orgId, ctx.orgId)),
+          where: and(eq(teacherTimeOff.id, id), isSuper ? undefined : eq(teacherTimeOff.orgId, ctx.orgId)),
         });
         if (!existing) throw new NotFoundError("Time off");
         // Re-uses the same rule as the writes: your own, unless you're an admin.
@@ -136,10 +140,10 @@ export async function DELETE(request: NextRequest) {
 
         await tx
           .delete(teacherTimeOff)
-          .where(and(eq(teacherTimeOff.id, id), eq(teacherTimeOff.orgId, ctx.orgId)));
+          .where(and(eq(teacherTimeOff.id, id), eq(teacherTimeOff.orgId, existing.orgId)));
 
         await insertSchedulingEvent(tx, {
-          orgId: ctx.orgId,
+          orgId: existing.orgId,
           teacherId: existing.teacherId,
           actorId: ctx.userId,
           type: "time_off.changed",
@@ -147,12 +151,12 @@ export async function DELETE(request: NextRequest) {
           aggregateId: id,
         });
 
-        return NextResponse.json({ success: true });
+        return { response: NextResponse.json({ success: true }), orgId: existing.orgId };
       });
 
-      afterResponse(drainOutbox({ orgId: ctx.orgId }).catch(() => {}));
+      afterResponse(drainOutbox({ orgId: res.orgId }).catch(() => {}));
 
-      return res;
+      return res.response;
     } catch (error) {
       return handleApiError(error);
     }
