@@ -109,10 +109,9 @@ nav lists, per-page auth copies, duplicate `money()`, emoji labels.
 
 ## Server setup for the daily job
 
-Prepared, not installed. novicetutor.com is still on Cloudflare Workers
-(checked 2026-10-27: no `x-served-by: hetzner`), nothing for it runs on the
-Hetzner server, and the image with this route is not pushed. A timer installed
-now would fail every day.
+Installed 2026-10-27. novicetutor.com is served by the Hetzner server since
+01:22 UTC that day, and `novicetutor-daily.timer` runs at 13:00 UTC; its first
+manual run answered `200 {"success":true,...}`.
 
 Committed in the infra repo (`hetzner/sites/novicetutor/`, branch
 `gmktec-staging-design`, not pushed):
