@@ -243,7 +243,9 @@ jobs:
   # ── Production image ───────────────────────────────────────────────────────
   # Builds the image, boots it in the runner, and pushes it to GHCR. Runs on a
   # push to master, or on a manual run of any branch, after web-quality is
-  # green. Only master moves `latest`. It does not deploy: the server
+  # green. Every build moves `staging`, which the server deploys to
+  # staging.novicetutor.com; only master moves `latest`. It does not deploy
+  # production: the server
   # has no public SSH, so a deploy is run from the Mac in the infra repo with
   # `bin/prod deploy novicetutor <full commit sha>` (infra/docs/runbook.md).
   #
@@ -292,6 +294,9 @@ jobs:
           platforms: ${{ env.PLATFORM }}
           load: true
           tags: ${{ env.IMAGE }}:${{ github.sha }}
+          # Read by the staging updater on the server (infra
+          # hetzner/sites/novicetutor-staging/update.sh).
+          labels: org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_APP_URL=${{ vars.NEXT_PUBLIC_APP_URL || 'https://novicetutor.com' }}
             NEXT_PUBLIC_VAPID_PUBLIC_KEY=${{ vars.NEXT_PUBLIC_VAPID_PUBLIC_KEY }}
@@ -352,10 +357,15 @@ jobs:
           docker logs web || true
           docker logs realtime || true
 
-      - name: Push image (sha, and latest from master)
+      # :staging is what staging.novicetutor.com runs: the server checks it every
+      # five minutes and deploys it. Production moves only by a manual
+      # `bin/prod deploy novicetutor <sha>` of a sha that has run on staging.
+      - name: Push image (sha and staging, and latest from master)
         run: |
           set -euo pipefail
           docker push "$IMAGE:$GITHUB_SHA"
+          docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:staging"
+          docker push "$IMAGE:staging"
           if [ "$GITHUB_REF" = "refs/heads/master" ]; then
             docker tag "$IMAGE:$GITHUB_SHA" "$IMAGE:latest"
             docker push "$IMAGE:latest"
